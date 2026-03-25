@@ -11,22 +11,20 @@
   }
   
   // Whitelist of domains to never check content (except search queries)
+  // IMPORTANT: Only truly safe domains go here — NOT graylist domains
+  // Graylist domains (reddit, twitter, youtube, etc.) need content monitoring
   const WHITELIST_DOMAINS = [
-    'youtube.com',
     'github.com',
     'stackoverflow.com',
-    'reddit.com',
-    'twitter.com',
-    'x.com',
-    'facebook.com',
-    'instagram.com',
     'linkedin.com',
     'microsoft.com',
     'openai.com',
     'anthropic.com',
     'claude.ai',
     'chatgpt.com',
-    'wikipedia.org'
+    'wikipedia.org',
+    'khanacademy.org',
+    'coursera.org'
   ];
   
   // Search engines - we check these for NSFW queries
@@ -42,7 +40,6 @@
   if (!isSearchEngine) {
     for (const whitelistDomain of WHITELIST_DOMAINS) {
       if (hostname === whitelistDomain || hostname.endsWith('.' + whitelistDomain)) {
-        console.log('✅ Pure Path: Whitelisted domain, skipping content check');
         return; // Don't check content on whitelisted domains
       }
     }
@@ -50,7 +47,6 @@
   
   // Check page content for blocked keywords
   function checkPageContent() {
-    // Get page text content
     const title = document.title || '';
     const metaDescription = document.querySelector('meta[name="description"]')?.content || '';
     const headings = Array.from(document.querySelectorAll('h1, h2, h3'))
@@ -59,21 +55,11 @@
     
     const textContent = (title + ' ' + metaDescription + ' ' + headings).toLowerCase();
     
-    // Check for explicit NSFW patterns (more specific)
+    // Check for explicit NSFW patterns
     const explicitPatterns = [
-      'free porn',
-      'porn videos',
-      'sex videos',
-      'nude videos',
-      'adult videos',
-      'xxx videos',
-      'porn site',
-      'sex site',
-      'adult site',
-      'hentai site',
-      'porn hub',
-      'sex tube',
-      'xxx tube'
+      'free porn', 'porn videos', 'sex videos', 'nude videos',
+      'adult videos', 'xxx videos', 'porn site', 'sex site',
+      'adult site', 'hentai site', 'porn hub', 'sex tube', 'xxx tube'
     ];
     
     for (const pattern of explicitPatterns) {
@@ -102,9 +88,9 @@
   }
   
   function blockPage(reason, match) {
-    const currentUrl = window.location.href;
+    // Don't leak the original URL in the blocked page query params
     const blockedUrl = chrome.runtime.getURL('blocked.html') + 
-      `?reason=${reason}&match=${encodeURIComponent(match)}&url=${encodeURIComponent(currentUrl)}`;
+      `?reason=${reason}&match=${encodeURIComponent(match)}`;
     window.location.replace(blockedUrl);
   }
   
@@ -121,19 +107,11 @@
   
   let lastUrl = window.location.href;
   
-  // Function to check URL with background script
   async function checkCurrentUrl() {
     const currentUrl = window.location.href;
-    
-    // Skip if URL hasn't changed
-    if (currentUrl === lastUrl) {
-      return;
-    }
-    
-    console.log('🔍 Pure Path: URL changed (SPA navigation):', currentUrl);
+    if (currentUrl === lastUrl) return;
     lastUrl = currentUrl;
     
-    // Send message to background script to check URL
     try {
       const response = await chrome.runtime.sendMessage({
         action: 'checkUrl',
@@ -141,47 +119,34 @@
       });
       
       if (response && response.blocked) {
-        console.log('🚫 Pure Path: URL blocked by background script');
         const blockedUrl = chrome.runtime.getURL('blocked.html') + 
-          `?reason=${response.reason}&match=${encodeURIComponent(response.match)}&url=${encodeURIComponent(currentUrl)}`;
+          `?reason=${response.reason}&match=${encodeURIComponent(response.match)}`;
         window.location.replace(blockedUrl);
       }
     } catch (error) {
-      console.error('❌ Pure Path: Error checking URL:', error);
+      // Silently handle — background script may have restarted
     }
   }
   
-  // Monitor URL changes using multiple methods
-  
   // Method 1: Listen for popstate events (back/forward navigation)
-  window.addEventListener('popstate', () => {
-    console.log('🔄 Pure Path: popstate event detected');
-    checkCurrentUrl();
-  });
+  window.addEventListener('popstate', checkCurrentUrl);
   
-  // Method 2: Listen for pushState and replaceState (SPA navigation)
+  // Method 2: Intercept pushState and replaceState (SPA navigation)
   const originalPushState = history.pushState;
   const originalReplaceState = history.replaceState;
   
   history.pushState = function(...args) {
     originalPushState.apply(this, args);
-    console.log('🔄 Pure Path: pushState detected');
     checkCurrentUrl();
   };
   
   history.replaceState = function(...args) {
     originalReplaceState.apply(this, args);
-    console.log('🔄 Pure Path: replaceState detected');
     checkCurrentUrl();
   };
   
-  // Method 3: Periodic URL check as fallback (every 500ms)
-  setInterval(() => {
-    if (window.location.href !== lastUrl) {
-      console.log('🔄 Pure Path: URL change detected via polling');
-      checkCurrentUrl();
-    }
-  }, 500);
+  // No polling interval — pushState/popstate hooks + background.js
+  // onHistoryStateUpdated listener are sufficient coverage.
   
   // Check URL immediately on script load
   checkCurrentUrl();

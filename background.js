@@ -3,11 +3,10 @@ let isExtensionEnabled = true;
 let passwordHash = null;
 let blocklistDomains = [];
 let blocklistKeywords = [];
-let stats = {
-  totalBlocks: 0,
-  installDate: null,
-  lastBlockDate: null
-};
+let blocklistSet = new Set(); // O(1) domain lookup
+
+// Deduplication map: tabId -> last checked URL (prevents triple-firing)
+const tabLastChecked = new Map();
 
 // Initialize extension
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -21,13 +20,10 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   // Load blocklists from storage
   await loadBlocklistsFromStorage();
   
-  // Load or initialize stats
+  // Initialize stats if first install
   const result = await chrome.storage.local.get(['stats']);
-  if (result.stats) {
-    stats = result.stats;
-  } else {
-    stats.installDate = new Date().toISOString();
-    await chrome.storage.local.set({ stats });
+  if (!result.stats) {
+    await chrome.storage.local.set({ stats: { totalBlocks: 0, installDate: new Date().toISOString() } });
   }
   
   // Check if password is set
@@ -42,12 +38,6 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 chrome.runtime.onStartup.addListener(async () => {
   console.log('Pure Path starting up');
   await loadBlocklistsFromStorage();
-  
-  // Load stats from storage
-  const result = await chrome.storage.local.get(['stats']);
-  if (result.stats) {
-    stats = result.stats;
-  }
 });
 
 // Initialize blocklists from JSON files (only on install/update)
@@ -83,6 +73,8 @@ async function loadBlocklistsFromStorage() {
     if (result.blocklistDomains && result.blocklistKeywords) {
       blocklistDomains = result.blocklistDomains;
       blocklistKeywords = result.blocklistKeywords;
+      // Build the Set for O(1) lookups
+      blocklistSet = new Set(blocklistDomains.map(d => d.toLowerCase()));
       console.log(`✅ Pure Path: Loaded ${blocklistDomains.length} domains and ${blocklistKeywords.length} keywords from storage`);
     } else {
       // If not in storage, initialize from JSON
@@ -102,67 +94,37 @@ async function loadBlocklists() {
 
 // ============================================================================
 // ENHANCED LEET SPEAK NORMALIZER (for search queries only)
+// Pre-compiled regex for performance
 // ============================================================================
+
+const LEET_MAP_RAW = {
+  '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '8': 'b', '9': 'g',
+  '@': 'a', '$': 's', '!': 'i', '|': 'l', '(': 'c', ')': 'c', '<': 'c', '>': 'c',
+  '+': 't', '&': 'and', '€': 'e', '£': 'l', '¥': 'y', '§': 's', '©': 'c', '®': 'r',
+  '™': 't', '°': 'o', '²': '2', '³': '3', 'µ': 'u', '¶': 'p', '×': 'x', '÷': 'd'
+};
+
+// Pre-compile regex patterns once at load time
+const LEET_MAP_COMPILED = Object.entries(LEET_MAP_RAW).map(([k, v]) => ([
+  new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), v
+]));
+
+const SEPARATOR_REGEX = /[-_\.\s]/g;
 
 function normalizeLeetSpeak(text) {
   if (!text) return '';
   
   let normalized = text.toLowerCase();
   
-  console.log('🔤 Leet Speak Normalization:');
-  console.log('  Input:', text);
-  
   // Remove common separator characters FIRST
-  normalized = normalized.replace(/[-_\.\s]/g, '');
-  console.log('  After separator removal:', normalized);
+  normalized = normalized.replace(SEPARATOR_REGEX, '');
   
-  // Leet speak character replacements (multiple passes for complex substitutions)
-  const leetMap = {
-    '0': 'o',
-    '1': 'i',
-    '3': 'e',
-    '4': 'a',
-    '5': 's',
-    '7': 't',
-    '8': 'b',
-    '9': 'g',
-    '@': 'a',
-    '$': 's',
-    '!': 'i',
-    '|': 'l',
-    '(': 'c',
-    ')': 'c',
-    '<': 'c',
-    '>': 'c',
-    '+': 't',
-    '&': 'and',
-    '€': 'e',
-    '£': 'l',
-    '¥': 'y',
-    '§': 's',
-    '©': 'c',
-    '®': 'r',
-    '™': 't',
-    '°': 'o',
-    '²': '2',
-    '³': '3',
-    'µ': 'u',
-    '¶': 'p',
-    '×': 'x',
-    '÷': 'd'
-  };
-  
-  // Replace leet speak characters (do multiple passes)
+  // Replace leet speak characters using pre-compiled patterns (3 passes)
   for (let pass = 0; pass < 3; pass++) {
-    for (const [leet, normal] of Object.entries(leetMap)) {
-      // Escape special regex characters
-      const escapedLeet = leet.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      normalized = normalized.replace(new RegExp(escapedLeet, 'g'), normal);
+    for (const [regex, replacement] of LEET_MAP_COMPILED) {
+      normalized = normalized.replace(regex, replacement);
     }
   }
-  
-  console.log('  After leet speak conversion:', normalized);
-  console.log('  Final normalized:', normalized);
   
   return normalized;
 }
@@ -238,6 +200,108 @@ const GRAYLIST_DOMAINS = [
 
 // TIER 3: BLACKLIST - Explicit NSFW domains (always block)
 // This will be loaded from blocklists/domains.json
+
+// ============================================================================
+// GRAYLIST EXPLICIT PATHS — hoisted to module level, built once
+// ============================================================================
+const GRAYLIST_EXPLICIT_PATHS = [
+  // General NSFW
+  '/r/nsfw', '/r/tipofmypenis', '/r/porn', '/r/nsfw411', '/r/iwanttofuckher', '/r/distension', '/r/bimbofetish', '/r/christiangirls', '/r/cuckold', '/r/dirtygaming', '/r/sexybutnotporn', '/r/femalepov', '/r/omgbeckylookathiscock', '/r/sexygirls', '/r/breedingmaterial', '/r/toocuteforporno', '/r/justhotwomen', '/r/realsexyselfies', '/r/stripgirls', '/r/uncommonposes', '/r/gifsofremoval', '/r/nostalgiafapping', '/r/oilporn', '/r/bisexy', '/r/riskyporn',
+  // MILF
+  '/r/milf', '/r/gonewild30plus', '/r/preggoporn', '/r/realmoms',
+  // Teen
+  '/r/legalteens', '/r/collegesluts', '/r/adorableporn', '/r/legalteensxxx', '/r/gonewild18', '/r/18_19', '/r/pornstarletHQ', '/r/fauxbait',
+  // Amateur
+  '/r/realgirls', '/r/amateur', '/r/homemadexxx', '/r/dirtypenpals', '/r/festivalsluts', '/r/collegeamateurs', '/r/amateurcumsluts', '/r/nsfw_amateurs', '/r/funwithfriends', '/r/randomsexiness', '/r/amateurporn', '/r/normalnudes',
+  // Cam
+  '/r/camwhores', '/r/camsluts', '/r/tiktokliveslip',
+  // Gonewild
+  '/r/gonewild', '/r/petitegonewild', '/r/gonewildstories', '/r/treesgonewild', '/r/gonewildaudio', '/r/gwnerdy', '/r/gonemild', '/r/altgonewild', '/r/gifsgonewild', '/r/analgw', '/r/gonewildsmiles', '/r/onstagegw', '/r/repressedgonewild', '/r/bdsmgw', '/r/underweargw', '/r/labiagw', '/r/tributeme', '/r/weddingsgonewild', '/r/gwpublic', '/r/assholegonewild', '/r/leggingsgonewild', '/r/dykesgonewild', '/r/goneerotic', '/r/gonewildhairy', '/r/gonewildtrans', '/r/gonwild', '/r/ratemynudebody', '/r/onmww', '/r/gwcouples', '/r/gonewildcouples', '/r/wouldyoufuckmywife', '/r/gonewildcurvy', '/r/gonewildplus', '/r/bigboobsgw', '/r/bigboobsgonewild', '/r/mycleavage', '/r/asiansgonewild', '/r/gonewildcolor', '/r/indiansgonewild', '/r/latinasgw', '/r/pawgtastic', '/r/workgonewild', '/r/gonewildscrubs', '/r/swingersgw', '/r/militarygonewild',
+  // Snapchat
+  '/r/nsfw_snapchat', '/r/snapleaks',
+  // Wives
+  '/r/wifesharing', '/r/hotwife', '/r/slutwife',
+  // Animated
+  '/r/rule34', '/r/ecchi', '/r/futanari', '/r/doujinshi', '/r/yiff', '/r/monstergirl', '/r/mechanicalsluts', '/r/rule34_comics', '/r/sex_comics',
+  // Video Games
+  '/r/overwatch_porn', '/r/pokeporn', '/r/bowsette', '/r/rule34lol', '/r/rule34overwatch', '/r/nintendowaifus', '/r/34honor', '/r/fivefapsatfreddys', '/r/breathofthegonewild', '/r/animalcrossingr34', '/r/apexlegends_porn', '/r/tflewd', '/r/thelostwoods',
+  // Hentai
+  '/r/hentai', '/r/hentai_gif', '/r/westernhentai', '/r/hentai_irl', '/r/artistic_hentai', '/r/hentaibeast', '/r/hentaihumiliation', '/r/traphentai', '/r/ahegao', '/r/ahegao_irl', '/r/hypnohentai', '/r/tentai', '/r/handholding', '/r/honeyfuckers', '/r/itshiptofuckbees', '/r/guro', '/r/hentaibondage', '/r/animeshorts', '/r/kuroihada', '/r/2dtittytouching', '/r/buttfangs', '/r/yuri', '/r/zettairyouiki', '/r/hentaifemdom', '/r/thighhighhentai', '/r/animebooty', '/r/swimsuithentai', '/r/animelegs', '/r/animearmpits', '/r/2dsuccubi', '/r/animemidriff', '/r/skindentation', '/r/thighdeology', '/r/chiisaihentai', '/r/bokunoeroacademia', '/r/waifusgonewild', '/r/sideoppai',
+  // BDSM
+  '/r/bdsm', '/r/bondage', '/r/bdsmcommunity', '/r/forcedorgasms', '/r/damselsindistress', '/r/cuffed', '/r/gagged', '/r/femaleorgasmdenial', '/r/girlscontrolled',
+  // Blowjobs
+  '/r/blowjobs', '/r/deepthroat', '/r/onherknees', '/r/blowjobsandwich',
+  // Ass
+  '/r/ass', '/r/asstastic', '/r/facedownassup', '/r/assinthong', '/r/bigasses', '/r/buttplug', '/r/theunderbun', '/r/booty', '/r/pawg', '/r/paag', '/r/cutelittlebutts', '/r/hungrybutts', '/r/celebritybutts', '/r/cosplaybutts', '/r/mooning',
+  // Anal
+  '/r/anal', '/r/painal', '/r/masterofanal', '/r/buttsharpies',
+  // Asshole
+  '/r/asshole', '/r/assholebehindthong', '/r/spreadem', '/r/bendover',
+  // Yoga pants
+  '/r/girlsinyogapants', '/r/yogapants',
+  // Boobs/Nipples
+  '/r/boobies', '/r/tittydrop', '/r/boltedontits', '/r/boobbounce', '/r/boobs', '/r/downblouse', '/r/homegrowntits', '/r/breastenvy', '/r/youtubetitties', '/r/torpedotits', '/r/thehangingboobs', '/r/page3glamour', '/r/biggerthanyouthought', '/r/bustypetite', '/r/hugeboobs', '/r/stacked', '/r/burstingout', '/r/2busty2hide', '/r/bigtiddygothgf', '/r/engorgedveinybreasts', '/r/pokies', '/r/ghostnipples', '/r/nipples', '/r/puffies', '/r/lactation', '/r/tinytits', '/r/aa_cups',
+  // Face/Hair
+  '/r/braceface', '/r/earspokingout', '/r/girlswithneonhair', '/r/shorthairchicks',
+  // Legs/Feet
+  '/r/stockings', '/r/legs', '/r/tightshorts', '/r/buttsandbarefeet', '/r/feet', '/r/datgap', '/r/thighhighs', '/r/thickthighs',
+  // Pussy
+  '/r/pussy', '/r/rearpussy', '/r/innie', '/r/simps', '/r/pelfie', '/r/godpussy', '/r/presenting', '/r/hairypussy', '/r/lipsthatgrip', '/r/fucklicking', '/r/moundofvenus', '/r/pussymound',
+  // Skin
+  '/r/hotchickswithtattoos', '/r/sexyfrex', '/r/tanlines', '/r/complexionexcellence',
+  // Waist/Tummy
+  '/r/sexytummies', '/r/theratio',
+  // Body Type
+  '/r/fitgirls', '/r/bodyperfection', '/r/samespecies', '/r/athleticgirls', '/r/fitgirlsfucking', '/r/curvy', '/r/thick', '/r/juicyasians', '/r/voluptuous', '/r/jigglefuck', '/r/chubby', '/r/slimthick', '/r/massivetitsnass', '/r/thicker', '/r/tightsqueeze', '/r/casualjiggles', '/r/bbw', '/r/dirtysmall', '/r/xsmallgirls', '/r/funsized',
+  // Celebrity/Athlete
+  '/r/athlete', '/r/volleyballgirls', '/r/ohlympics', '/r/celebnsfw', '/r/watchitfortheplot', '/r/extramile', '/r/onoffcelebs',
+  // Cum
+  '/r/cumsluts', '/r/girlsfinishingthejob', '/r/cumfetish', '/r/cumcoveredfucking', '/r/cumhaters', '/r/thickloads', '/r/before_after_cumsluts', '/r/pulsatingcumshots', '/r/impressedbycum', '/r/creampies', '/r/throatpies', '/r/facialfun', '/r/cumonclothes', '/r/oralcreampie',
+  // Emotion
+  '/r/happyembarrassedgirls', '/r/borednignored', '/r/annoyedtobenude',
+  // Ethnicity
+  '/r/damngoodinterracial', '/r/asianhotties', '/r/realasians', '/r/asiannnsfw', '/r/asianporn', '/r/bustyasians', '/r/indianbabes', '/r/nsfw_japan', '/r/kpopfap', '/r/womenofcolor', '/r/darkangels', '/r/blackchickswhitedicks', '/r/ebony', '/r/afrodisiac', '/r/ginger', '/r/redheads', '/r/latinas', '/r/latinacuties', '/r/palegirls', '/r/snowwhites',
+  // Gifs
+  '/r/nsfw_gif', '/r/nsfw_gifs', '/r/porn_gifs', '/r/porninfifteenseconds', '/r/nsfw_html5', '/r/the_best_nsfw_gifs',
+  // Groups
+  '/r/twingirls', '/r/groupofnudegirls', '/r/ifyouhadtopickone',
+  // Hardcore
+  '/r/nsfwhardcore', '/r/shelikesitrough', '/r/freeuse', '/r/whenitgoesin', '/r/outercourse', '/r/gangbang', '/r/breeding', '/r/pegging', '/r/passionx', '/r/amateurgirlsbigcocks', '/r/facesitting', '/r/nsfw_plowcam', '/r/pronebone', '/r/facefuck',
+  // High Quality
+  '/r/highresnsfw',
+  // Incest
+  '/r/incestporn',
+  // Individuals (pornstars)
+  '/r/sarah_xxx', '/r/remylacroix', '/r/anjelica_ebbi', '/r/blancnoir', '/r/rileyreid', '/r/dollywinks', '/r/tessafowler', '/r/lilyivy', '/r/funsizedasian', '/r/mycherrycrush', '/r/gillianbarnes', '/r/kawaiikitten', '/r/emilybloom', '/r/legendarylootz', '/r/sexyflowerwater', '/r/miamalkova', '/r/sashagrey', '/r/keriberry_420', '/r/justpeachyy', '/r/angelawhite', '/r/miakhalifa', '/r/alexapearl', '/r/missalice_18', '/r/evalovia', '/r/giannamichaels', '/r/arianamarie',
+  // Lesbian
+  '/r/lesbians', '/r/straightgirlsplaying', '/r/girlskissing', '/r/mmgirls', '/r/facesittinglesbians',
+  // Masturbation/Orgasm
+  '/r/holdthemoan', '/r/o_faces', '/r/jilling', '/r/gettingherselfoff', '/r/quiver', '/r/girlshumpingthings', '/r/ruinedorgasms', '/r/holdingit', '/r/suctiondildos', '/r/baddragon', '/r/grool', '/r/squirting',
+  // Men
+  '/r/ladybonersgw', '/r/massivecock', '/r/chickflixxx', '/r/gaybrosgonewild', '/r/sissies', '/r/selffuck', '/r/sounding',
+  // Furry
+  '/r/furryporn', '/r/zootopiaporn', '/r/yiffgif', '/r/furrypornsubreddit', '/r/gfur', '/r/femyiff', '/r/gayfurryporn', '/r/yiffcomics', '/r/sharktits', '/r/arousingavians', '/r/anthroids', '/r/anthropokeporn', '/r/dragonpenis', '/r/dragonsfuckingdragons', '/r/feralpokeporn', '/r/furryfrot', '/r/gaypokeporn', '/r/horsecocksmasterrace', '/r/scalieporn', '/r/wholesomeyiff',
+  // Outfits
+  '/r/onoff', '/r/nsfwoutfits', '/r/girlswithglasses', '/r/collared', '/r/seethru', '/r/sweatermeat', '/r/cfnm', '/r/nsfwfashion', '/r/leotards', '/r/bikinis', '/r/bikinibridge', '/r/nsfwcosplay', '/r/nsfwcostumes', '/r/girlsinschooluniforms', '/r/wtstadamit', '/r/tightdresses', '/r/upskirt', '/r/leggingsgonewild', '/r/tightshorts', '/r/lingerie', '/r/garterbelts',
+  // Professional/Sites
+  '/r/suicidegirls',
+  // Public
+  '/r/changingrooms', '/r/trashyboners', '/r/flashinggirls', '/r/publicflashing', '/r/sexinfrontofothers', '/r/notsafefornature', '/r/realpublicnudity', '/r/socialmediasluts', '/r/flashingandflaunting',
+  // Trans
+  '/r/tgirls', '/r/traps', '/r/tgifs',
+  // Gay
+  '/r/gaysex', '/r/topsandbottoms', '/r/lgbtsex', '/r/gaykink', '/r/gaybdsmcommunity', '/r/gaymersgonewild', '/r/gaybears', '/r/lgbtgonewild', '/r/bigonewild', '/r/gaynsfw',
+  // Video
+  '/r/pornvids', '/r/nsfw_videos',
+  // Meet People
+  '/r/dirtysnapchat', '/r/randomactsofblowjob', '/r/dirtykikpals', '/r/randomactsofmuffdive',
+  // Other
+  '/r/nsfwfunny', '/r/pornhubcomments', '/r/stupidslutsclub', '/r/sluttyconfessions', '/r/sextrophies', '/r/quarantinegonewild', '/r/celebrityarmpits', '/r/armpitfetish',
+  // Weird
+  '/r/dragonsfuckingcars', '/r/scporn', '/r/fedlegs', '/r/cummingonfigurines',
+  // Generic NSFW paths
+  '/porn', '/sex', '/nude', '/adult', '/hentai', '/xxx'
+];
 
 // ============================================================================
 // SEARCH QUERY DETECTION - Enhanced with Leet Speak Normalization
@@ -330,14 +394,15 @@ function checkSearchEngineQuery(url, hostname) {
     const lowerQuery = query.toLowerCase();
     const isImageSearch = url.includes(searchEngine.imageParam);
     
-    // Check if SafeSearch is enabled (block if user tries to use SafeSearch)
-    const hasSafeSearch = url.includes('safe=') || url.includes('safesearch');
-    if (hasSafeSearch) {
-      console.log('🚫 SafeSearch detected - blocking to prevent bypass');
+    // SafeSearch detection: only block if user tries to DISABLE SafeSearch
+    // SafeSearch being ON is a protective feature and should be allowed
+    const hasSafeSearchOff = url.includes('safe=off') || url.includes('safesearch=off') || url.includes('safe=0');
+    if (hasSafeSearchOff) {
+      console.log('🚫 SafeSearch disabled - blocking bypass attempt');
       return {
         blocked: true,
         reason: 'safesearch_bypass',
-        match: 'SafeSearch enabled',
+        match: 'SafeSearch disabled',
         query: query,
         severity: 'bypass_attempt'
       };
@@ -346,20 +411,10 @@ function checkSearchEngineQuery(url, hostname) {
     // Normalize leet speak in the query
     const normalizedQuery = normalizeLeetSpeak(lowerQuery);
     
-    console.log('═══════════════════════════════════════════════════════');
-    console.log('🔍 Search Query Analysis:');
-    console.log('  Original:', lowerQuery);
-    console.log('  Normalized:', normalizedQuery);
-    console.log('  Image Search:', isImageSearch);
-    console.log('  SafeSearch:', hasSafeSearch);
-    console.log('═══════════════════════════════════════════════════════');
-    
     // Check for hard porn keywords (immediate block)
-    console.log('Checking hard porn keywords...');
     for (const keyword of HARD_PORN_KEYWORDS) {
       const normalizedKeyword = keyword.toLowerCase().replace(/[-_\.\s]/g, '');
       if (normalizedQuery.includes(normalizedKeyword)) {
-        console.log(`🚫 HARD PORN MATCH: "${keyword}" found in normalized query`);
         return {
           blocked: true,
           reason: isImageSearch ? 'search_images' : 'search_query',
@@ -372,11 +427,9 @@ function checkSearchEngineQuery(url, hostname) {
     }
     
     // Check for NSFW phrases (contextual block)
-    console.log('Checking NSFW phrases...');
     for (const phrase of NSFW_PHRASES) {
       const normalizedPhrase = normalizeLeetSpeak(phrase.toLowerCase());
       if (normalizedQuery.includes(normalizedPhrase)) {
-        console.log(`🚫 NSFW PHRASE MATCH: "${phrase}" found in normalized query`);
         return {
           blocked: true,
           reason: isImageSearch ? 'search_images' : 'search_query',
@@ -389,22 +442,18 @@ function checkSearchEngineQuery(url, hostname) {
     }
     
     // Check for soft porn keywords
-    console.log('Checking soft porn keywords...');
     let softMatches = [];
     for (const keyword of SOFT_PORN_KEYWORDS) {
       const normalizedKeyword = keyword.toLowerCase().replace(/[-_\.\s]/g, '');
       if (normalizedQuery.includes(normalizedKeyword)) {
         softMatches.push(keyword);
-        console.log(`  ⚠️ Soft match: "${keyword}"`);
       }
     }
     
     if (softMatches.length > 0) {
-      console.log(`Found ${softMatches.length} soft porn keywords: ${softMatches.join(', ')}`);
       
       // Always block on image search with any soft keyword
       if (isImageSearch) {
-        console.log(`🚫 IMAGE SEARCH BLOCK: Soft keyword "${softMatches[0]}" in image search`);
         return {
           blocked: true,
           reason: 'search_images',
@@ -417,7 +466,6 @@ function checkSearchEngineQuery(url, hostname) {
       
       // For text search, block if 2+ soft keywords
       if (softMatches.length >= 2) {
-        console.log(`🚫 MULTIPLE SOFT KEYWORDS: ${softMatches.length} keywords found`);
         return {
           blocked: true,
           reason: 'search_query',
@@ -427,11 +475,9 @@ function checkSearchEngineQuery(url, hostname) {
           normalized: normalizedQuery
         };
       }
-      
-      console.log(`✅ Only 1 soft keyword, allowing for now`);
+
     }
-    
-    console.log('✅ Search query allowed');
+
     
   } catch (error) {
     console.error('❌ Error checking search query:', error);
@@ -451,259 +497,72 @@ function shouldBlockUrl(url) {
     const fullUrl = url.toLowerCase();
     const pathname = urlObj.pathname.toLowerCase();
     
-    console.log('═══════════════════════════════════════════════════════');
-    console.log('🔍 Pure Path: URL Analysis');
-    console.log('  Full URL:', url);
-    console.log('  Hostname:', hostname);
-    console.log('  Pathname:', pathname);
-    console.log('═══════════════════════════════════════════════════════');
-    
     // ========================================================================
     // STEP 1: Check search engine queries FIRST (with leet speak detection)
     // ========================================================================
-    console.log('STEP 1: Checking search engine queries...');
     const searchCheck = checkSearchEngineQuery(url, hostname);
     if (searchCheck && searchCheck.blocked) {
-      console.log('🚫 BLOCKED by search query detection');
       return searchCheck;
     }
-    console.log('✅ Not a blocked search query');
     
     // ========================================================================
     // STEP 2: Check WHITELIST (never block these)
     // ========================================================================
-    console.log('STEP 2: Checking whitelist...');
     for (const whitelistDomain of WHITELIST_DOMAINS) {
       if (hostname === whitelistDomain || hostname.endsWith('.' + whitelistDomain)) {
-        console.log(`✅ WHITELISTED: Matched "${whitelistDomain}"`);
         return { blocked: false, tier: 'whitelist' };
       }
     }
-    console.log('⚪ Not in whitelist');
     
     // ========================================================================
     // STEP 3: Check BLACKLIST (explicit NSFW domains)
     // ========================================================================
-    console.log('STEP 3: Checking blacklist...');
-    console.log(`  Blacklist has ${blocklistDomains.length} domains`);
-    for (const domain of blocklistDomains) {
-      const lowerDomain = domain.toLowerCase();
-      if (hostname === lowerDomain || hostname.endsWith('.' + lowerDomain)) {
-        console.log(`🚫 BLACKLISTED: Matched "${domain}"`);
-        return { 
-          blocked: true, 
-          reason: 'blacklist_domain', 
-          match: domain,
-          tier: 'blacklist'
-        };
+    // O(1) Set lookup for exact match, then check subdomains
+    if (blocklistSet.has(hostname)) {
+      return { blocked: true, reason: 'blacklist_domain', match: hostname, tier: 'blacklist' };
+    }
+    // Check subdomain matches (e.g., sub.pornhub.com)
+    for (const domain of blocklistSet) {
+      if (hostname.endsWith('.' + domain)) {
+        return { blocked: true, reason: 'blacklist_domain', match: domain, tier: 'blacklist' };
       }
     }
-    console.log('⚪ Not in blacklist');
     
     // ========================================================================
     // STEP 4: Check if domain contains explicit NSFW keywords
     // ========================================================================
-    console.log('STEP 4: Checking domain for explicit keywords...');
     const domainKeywords = ['porn', 'xxx', 'sex', 'adult', 'hentai', 'xnxx', 'xvideos'];
     for (const keyword of domainKeywords) {
       if (hostname.includes(keyword)) {
-        console.log(`🚫 EXPLICIT DOMAIN: Found "${keyword}" in hostname`);
-        return { 
-          blocked: true, 
-          reason: 'explicit_domain', 
-          match: keyword,
-          tier: 'blacklist'
-        };
+        return { blocked: true, reason: 'explicit_domain', match: keyword, tier: 'blacklist' };
       }
     }
-    console.log('⚪ No explicit keywords in domain');
     
     // ========================================================================
     // STEP 5: Check GRAYLIST domains with basic monitoring
     // ========================================================================
-    console.log('STEP 5: Checking graylist...');
     let isGraylist = false;
     for (const graylistDomain of GRAYLIST_DOMAINS) {
       if (hostname === graylistDomain || hostname.endsWith('.' + graylistDomain)) {
         isGraylist = true;
-        console.log(`⚠️ GRAYLIST DOMAIN: Matched "${graylistDomain}"`);
         break;
       }
     }
     
     if (isGraylist) {
-      // For graylist domains, check for explicit NSFW paths
-      // Comprehensive list of NSFW subreddits to block
-      const explicitPaths = [
-        // General NSFW
-        '/r/nsfw', '/r/tipofmypenis', '/r/porn', '/r/nsfw411', '/r/iwanttofuckher', '/r/distension', '/r/bimbofetish', '/r/christiangirls', '/r/cuckold', '/r/dirtygaming', '/r/sexybutnotporn', '/r/femalepov', '/r/omgbeckylookathiscock', '/r/sexygirls', '/r/breedingmaterial', '/r/toocuteforporno', '/r/justhotwomen', '/r/realsexyselfies', '/r/stripgirls', '/r/uncommonposes', '/r/gifsofremoval', '/r/nostalgiafapping', '/r/oilporn', '/r/bisexy', '/r/riskyporn',
-        
-        // MILF
-        '/r/milf', '/r/gonewild30plus', '/r/preggoporn', '/r/realmoms',
-        
-        // Teen
-        '/r/legalteens', '/r/collegesluts', '/r/adorableporn', '/r/legalteensxxx', '/r/gonewild18', '/r/18_19', '/r/pornstarletHQ', '/r/fauxbait',
-        
-        // Amateur
-        '/r/realgirls', '/r/amateur', '/r/homemadexxx', '/r/dirtypenpals', '/r/festivalsluts', '/r/collegeamateurs', '/r/amateurcumsluts', '/r/nsfw_amateurs', '/r/funwithfriends', '/r/randomsexiness', '/r/amateurporn', '/r/normalnudes',
-        
-        // Cam
-        '/r/camwhores', '/r/camsluts', '/r/tiktokliveslip',
-        
-        // Gonewild
-        '/r/gonewild', '/r/petitegonewild', '/r/gonewildstories', '/r/treesgonewild', '/r/gonewildaudio', '/r/gwnerdy', '/r/gonemild', '/r/altgonewild', '/r/gifsgonewild', '/r/analgw', '/r/gonewildsmiles', '/r/onstagegw', '/r/repressedgonewild', '/r/bdsmgw', '/r/underweargw', '/r/labiagw', '/r/tributeme', '/r/weddingsgonewild', '/r/gwpublic', '/r/assholegonewild', '/r/leggingsgonewild', '/r/dykesgonewild', '/r/goneerotic', '/r/gonewildhairy', '/r/gonewildtrans', '/r/gonwild', '/r/ratemynudebody', '/r/onmww', '/r/gwcouples', '/r/gonewildcouples', '/r/wouldyoufuckmywife', '/r/gonewildcurvy', '/r/gonewildplus', '/r/bigboobsgw', '/r/bigboobsgonewild', '/r/mycleavage', '/r/asiansgonewild', '/r/gonewildcolor', '/r/indiansgonewild', '/r/latinasgw', '/r/pawgtastic', '/r/workgonewild', '/r/gonewildscrubs', '/r/swingersgw', '/r/militarygonewild',
-        
-        // Snapchat
-        '/r/nsfw_snapchat', '/r/snapleaks',
-        
-        // Wives
-        '/r/wifesharing', '/r/hotwife', '/r/slutwife',
-        
-        // Animated
-        '/r/rule34', '/r/ecchi', '/r/futanari', '/r/doujinshi', '/r/yiff', '/r/monstergirl', '/r/mechanicalsluts', '/r/rule34_comics', '/r/sex_comics',
-        
-        // Video Games
-        '/r/overwatch_porn', '/r/pokeporn', '/r/bowsette', '/r/rule34lol', '/r/rule34overwatch', '/r/nintendowaifus', '/r/34honor', '/r/fivefapsatfreddys', '/r/breathofthegonewild', '/r/animalcrossingr34', '/r/apexlegends_porn', '/r/tflewd', '/r/thelostwoods',
-        
-        // Hentai
-        '/r/hentai', '/r/hentai_gif', '/r/westernhentai', '/r/hentai_irl', '/r/artistic_hentai', '/r/hentaibeast', '/r/hentaihumiliation', '/r/traphentai', '/r/ahegao', '/r/ahegao_irl', '/r/hypnohentai', '/r/tentai', '/r/handholding', '/r/honeyfuckers', '/r/itshiptofuckbees', '/r/guro', '/r/hentaibondage', '/r/animeshorts', '/r/kuroihada', '/r/2dtittytouching', '/r/buttfangs', '/r/yuri', '/r/zettairyouiki', '/r/hentaifemdom', '/r/thighhighhentai', '/r/animebooty', '/r/swimsuithentai', '/r/animelegs', '/r/animearmpits', '/r/2dsuccubi', '/r/animemidriff', '/r/skindentation', '/r/thighdeology', '/r/chiisaihentai', '/r/bokunoeroacademia', '/r/waifusgonewild', '/r/sideoppai',
-        
-        // BDSM
-        '/r/bdsm', '/r/bondage', '/r/bdsmcommunity', '/r/forcedorgasms', '/r/damselsindistress', '/r/cuffed', '/r/gagged', '/r/femaleorgasmdenial', '/r/girlscontrolled',
-        
-        // Blowjobs
-        '/r/blowjobs', '/r/deepthroat', '/r/onherknees', '/r/blowjobsandwich',
-        
-        // Ass
-        '/r/ass', '/r/asstastic', '/r/facedownassup', '/r/assinthong', '/r/bigasses', '/r/buttplug', '/r/theunderbun', '/r/booty', '/r/pawg', '/r/paag', '/r/cutelittlebutts', '/r/hungrybutts', '/r/celebritybutts', '/r/cosplaybutts', '/r/mooning',
-        
-        // Anal
-        '/r/anal', '/r/painal', '/r/masterofanal', '/r/buttsharpies',
-        
-        // Asshole
-        '/r/asshole', '/r/assholebehindthong', '/r/spreadem', '/r/bendover',
-        
-        // Yoga pants
-        '/r/girlsinyogapants', '/r/yogapants',
-        
-        // Boobs/Nipples
-        '/r/boobies', '/r/tittydrop', '/r/boltedontits', '/r/boobbounce', '/r/boobs', '/r/downblouse', '/r/homegrowntits', '/r/breastenvy', '/r/youtubetitties', '/r/torpedotits', '/r/thehangingboobs', '/r/page3glamour', '/r/biggerthanyouthought', '/r/bustypetite', '/r/hugeboobs', '/r/stacked', '/r/burstingout', '/r/2busty2hide', '/r/bigtiddygothgf', '/r/engorgedveinybreasts', '/r/pokies', '/r/ghostnipples', '/r/nipples', '/r/puffies', '/r/lactation', '/r/tinytits', '/r/aa_cups',
-        
-        // Face/Hair
-        '/r/braceface', '/r/earspokingout', '/r/girlswithneonhair', '/r/shorthairchicks',
-        
-        // Legs/Feet
-        '/r/stockings', '/r/legs', '/r/tightshorts', '/r/buttsandbarefeet', '/r/feet', '/r/datgap', '/r/thighhighs', '/r/thickthighs',
-        
-        // Pussy
-        '/r/pussy', '/r/rearpussy', '/r/innie', '/r/simps', '/r/pelfie', '/r/godpussy', '/r/presenting', '/r/hairypussy', '/r/lipsthatgrip', '/r/fucklicking', '/r/moundofvenus', '/r/pussymound',
-        
-        // Skin
-        '/r/hotchickswithtattoos', '/r/sexyfrex', '/r/tanlines', '/r/complexionexcellence',
-        
-        // Waist/Tummy
-        '/r/sexytummies', '/r/theratio',
-        
-        // Body Type
-        '/r/fitgirls', '/r/bodyperfection', '/r/samespecies', '/r/athleticgirls', '/r/fitgirlsfucking', '/r/curvy', '/r/thick', '/r/juicyasians', '/r/voluptuous', '/r/jigglefuck', '/r/chubby', '/r/slimthick', '/r/massivetitsnass', '/r/thicker', '/r/tightsqueeze', '/r/casualjiggles', '/r/bbw', '/r/dirtysmall', '/r/xsmallgirls', '/r/funsized',
-        
-        // Celebrity/Athlete
-        '/r/athlete', '/r/volleyballgirls', '/r/ohlympics', '/r/celebnsfw', '/r/watchitfortheplot', '/r/extramile', '/r/onoffcelebs',
-        
-        // Cum
-        '/r/cumsluts', '/r/girlsfinishingthejob', '/r/cumfetish', '/r/cumcoveredfucking', '/r/cumhaters', '/r/thickloads', '/r/before_after_cumsluts', '/r/pulsatingcumshots', '/r/impressedbycum', '/r/creampies', '/r/throatpies', '/r/facialfun', '/r/cumonclothes', '/r/oralcreampie',
-        
-        // Emotion
-        '/r/happyembarrassedgirls', '/r/borednignored', '/r/annoyedtobenude',
-        
-        // Ethnicity
-        '/r/damngoodinterracial', '/r/asianhotties', '/r/realasians', '/r/asiannnsfw', '/r/asianporn', '/r/bustyasians', '/r/indianbabes', '/r/nsfw_japan', '/r/kpopfap', '/r/womenofcolor', '/r/darkangels', '/r/blackchickswhitedicks', '/r/ebony', '/r/afrodisiac', '/r/ginger', '/r/redheads', '/r/latinas', '/r/latinacuties', '/r/palegirls', '/r/snowwhites',
-        
-        // Gifs
-        '/r/nsfw_gif', '/r/nsfw_gifs', '/r/porn_gifs', '/r/porninfifteenseconds', '/r/nsfw_html5', '/r/the_best_nsfw_gifs',
-        
-        // Groups
-        '/r/twingirls', '/r/groupofnudegirls', '/r/ifyouhadtopickone',
-        
-        // Hardcore
-        '/r/nsfwhardcore', '/r/shelikesitrough', '/r/freeuse', '/r/whenitgoesin', '/r/outercourse', '/r/gangbang', '/r/breeding', '/r/pegging', '/r/passionx', '/r/amateurgirlsbigcocks', '/r/facesitting', '/r/nsfw_plowcam', '/r/pronebone', '/r/facefuck',
-        
-        // High Quality
-        '/r/highresnsfw',
-        
-        // Incest
-        '/r/incestporn',
-        
-        // Individuals (pornstars)
-        '/r/sarah_xxx', '/r/remylacroix', '/r/anjelica_ebbi', '/r/blancnoir', '/r/rileyreid', '/r/dollywinks', '/r/tessafowler', '/r/lilyivy', '/r/funsizedasian', '/r/mycherrycrush', '/r/gillianbarnes', '/r/kawaiikitten', '/r/emilybloom', '/r/legendarylootz', '/r/sexyflowerwater', '/r/miamalkova', '/r/sashagrey', '/r/keriberry_420', '/r/justpeachyy', '/r/angelawhite', '/r/miakhalifa', '/r/alexapearl', '/r/missalice_18', '/r/evalovia', '/r/giannamichaels', '/r/arianamarie',
-        
-        // Lesbian
-        '/r/lesbians', '/r/straightgirlsplaying', '/r/girlskissing', '/r/mmgirls', '/r/facesittinglesbians',
-        
-        // Masturbation/Orgasm
-        '/r/holdthemoan', '/r/o_faces', '/r/jilling', '/r/gettingherselfoff', '/r/quiver', '/r/girlshumpingthings', '/r/ruinedorgasms', '/r/holdingit', '/r/suctiondildos', '/r/baddragon', '/r/grool', '/r/squirting',
-        
-        // Men
-        '/r/ladybonersgw', '/r/massivecock', '/r/chickflixxx', '/r/gaybrosgonewild', '/r/sissies', '/r/selffuck', '/r/sounding',
-        
-        // Furry
-        '/r/furryporn', '/r/zootopiaporn', '/r/yiffgif', '/r/furrypornsubreddit', '/r/gfur', '/r/femyiff', '/r/gayfurryporn', '/r/yiffcomics', '/r/sharktits', '/r/arousingavians', '/r/anthroids', '/r/anthropokeporn', '/r/dragonpenis', '/r/dragonsfuckingdragons', '/r/feralpokeporn', '/r/furryfrot', '/r/gaypokeporn', '/r/horsecocksmasterrace', '/r/scalieporn', '/r/wholesomeyiff',
-        
-        // Outfits
-        '/r/onoff', '/r/nsfwoutfits', '/r/girlswithglasses', '/r/collared', '/r/seethru', '/r/sweatermeat', '/r/cfnm', '/r/nsfwfashion', '/r/leotards', '/r/bikinis', '/r/bikinibridge', '/r/nsfwcosplay', '/r/nsfwcostumes', '/r/girlsinschooluniforms', '/r/wtstadamit', '/r/tightdresses', '/r/upskirt', '/r/leggingsgonewild', '/r/tightshorts', '/r/lingerie', '/r/garterbelts',
-        
-        // Professional/Sites
-        '/r/suicidegirls',
-        
-        // Public
-        '/r/changingrooms', '/r/trashyboners', '/r/flashinggirls', '/r/publicflashing', '/r/sexinfrontofothers', '/r/notsafefornature', '/r/realpublicnudity', '/r/socialmediasluts', '/r/flashingandflaunting',
-        
-        // Trans
-        '/r/tgirls', '/r/traps', '/r/tgifs',
-        
-        // Gay
-        '/r/gaysex', '/r/topsandbottoms', '/r/lgbtsex', '/r/gaykink', '/r/gaybdsmcommunity', '/r/gaymersgonewild', '/r/gaybears', '/r/lgbtgonewild', '/r/bigonewild', '/r/gaynsfw',
-        
-        // Video
-        '/r/pornvids', '/r/nsfw_videos',
-        
-        // Meet People
-        '/r/dirtysnapchat', '/r/randomactsofblowjob', '/r/dirtykikpals', '/r/randomactsofmuffdive',
-        
-        // Other
-        '/r/nsfwfunny', '/r/pornhubcomments', '/r/stupidslutsclub', '/r/sluttyconfessions', '/r/sextrophies', '/r/quarantinegonewild', '/r/celebrityarmpits', '/r/armpitfetish',
-        
-        // Weird
-        '/r/dragonsfuckingcars', '/r/scporn', '/r/fedlegs', '/r/cummingonfigurines',
-        
-        // Generic NSFW paths
-        '/porn', '/sex', '/nude', '/adult', '/hentai', '/xxx'
-      ];
-      
-      console.log(`  Checking ${explicitPaths.length} explicit paths...`);
-      for (const path of explicitPaths) {
-        // Check if pathname starts with or contains the path (case insensitive)
-        if (pathname.toLowerCase().includes(path.toLowerCase())) {
-          console.log(`🚫 GRAYLIST BLOCK: Found "${path}" in pathname "${pathname}"`);
-          return { 
-            blocked: true, 
-            reason: 'graylist_explicit', 
-            match: path,
-            tier: 'graylist'
-          };
+      // Check against hoisted GRAYLIST_EXPLICIT_PATHS Set (O(1) per entry)
+      for (const path of GRAYLIST_EXPLICIT_PATHS) {
+        if (pathname.includes(path)) {
+          return { blocked: true, reason: 'graylist_explicit', match: path, tier: 'graylist' };
         }
       }
-      
-      console.log(`✅ GRAYLIST ALLOW: No explicit paths found in "${pathname}"`);
       // Allow if no explicit NSFW paths found
       return { blocked: false, tier: 'graylist' };
     }
-    console.log('⚪ Not in graylist');
     
     // ========================================================================
     // STEP 6: Check unknown domains for explicit patterns
     // ========================================================================
-    console.log('STEP 6: Checking unknown domain for explicit patterns...');
     
     // Check for explicit patterns in path
     const explicitPatterns = [
@@ -712,7 +571,6 @@ function shouldBlockUrl(url) {
     
     for (const pattern of explicitPatterns) {
       if (pathname.includes(pattern)) {
-        console.log(`🚫 EXPLICIT PATH: Found "${pattern}" in pathname`);
         return { 
           blocked: true, 
           reason: 'explicit_path', 
@@ -735,7 +593,6 @@ function shouldBlockUrl(url) {
     }
     
     if (keywordCount >= 2) {
-      console.log(`🚫 MULTIPLE KEYWORDS: Found ${keywordCount} keywords: ${matchedKeywords.join(', ')}`);
       return { 
         blocked: true, 
         reason: 'multiple_explicit', 
@@ -745,8 +602,6 @@ function shouldBlockUrl(url) {
     }
     
     // Allow if no NSFW indicators found
-    console.log('✅ ALLOWED: No NSFW indicators found');
-    console.log('═══════════════════════════════════════════════════════');
     return { blocked: false, tier: 'unknown' };
     
   } catch (error) {
@@ -755,129 +610,86 @@ function shouldBlockUrl(url) {
   }
 }
 
-// Handle web requests
+// ============================================================================
+// SHARED BLOCK HANDLER — single source of truth for blocking + stats
+// Deduplicates across the 3 navigation listeners per tabId+URL pair.
+// ============================================================================
+
+function isIgnoredUrl(url) {
+  return url.startsWith('chrome://') ||
+         url.startsWith('chrome-extension://') ||
+         url.startsWith('about:') ||
+         url.startsWith('edge://');
+}
+
+async function handleBlock(tabId, url) {
+  // Deduplicate: skip if we already checked this exact URL for this tab
+  if (tabLastChecked.get(tabId) === url) return;
+  tabLastChecked.set(tabId, url);
+
+  const { passwordHash: storedHash } = await chrome.storage.local.get(['passwordHash']);
+  if (!storedHash) return; // Not set up yet
+
+  const result = shouldBlockUrl(url);
+  if (!result.blocked) return;
+
+  // Atomically increment stats from storage (avoids MV3 service worker race)
+  const { stats: s } = await chrome.storage.local.get(['stats']);
+  const updatedStats = s || { totalBlocks: 0, installDate: new Date().toISOString() };
+  updatedStats.totalBlocks = (updatedStats.totalBlocks || 0) + 1;
+  updatedStats.lastBlockDate = new Date().toISOString();
+  await chrome.storage.local.set({ stats: updatedStats });
+
+  // Redirect to blocked page — pass reason/match but NOT the original URL
+  const blockedUrl = chrome.runtime.getURL('blocked.html') +
+    `?reason=${result.reason}&match=${encodeURIComponent(result.match)}`;
+  chrome.tabs.update(tabId, { url: blockedUrl });
+}
+
+// Clean up dedup map when tabs close
+chrome.tabs.onRemoved.addListener((tabId) => {
+  tabLastChecked.delete(tabId);
+});
+
+// Handle web requests (main navigation)
 chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
-  if (details.frameId !== 0) return; // Only check main frame
-  
-  // Don't block extension pages or chrome URLs
-  if (details.url.startsWith('chrome://') || 
-      details.url.startsWith('chrome-extension://') ||
-      details.url.startsWith('about:') ||
-      details.url.startsWith('edge://')) {
-    return;
-  }
-  
-  const { passwordHash: storedHash } = await chrome.storage.local.get(['passwordHash']);
-  if (!storedHash) {
-    console.log('⚠️ Pure Path: Setup not completed. Please complete setup to enable blocking.');
-    return; // Not set up yet
-  }
-  
-  console.log('🔍 Pure Path: Checking URL:', details.url);
-  const result = shouldBlockUrl(details.url);
-  
-  if (result.blocked) {
-    console.log('🚫 Pure Path: BLOCKED!', result.reason, result.match);
-    // Increment stats
-    stats.totalBlocks++;
-    stats.lastBlockDate = new Date().toISOString();
-    await chrome.storage.local.set({ stats });
-    
-    // Redirect to blocked page
-    const blockedUrl = chrome.runtime.getURL('blocked.html') + 
-      `?reason=${result.reason}&match=${encodeURIComponent(result.match)}&url=${encodeURIComponent(details.url)}`;
-    chrome.tabs.update(details.tabId, { url: blockedUrl });
-  } else {
-    console.log('✅ Pure Path: URL allowed');
-  }
+  if (details.frameId !== 0) return;
+  if (isIgnoredUrl(details.url)) return;
+  await handleBlock(details.tabId, details.url);
 });
 
-// Handle SPA navigation (for sites like Reddit that don't trigger full page loads)
+// Handle SPA navigation
 chrome.webNavigation.onHistoryStateUpdated.addListener(async (details) => {
-  if (details.frameId !== 0) return; // Only check main frame
-  
-  // Don't block extension pages or chrome URLs
-  if (details.url.startsWith('chrome://') || 
-      details.url.startsWith('chrome-extension://') ||
-      details.url.startsWith('about:') ||
-      details.url.startsWith('edge://')) {
-    return;
-  }
-  
-  const { passwordHash: storedHash } = await chrome.storage.local.get(['passwordHash']);
-  if (!storedHash) {
-    return; // Not set up yet
-  }
-  
-  console.log('🔍 Pure Path: Checking SPA navigation:', details.url);
-  const result = shouldBlockUrl(details.url);
-  
-  if (result.blocked) {
-    console.log('🚫 Pure Path: BLOCKED (SPA)!', result.reason, result.match);
-    // Increment stats
-    stats.totalBlocks++;
-    stats.lastBlockDate = new Date().toISOString();
-    await chrome.storage.local.set({ stats });
-    
-    // Redirect to blocked page
-    const blockedUrl = chrome.runtime.getURL('blocked.html') + 
-      `?reason=${result.reason}&match=${encodeURIComponent(result.match)}&url=${encodeURIComponent(details.url)}`;
-    chrome.tabs.update(details.tabId, { url: blockedUrl });
-  } else {
-    console.log('✅ Pure Path: SPA navigation allowed');
-  }
+  if (details.frameId !== 0) return;
+  if (isIgnoredUrl(details.url)) return;
+  await handleBlock(details.tabId, details.url);
 });
 
-// Also handle tab updates (catches URL changes in address bar)
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  // Only check when URL changes
+// Handle tab address bar changes
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
   if (!changeInfo.url) return;
-  
-  // Don't block extension pages or chrome URLs
-  if (changeInfo.url.startsWith('chrome://') || 
-      changeInfo.url.startsWith('chrome-extension://') ||
-      changeInfo.url.startsWith('about:') ||
-      changeInfo.url.startsWith('edge://')) {
-    return;
-  }
-  
-  const { passwordHash: storedHash } = await chrome.storage.local.get(['passwordHash']);
-  if (!storedHash) {
-    return; // Not set up yet
-  }
-  
-  console.log('🔍 Pure Path: Checking tab update:', changeInfo.url);
-  const result = shouldBlockUrl(changeInfo.url);
-  
-  if (result.blocked) {
-    console.log('🚫 Pure Path: BLOCKED (tab update)!', result.reason, result.match);
-    // Increment stats
-    stats.totalBlocks++;
-    stats.lastBlockDate = new Date().toISOString();
-    await chrome.storage.local.set({ stats });
-    
-    // Redirect to blocked page
-    const blockedUrl = chrome.runtime.getURL('blocked.html') + 
-      `?reason=${result.reason}&match=${encodeURIComponent(result.match)}&url=${encodeURIComponent(changeInfo.url)}`;
-    chrome.tabs.update(tabId, { url: blockedUrl });
-  } else {
-    console.log('✅ Pure Path: Tab update allowed');
-  }
+  if (isIgnoredUrl(changeInfo.url)) return;
+  await handleBlock(tabId, changeInfo.url);
 });
 
 // Listen for messages from content script and popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'getStats') {
-    sendResponse({ stats });
+    // Read stats from storage (not in-memory) to avoid MV3 service worker race
+    chrome.storage.local.get(['stats'], (result) => {
+      sendResponse({ stats: result.stats || { totalBlocks: 0 } });
+    });
     return true;
   }
   
   if (request.action === 'setPassword') {
-    chrome.storage.local.set({ passwordHash: request.hash }, () => {
+    // Store hash and salt together for PBKDF2
+    const updates = { passwordHash: request.hash };
+    if (request.salt) updates.passwordSalt = request.salt;
+    chrome.storage.local.set(updates, () => {
       if (chrome.runtime.lastError) {
         sendResponse({ success: false, error: chrome.runtime.lastError.message });
       } else {
-        passwordHash = request.hash;
         sendResponse({ success: true });
       }
     });
@@ -885,11 +697,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   
   if (request.action === 'verifyPassword') {
-    chrome.storage.local.get(['passwordHash'], (result) => {
+    // Compare provided hash with stored hash
+    chrome.storage.local.get(['passwordHash', 'passwordSalt'], (result) => {
       if (chrome.runtime.lastError) {
         sendResponse({ valid: false, error: chrome.runtime.lastError.message });
       } else {
-        sendResponse({ valid: result.passwordHash === request.hash });
+        sendResponse({ 
+          valid: result.passwordHash === request.hash,
+          salt: result.passwordSalt || null
+        });
       }
     });
     return true;
@@ -908,6 +724,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const updates = {};
     if (request.domains !== undefined) {
       blocklistDomains = request.domains;
+      blocklistSet = new Set(request.domains.map(d => d.toLowerCase()));
       updates.blocklistDomains = request.domains;
     }
     if (request.keywords !== undefined) {
@@ -938,29 +755,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
   if (request.action === 'checkUrl') {
     // Check URL from content script (for SPA navigation)
+    // Uses handleBlock for consistency — but we also need a response
     chrome.storage.local.get(['passwordHash'], async (result) => {
       if (!result.passwordHash) {
         sendResponse({ blocked: false });
         return;
       }
       
-      console.log('🔍 Pure Path: Content script checking URL:', request.url);
       const checkResult = shouldBlockUrl(request.url);
       
       if (checkResult.blocked) {
-        console.log('🚫 Pure Path: URL blocked by content script check');
-        // Increment stats
-        stats.totalBlocks++;
-        stats.lastBlockDate = new Date().toISOString();
-        await chrome.storage.local.set({ stats });
+        // Atomically increment stats from storage
+        const { stats: s } = await chrome.storage.local.get(['stats']);
+        const updatedStats = s || { totalBlocks: 0, installDate: new Date().toISOString() };
+        updatedStats.totalBlocks = (updatedStats.totalBlocks || 0) + 1;
+        updatedStats.lastBlockDate = new Date().toISOString();
+        await chrome.storage.local.set({ stats: updatedStats });
         
-        sendResponse({ 
-          blocked: true, 
-          reason: checkResult.reason, 
-          match: checkResult.match 
-        });
+        sendResponse({ blocked: true, reason: checkResult.reason, match: checkResult.match });
       } else {
-        console.log('✅ Pure Path: URL allowed by content script check');
         sendResponse({ blocked: false });
       }
     });

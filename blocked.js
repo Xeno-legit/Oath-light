@@ -10,11 +10,10 @@ const quotes = [
   "The pain of discipline is far less than the pain of regret. - Anonymous"
 ];
 
-// Get URL parameters
+// Get URL parameters (original URL is no longer passed for privacy)
 const urlParams = new URLSearchParams(window.location.search);
 const reason = urlParams.get('reason');
 const match = urlParams.get('match');
-const blockedUrl = urlParams.get('url');
 
 // Display reason
 const reasonEl = document.getElementById('reason');
@@ -32,6 +31,14 @@ if (reason === 'domain') {
   reasonEl.textContent = `Image search blocked: "${match}"`;
 } else if (reason === 'keyword_content') {
   reasonEl.textContent = `Page content blocked: ${match}`;
+} else if (reason === 'blacklist_domain') {
+  reasonEl.textContent = `Blocked domain: ${match}`;
+} else if (reason === 'explicit_domain') {
+  reasonEl.textContent = `Explicit domain blocked`;
+} else if (reason === 'graylist_explicit') {
+  reasonEl.textContent = `NSFW content blocked on monitored site`;
+} else if (reason === 'safesearch_bypass') {
+  reasonEl.textContent = `SafeSearch was disabled — bypass attempt blocked`;
 } else {
   reasonEl.textContent = 'This page was blocked to help you stay focused.';
 }
@@ -65,20 +72,15 @@ chrome.runtime.sendMessage({ action: 'getStats' }, (response) => {
 
 // Handle "Go to Safe Page" button
 document.getElementById('goBackBtn').addEventListener('click', () => {
-  // Redirect to a safe page (Google homepage or new tab)
-  // Try to open new tab first, fallback to Google homepage
   try {
     chrome.tabs.getCurrent((tab) => {
       if (tab && tab.id) {
-        // Update current tab to Google homepage
         chrome.tabs.update(tab.id, { url: 'https://www.google.com' });
       } else {
-        // Fallback: just navigate to Google
         window.location.href = 'https://www.google.com';
       }
     });
   } catch (error) {
-    // If chrome.tabs API fails, just navigate to Google
     window.location.href = 'https://www.google.com';
   }
 });

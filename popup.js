@@ -1,9 +1,16 @@
 // Popup script
-async function hashPassword(password) {
+
+// Hash password with PBKDF2 + salt (matches setup.js)
+async function hashPassword(password, salt) {
   const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']
+  );
+  const derivedBits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: encoder.encode(salt), iterations: 100000, hash: 'SHA-256' },
+    keyMaterial, 256
+  );
+  const hashArray = Array.from(new Uint8Array(derivedBits));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
@@ -53,7 +60,6 @@ document.getElementById('viewBlocklistsBtn').addEventListener('click', () => {
 
 // Change password button (placeholder for now)
 document.getElementById('changePasswordBtn').addEventListener('click', () => {
-  // Could implement password change modal in the future
   alert('Password change feature coming soon! For now, you can reinstall the extension to set a new password.');
 });
 
