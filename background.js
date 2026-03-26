@@ -11,21 +11,21 @@ const tabLastChecked = new Map();
 // Initialize extension
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('Pure Path installed');
-  
+
   // On first install or update, load blocklists from JSON and save to storage
   if (details.reason === 'install' || details.reason === 'update') {
     await initializeBlocklistsFromJSON();
   }
-  
+
   // Load blocklists from storage
   await loadBlocklistsFromStorage();
-  
+
   // Initialize stats if first install
   const result = await chrome.storage.local.get(['stats']);
   if (!result.stats) {
     await chrome.storage.local.set({ stats: { totalBlocks: 0, installDate: new Date().toISOString() } });
   }
-  
+
   // Check if password is set
   const { passwordHash: storedHash } = await chrome.storage.local.get(['passwordHash']);
   if (!storedHash) {
@@ -47,17 +47,17 @@ async function initializeBlocklistsFromJSON() {
     const domainsResponse = await fetch(chrome.runtime.getURL('blocklists/domains.json'));
     const domainsData = await domainsResponse.json();
     const domains = domainsData.domains || [];
-    
+
     const keywordsResponse = await fetch(chrome.runtime.getURL('blocklists/keywords.json'));
     const keywordsData = await keywordsResponse.json();
     const keywords = keywordsData.keywords || [];
-    
+
     // Save to storage
-    await chrome.storage.local.set({ 
+    await chrome.storage.local.set({
       blocklistDomains: domains,
       blocklistKeywords: keywords
     });
-    
+
     console.log(`✅ Pure Path: Initialized ${domains.length} domains and ${keywords.length} keywords in storage`);
   } catch (error) {
     console.error('❌ Pure Path: Error initializing blocklists from JSON:', error);
@@ -69,7 +69,7 @@ async function loadBlocklistsFromStorage() {
   try {
     console.log('📋 Pure Path: Loading blocklists from storage...');
     const result = await chrome.storage.local.get(['blocklistDomains', 'blocklistKeywords']);
-    
+
     if (result.blocklistDomains && result.blocklistKeywords) {
       blocklistDomains = result.blocklistDomains;
       blocklistKeywords = result.blocklistKeywords;
@@ -113,19 +113,19 @@ const SEPARATOR_REGEX = /[-_\.\s]/g;
 
 function normalizeLeetSpeak(text) {
   if (!text) return '';
-  
+
   let normalized = text.toLowerCase();
-  
+
   // Remove common separator characters FIRST
   normalized = normalized.replace(SEPARATOR_REGEX, '');
-  
+
   // Replace leet speak characters using pre-compiled patterns (3 passes)
   for (let pass = 0; pass < 3; pass++) {
     for (const [regex, replacement] of LEET_MAP_COMPILED) {
       normalized = normalized.replace(regex, replacement);
     }
   }
-  
+
   return normalized;
 }
 
@@ -146,7 +146,7 @@ const WHITELIST_DOMAINS = [
   'anthropic.com',
   'claude.ai',
   'chatgpt.com',
-  
+
   // Development & Tech
   'github.com',
   'gitlab.com',
@@ -155,10 +155,35 @@ const WHITELIST_DOMAINS = [
   'microsoft.com',
   'apple.com',
   'developer.mozilla.org',
-  
-  // Social Media (mainstream)
+  'npmjs.com',
+  'pypi.org',
+  'crates.io',
+  'hub.docker.com',
+  'vercel.com',
+  'netlify.com',
+  'heroku.com',
+  'aws.amazon.com',
+  'cloud.google.com',
+  'azure.microsoft.com',
+  'bitbucket.org',
+  'codepen.io',
+  'replit.com',
+  'figma.com',
+
+  // Cloud & Productivity
+  'notion.so',
+  'docs.google.com',
+  'drive.google.com',
+  'dropbox.com',
+  'onedrive.live.com',
+  'office.com',
+  'slack.com',
+  'zoom.us',
+  'teams.microsoft.com',
+
+  // Social Media (mainstream safe)
   'linkedin.com',
-  
+
   // Education & Reference
   'wikipedia.org',
   'wikihow.com',
@@ -166,19 +191,64 @@ const WHITELIST_DOMAINS = [
   'coursera.org',
   'udemy.com',
   'edx.org',
-  
+  'mit.edu',
+  'stanford.edu',
+  'harvard.edu',
+  'w3schools.com',
+  'freecodecamp.org',
+  'codecademy.com',
+  'brilliant.org',
+  'merriam-webster.com',
+  'dictionary.com',
+  'wolframalpha.com',
+  'quora.com',
+
   // E-commerce
   'amazon.com',
   'ebay.com',
   'walmart.com',
   'target.com',
-  
+
   // News & Media
   'bbc.com',
   'cnn.com',
   'nytimes.com',
   'theguardian.com',
-  'reuters.com'
+  'reuters.com',
+  'washingtonpost.com',
+  'wsj.com',
+  'apnews.com',
+  'aljazeera.com',
+  'forbes.com',
+  'techcrunch.com',
+  'arstechnica.com',
+  'theverge.com',
+  'wired.com',
+
+  // Banking & Finance
+  'paypal.com',
+  'stripe.com',
+  'chase.com',
+  'bankofamerica.com',
+
+  // Health
+  'webmd.com',
+  'mayoclinic.org',
+  'nih.gov',
+  'who.int',
+
+  // Government
+  'nasa.gov',
+  'irs.gov',
+
+  // Entertainment (safe)
+  'spotify.com',
+  'netflix.com',
+  'hulu.com',
+  'disneyplus.com',
+  'crunchyroll.com',
+  'store.steampowered.com',
+  'epicgames.com'
 ];
 
 // TIER 2: GRAYLIST - Can contain NSFW but not primary focus (strict monitoring)
@@ -195,7 +265,25 @@ const GRAYLIST_DOMAINS = [
   'pinterest.com',
   'imgur.com',
   'twitch.tv',
-  'youtube.com'
+  'youtube.com',
+  // Expanded graylist
+  'tiktok.com',
+  'snapchat.com',
+  'telegram.org',
+  'web.telegram.org',
+  'mastodon.social',
+  'bsky.app',
+  'flickr.com',
+  'vimeo.com',
+  'dailymotion.com',
+  'soundcloud.com',
+  'patreon.com',
+  'ko-fi.com',
+  'gumroad.com',
+  'itch.io',
+  'artstation.com',
+  'pixiv.net',
+  'furaffinity.net'
 ];
 
 // TIER 3: BLACKLIST - Explicit NSFW domains (always block)
@@ -300,7 +388,16 @@ const GRAYLIST_EXPLICIT_PATHS = [
   // Weird
   '/r/dragonsfuckingcars', '/r/scporn', '/r/fedlegs', '/r/cummingonfigurines',
   // Generic NSFW paths
-  '/porn', '/sex', '/nude', '/adult', '/hentai', '/xxx'
+  '/porn', '/sex', '/nude', '/adult', '/hentai', '/xxx', '/ecchi',
+  // Expanded graylist paths for new platforms
+  '/artworks/r18', '/tags/r-18', '/tags/r18',
+  '/nsfw', '/r18', '/r-18',
+  '/tag/nsfw', '/tag/adult', '/tag/onlyfans', '/tag/ecchi',
+  '/tags/nsfw', '/tags/nude', '/tags/porn',
+  '/games/tag-nsfw', '/games/tag-adult',
+  '/groups/nudephotography', '/groups/artisticnude',
+  // Anime NSFW Subreddits
+  '/r/ecchi', '/r/hentaibondage', '/r/yuri', '/r/yaoi'
 ];
 
 // ============================================================================
@@ -313,12 +410,13 @@ const SOFT_PORN_KEYWORDS = [
   'sexy', 'hot babes', 'hot girls', 'hot women', 'hot chicks',
   'bikini babes', 'lingerie', 'underwear models', 'swimsuit models',
   'topless', 'bottomless', 'naked', 'nude', 'nudes',
-  
+  'sex', 'sexual',
+
   // Action terms
   'strip', 'stripping', 'stripper', 'striptease',
   'cam girl', 'camgirl', 'webcam girl', 'live cam',
   'onlyfans', 'only fans', 'patreon nsfw',
-  
+
   // Euphemisms
   'adult content', 'mature content', '18+', 'nsfw',
   'not safe for work', 'explicit content'
@@ -330,14 +428,14 @@ const HARD_PORN_KEYWORDS = [
   'porn', 'pornography', 'pornhub', 'xvideos', 'xnxx', 'redtube',
   'hentai', 'doujin', 'rule34',
   'sex video', 'sex videos', 'porn video', 'porn videos',
-  
+
   // Explicit body parts (moved from soft keywords)
   'boobs', 'boobies', 'tits', 'titties', 'breasts',
   'ass', 'butt', 'booty', 'pussy', 'vagina',
   'dick', 'cock', 'penis', 'balls', 'testicles',
-  
+
   // Explicit acts
-  'fuck', 'fucking', 'sex', 'sexual',
+  'fuck', 'fucking',
   'milf', 'gilf', 'dilf',
   'gangbang', 'orgy', 'threesome', 'foursome',
   'blowjob', 'handjob', 'footjob',
@@ -345,7 +443,7 @@ const HARD_PORN_KEYWORDS = [
   'lesbian porn', 'gay porn', 'shemale', 'trans porn',
   'incest', 'stepmom', 'stepsister', 'stepbrother',
   'rape', 'forced', 'bdsm', 'bondage',
-  
+
   // Curated unambiguous terms from keywords.json (Section D)
   'bangbros', 'brazzers', 'youporn', 'spankbang', 'xhamster',
   'chaturbate', 'livejasmin', 'bongacams', 'stripchat',
@@ -359,7 +457,10 @@ const HARD_PORN_KEYWORDS = [
   'smegma', 'felching', 'rimjob', 'rimming', 'queef',
   'sodomize', 'sodomy', 'scissoring', 'tribadism',
   'goregasm', 'dolcett', 'guro', 'vorarephilia',
-  'suicidegirls', 'babestation', 'slutwife', 'hotwife'
+  'suicidegirls', 'babestation', 'slutwife', 'hotwife',
+  // Anime NSFW
+  'ecchi', 'ahegao', 'oppai', 'yaoi', 'yuri',
+  'shotacon', 'lolicon', 'doujinshi', 'ero manga', 'eroge'
 ];
 
 // ============================================================================
@@ -403,10 +504,10 @@ const NSFW_PHRASES = [
 // ============================================================================
 
 const SEARCH_ENGINES = [
-  { domain: 'google.com', queryParam: 'q', imageParam: 'tbm=isch' },
-  { domain: 'bing.com', queryParam: 'q', imageParam: 'filters=filterui:photo' },
-  { domain: 'duckduckgo.com', queryParam: 'q', imageParam: 'iax=images' },
-  { domain: 'yahoo.com', queryParam: 'p', imageParam: 'fr2=piv-web' }
+  { domain: 'google.com', queryParam: 'q', imageParam: 'tbm=isch', safeParam: 'active' },
+  { domain: 'bing.com', queryParam: 'q', imageParam: 'filters=filterui:photo', safeParam: 'strict' },
+  { domain: 'duckduckgo.com', queryParam: 'q', imageParam: 'iax=images', safeParam: '1' },
+  { domain: 'yahoo.com', queryParam: 'p', imageParam: 'fr2=piv-web', safeParam: 'r' }
 ];
 
 // ============================================================================
@@ -414,22 +515,22 @@ const SEARCH_ENGINES = [
 // ============================================================================
 
 function checkSearchEngineQuery(url, hostname) {
-  const searchEngine = SEARCH_ENGINES.find(se => 
+  const searchEngine = SEARCH_ENGINES.find(se =>
     hostname === se.domain || hostname.endsWith('.' + se.domain)
   );
-  
+
   if (!searchEngine) return null;
-  
+
   try {
     const urlObj = new URL(url);
     const searchParams = urlObj.searchParams;
     const query = searchParams.get(searchEngine.queryParam);
-    
+
     if (!query) return null;
-    
+
     const lowerQuery = query.toLowerCase();
     const isImageSearch = url.includes(searchEngine.imageParam);
-    
+
     // SafeSearch detection: only block if user tries to DISABLE SafeSearch
     // SafeSearch being ON is a protective feature and should be allowed
     const hasSafeSearchOff = url.includes('safe=off') || url.includes('safesearch=off') || url.includes('safe=0');
@@ -443,10 +544,10 @@ function checkSearchEngineQuery(url, hostname) {
         severity: 'bypass_attempt'
       };
     }
-    
+
     // Normalize leet speak in the query
     const normalizedQuery = normalizeLeetSpeak(lowerQuery);
-    
+
     // Check for hard porn keywords (immediate block) — word-boundary aware
     for (const { kw, regex } of HARD_KEYWORD_REGEXES) {
       if (regex.test(normalizedQuery)) {
@@ -460,7 +561,7 @@ function checkSearchEngineQuery(url, hostname) {
         };
       }
     }
-    
+
     // Check for NSFW phrases (contextual block)
     for (const phrase of NSFW_PHRASES) {
       const normalizedPhrase = normalizeLeetSpeak(phrase.toLowerCase());
@@ -475,7 +576,7 @@ function checkSearchEngineQuery(url, hostname) {
         };
       }
     }
-    
+
     // Check for soft porn keywords — word-boundary aware
     let softMatches = [];
     for (const { kw, regex } of SOFT_KEYWORD_REGEXES) {
@@ -483,9 +584,9 @@ function checkSearchEngineQuery(url, hostname) {
         softMatches.push(kw);
       }
     }
-    
+
     if (softMatches.length > 0) {
-      
+
       // Always block on image search with any soft keyword
       if (isImageSearch) {
         return {
@@ -497,26 +598,57 @@ function checkSearchEngineQuery(url, hostname) {
           normalized: normalizedQuery
         };
       }
-      
-      // For text search, block if 2+ soft keywords
-      if (softMatches.length >= 2) {
-        return {
-          blocked: true,
-          reason: 'search_query',
-          match: softMatches.join(', '),
-          query: query,
-          severity: 'soft',
-          normalized: normalizedQuery
-        };
+
+      // For text search with soft keywords, enforce SafeSearch instead of blocking
+      try {
+        const currentUrl = new URL(url);
+        let paramName = 'safe';
+        if (searchEngine.domain.includes('bing.com')) paramName = 'adlt';
+        if (searchEngine.domain.includes('duckduckgo.com')) paramName = 'kp';
+        if (searchEngine.domain.includes('yahoo.com')) paramName = 'vm';
+
+        // If SafeSearch is not already forced in the query, trigger redirect
+        if (currentUrl.searchParams.get(paramName) !== searchEngine.safeParam) {
+          currentUrl.searchParams.set(paramName, searchEngine.safeParam);
+          return {
+            safesearch: true,
+            redirectUrl: currentUrl.toString(),
+            reason: 'soft_search_safesearch',
+            match: softMatches[0]
+          };
+        }
+      } catch (e) {
+        // Fallback for Malformed URL
       }
 
     }
 
-    
+    // ====================================================================
+    // ALWAYS enforce SafeSearch on search engines (regardless of query)
+    // ====================================================================
+    try {
+      const currentUrl = new URL(url);
+      let paramName = 'safe';
+      if (searchEngine.domain.includes('bing.com')) paramName = 'adlt';
+      if (searchEngine.domain.includes('duckduckgo.com')) paramName = 'kp';
+      if (searchEngine.domain.includes('yahoo.com')) paramName = 'vm';
+
+      if (currentUrl.searchParams.get(paramName) !== searchEngine.safeParam) {
+        currentUrl.searchParams.set(paramName, searchEngine.safeParam);
+        return {
+          safesearch: true,
+          redirectUrl: currentUrl.toString(),
+          reason: 'safesearch_always_on',
+          match: 'SafeSearch enforced'
+        };
+      }
+    } catch (e) {
+      // Malformed URL fallback
+    }
   } catch (error) {
     console.error('❌ Error checking search query:', error);
   }
-  
+
   return null;
 }
 
@@ -536,15 +668,16 @@ function shouldBlockUrl(url) {
       fullUrl = url.toLowerCase(); // Fallback for malformed URIs
     }
     const pathname = urlObj.pathname.toLowerCase();
-    
+
     // ========================================================================
     // STEP 1: Check search engine queries FIRST (with leet speak detection)
     // ========================================================================
     const searchCheck = checkSearchEngineQuery(url, hostname);
-    if (searchCheck && searchCheck.blocked) {
+    // Propagate both blocks AND safesearch redirects
+    if (searchCheck && (searchCheck.blocked || searchCheck.safesearch)) {
       return searchCheck;
     }
-    
+
     // ========================================================================
     // STEP 2: Check WHITELIST (never block these)
     // ========================================================================
@@ -553,7 +686,7 @@ function shouldBlockUrl(url) {
         return { blocked: false, tier: 'whitelist' };
       }
     }
-    
+
     // ========================================================================
     // STEP 3: Check BLACKLIST (explicit NSFW domains)
     // ========================================================================
@@ -567,18 +700,18 @@ function shouldBlockUrl(url) {
         return { blocked: true, reason: 'blacklist_domain', match: domain, tier: 'blacklist' };
       }
     }
-    
+
     // ========================================================================
     // STEP 4: Check if domain contains explicit NSFW keywords
     // ========================================================================
     const domainKeywords = ['porn', 'xxx', 'sex', 'adult', 'hentai', 'xnxx', 'xvideos',
-                             'nude', 'erotic', 'fetish', 'escort', 'cam', 'onlyfans'];
+      'nude', 'erotic', 'fetish', 'escort', 'cam', 'onlyfans', 'ecchi'];
     for (const keyword of domainKeywords) {
       if (hostname.includes(keyword)) {
         return { blocked: true, reason: 'explicit_domain', match: keyword, tier: 'blacklist' };
       }
     }
-    
+
     // ========================================================================
     // STEP 5: Check GRAYLIST domains with basic monitoring
     // ========================================================================
@@ -589,7 +722,7 @@ function shouldBlockUrl(url) {
         break;
       }
     }
-    
+
     if (isGraylist) {
       // Check against hoisted GRAYLIST_EXPLICIT_PATHS Set (O(1) per entry)
       for (const path of GRAYLIST_EXPLICIT_PATHS) {
@@ -600,51 +733,51 @@ function shouldBlockUrl(url) {
       // Allow if no explicit NSFW paths found
       return { blocked: false, tier: 'graylist' };
     }
-    
+
     // ========================================================================
     // STEP 6: Check unknown domains for explicit patterns
     // ========================================================================
-    
+
     // Check for explicit patterns in path
     const explicitPatterns = [
-      '/porn/', '/sex/', '/nude/', '/nsfw/', '/adult/', '/hentai/', '/xxx/'
+      '/porn/', '/sex/', '/nude/', '/nsfw/', '/adult/', '/hentai/', '/xxx/', '/ecchi/'
     ];
-    
+
     for (const pattern of explicitPatterns) {
       if (pathname.includes(pattern)) {
-        return { 
-          blocked: true, 
-          reason: 'explicit_path', 
+        return {
+          blocked: true,
+          reason: 'explicit_path',
           match: pattern,
           tier: 'unknown'
         };
       }
     }
-    
+
     // Check for multiple explicit keywords in URL (need 2+)
-    const explicitKeywords = ['porn', 'sex', 'nude', 'xxx', 'adult', 'nsfw', 'hentai'];
+    const explicitKeywords = ['porn', 'sex', 'nude', 'xxx', 'adult', 'nsfw', 'hentai', 'ecchi'];
     let keywordCount = 0;
     let matchedKeywords = [];
-    
+
     for (const keyword of explicitKeywords) {
       if (fullUrl.includes(keyword)) {
         keywordCount++;
         matchedKeywords.push(keyword);
       }
     }
-    
+
     if (keywordCount >= 2) {
-      return { 
-        blocked: true, 
-        reason: 'multiple_explicit', 
+      return {
+        blocked: true,
+        reason: 'multiple_explicit',
         match: matchedKeywords.join(', '),
         tier: 'unknown'
       };
     }
-    
+
     // Allow if no NSFW indicators found
     return { blocked: false, tier: 'unknown' };
-    
+
   } catch (error) {
     console.error('❌ Error checking URL:', error);
     return { blocked: false };
@@ -658,21 +791,15 @@ function shouldBlockUrl(url) {
 
 function isIgnoredUrl(url) {
   return url.startsWith('chrome://') ||
-         url.startsWith('chrome-extension://') ||
-         url.startsWith('about:') ||
-         url.startsWith('edge://');
+    url.startsWith('chrome-extension://') ||
+    url.startsWith('about:') ||
+    url.startsWith('edge://');
 }
 
-async function handleBlock(tabId, url) {
+async function recordBlockAndRedirect(tabId, url, reason, match) {
   // Deduplicate: skip if we already checked this exact URL for this tab
   if (tabLastChecked.get(tabId) === url) return;
   tabLastChecked.set(tabId, url);
-
-  const { passwordHash: storedHash } = await chrome.storage.local.get(['passwordHash']);
-  if (!storedHash) return; // Not set up yet
-
-  const result = shouldBlockUrl(url);
-  if (!result.blocked) return;
 
   // Atomically increment stats from storage (avoids MV3 service worker race)
   const { stats: s } = await chrome.storage.local.get(['stats']);
@@ -683,8 +810,28 @@ async function handleBlock(tabId, url) {
 
   // Redirect to blocked page — pass reason/match but NOT the original URL
   const blockedUrl = chrome.runtime.getURL('blocked.html') +
-    `?reason=${result.reason}&match=${encodeURIComponent(result.match)}`;
+    `?reason=${reason}&match=${encodeURIComponent(match)}`;
   chrome.tabs.update(tabId, { url: blockedUrl });
+}
+
+async function handleBlock(tabId, url) {
+  const { passwordHash: storedHash } = await chrome.storage.local.get(['passwordHash']);
+  if (!storedHash) return; // Not set up yet
+
+  const result = shouldBlockUrl(url);
+
+  // Handle silent SafeSearch enforcement for soft terms
+  if (result && result.safesearch) {
+    if (url !== result.redirectUrl) {
+      console.log(`Forcing SafeSearch for soft query: ${result.match}`);
+      chrome.tabs.update(tabId, { url: result.redirectUrl });
+    }
+    return;
+  }
+
+  if (!result || !result.blocked) return;
+
+  await recordBlockAndRedirect(tabId, url, result.reason, result.match);
 }
 
 // Clean up dedup map when tabs close
@@ -722,7 +869,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   }
-  
+
   if (request.action === 'setPassword') {
     // Store hash and salt together for PBKDF2
     const updates = { passwordHash: request.hash };
@@ -736,14 +883,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   }
-  
+
   if (request.action === 'verifyPassword') {
     // Compare provided hash with stored hash
     chrome.storage.local.get(['passwordHash', 'passwordSalt'], (result) => {
       if (chrome.runtime.lastError) {
         sendResponse({ valid: false, error: chrome.runtime.lastError.message });
       } else {
-        sendResponse({ 
+        sendResponse({
           valid: result.passwordHash === request.hash,
           salt: result.passwordSalt || null
         });
@@ -751,15 +898,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   }
-  
+
   if (request.action === 'getBlocklists') {
-    sendResponse({ 
-      domains: blocklistDomains, 
-      keywords: blocklistKeywords 
+    sendResponse({
+      domains: blocklistDomains,
+      keywords: blocklistKeywords
     });
     return true;
   }
-  
+
   if (request.action === 'updateBlocklists') {
     // Update blocklists in storage
     const updates = {};
@@ -772,7 +919,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       blocklistKeywords = request.keywords;
       updates.blocklistKeywords = request.keywords;
     }
-    
+
     chrome.storage.local.set(updates, () => {
       if (chrome.runtime.lastError) {
         sendResponse({ success: false, error: chrome.runtime.lastError.message });
@@ -783,7 +930,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   }
-  
+
   if (request.action === 'reloadBlocklists') {
     // Reload blocklists from storage
     loadBlocklistsFromStorage().then(() => {
@@ -793,13 +940,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   }
-  
+
   if (request.action === 'checkUrl') {
-    // Delegate to handleBlock — it deduplicates and handles stats (Section G)
-    // handleBlock redirects via chrome.tabs.update if blocked
+    // Delegate to handleBlock — it deduplicates and handles stats
     if (sender.tab && sender.tab.id) {
       handleBlock(sender.tab.id, request.url).then(() => {
-        sendResponse({ blocked: false }); // handleBlock redirects directly if needed
+        sendResponse({ blocked: false });
       }).catch(() => {
         sendResponse({ blocked: false });
       });
@@ -808,7 +954,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     return true;
   }
-  
+
+  if (request.action === 'notifyBlock') {
+    // Explicit block report from content script (DOM tags detection)
+    if (sender.tab && sender.tab.id) {
+      recordBlockAndRedirect(
+        sender.tab.id,
+        request.url || sender.tab.url,
+        request.reason,
+        request.match
+      ).then(() => {
+        sendResponse({ success: true });
+      });
+    } else {
+      sendResponse({ success: false });
+    }
+    return true;
+  }
+
   if (request.action === 'isDomainSafe') {
     // Unified whitelist check (Section C) — single source of truth
     const hostname = (request.hostname || '').toLowerCase();
@@ -822,7 +985,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ safe });
     return true;
   }
-  
+
   return false;
 });
 

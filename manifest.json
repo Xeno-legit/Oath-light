@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pure Path - Content Filter",
-  "version": "1.0.0",
+  "version": "1.7.4",
   "description": "A content filtering system to help you stay focused on personal growth",
   "permissions": [
     "storage",

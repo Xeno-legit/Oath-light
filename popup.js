@@ -63,5 +63,45 @@ document.getElementById('changePasswordBtn').addEventListener('click', () => {
   alert('Password change feature coming soon! For now, you can reinstall the extension to set a new password.');
 });
 
+// Tab switching logic
+document.querySelectorAll('.nav-item').forEach(btn => {
+  btn.addEventListener('click', () => {
+    // Update tabs
+    document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    
+    // Update views
+    const targetView = btn.getAttribute('data-target');
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    const viewEl = document.getElementById(targetView);
+    if (viewEl) viewEl.classList.add('active');
+  });
+});
+
+// Theme switching logic
+document.querySelectorAll('.theme-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const themeId = btn.getAttribute('data-theme-id');
+    document.documentElement.setAttribute('data-theme', themeId);
+    
+    // Update active class
+    document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    // Save to chrome.storage
+    chrome.storage.local.set({ theme: themeId });
+  });
+});
+
+// Load saved theme
+chrome.storage.local.get(['theme'], (result) => {
+  if (result.theme) {
+    document.documentElement.setAttribute('data-theme', result.theme);
+    document.querySelectorAll('.theme-btn').forEach(b => {
+       b.classList.toggle('active', b.getAttribute('data-theme-id') === result.theme);
+    });
+  }
+});
+
 // Initialize
 displayRandomQuote();
