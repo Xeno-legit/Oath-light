@@ -65,27 +65,7 @@
       padding: 24px; overflow-x: hidden;
     }
 
-    .ambient-bg {
-      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-      pointer-events: none; z-index: 0; overflow: hidden;
-    }
-    .orb {
-      position: absolute; border-radius: 50%; filter: blur(80px);
-      animation: float 25s infinite ease-in-out alternate; opacity: 0.8;
-    }
-    .orb-1 {
-      width: 500px; height: 500px; background: var(--orb-1);
-      top: -100px; right: -100px;
-    }
-    .orb-2 {
-      width: 400px; height: 400px; background: var(--orb-2);
-      bottom: -50px; left: -100px; animation-delay: -12s;
-    }
 
-    @keyframes float {
-      0% { transform: translate(0, 0) scale(1); }
-      100% { transform: translate(60px, 80px) scale(1.1); }
-    }
 
     .container {
       position: relative; z-index: 10;
@@ -170,10 +150,7 @@
   </style>
 </head>
 <body>
-  <div class="ambient-bg">
-    <div class="orb orb-1"></div>
-    <div class="orb orb-2"></div>
-  </div>
+  <canvas id="fluidCanvas" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0; pointer-events: none;"></canvas>
 
   <div class="container">
     <img src="icons/icon48.png" alt="Pure Path Shield" class="shield-icon">
@@ -207,16 +184,7 @@
     </button>
   </div>
   
+  <script src="gsap.min.js"></script>
   <script src="blocked.js"></script>
-  <script>
-    // Load saved theme
-    if(typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.get(['theme'], (result) => {
-        if(result.theme) {
-          document.documentElement.setAttribute('data-theme', result.theme);
-        }
-      });
-    }
-  </script>
 </body>
 </html>

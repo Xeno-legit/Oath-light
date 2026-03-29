@@ -991,3 +991,4 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // Remove the periodic reload since we're using storage now
 // Blocklists will persist and load automatically
+
