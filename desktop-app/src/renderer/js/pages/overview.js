@@ -10,13 +10,13 @@ window.PurePathPages.overview = (function () {
 
   const T = window.PurePathTransitions;
 
-  /* ─── Mock Data (will come from Native Messaging later) ────────── */
+  /* ─── Data State (will come from Native Messaging later) ────────── */
   const mockData = {
-    sitesBlocked: 1247,
-    daysProtected: 38,
-    keywordsActive: 86,
-    threatsToday: 12,
-    weeklyActivity: [14, 22, 19, 31, 27, 16, 9],
+    sitesBlocked: 0,
+    daysProtected: 0,
+    keywordsActive: 0,
+    threatsToday: 0,
+    weeklyActivity: [0, 0, 0, 0, 0, 0, 0],
     weekDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
   };
 

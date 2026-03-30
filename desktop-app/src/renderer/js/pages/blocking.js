@@ -10,19 +10,9 @@ window.PurePathPages.blocking = (function () {
 
   const T = window.PurePathTransitions;
 
-  /* ─── Mock Data ────────────────────────────────────────────────── */
-  let domains = [
-    'example-adult.com', 'nsfw-content.net', 'explicit-hub.org',
-    'harmful-site.co', 'unsafe-page.io', 'blocked-domain.xyz',
-    'restricted-content.com', 'filtered-site.net', 'adult-only.org',
-    'danger-zone.co', 'bad-content.io', 'unclean-web.com',
-  ];
-
-  let keywords = [
-    'explicit', 'nsfw', 'adult', 'xxx', 'porn', 'nude',
-    'unfiltered', 'uncensored', 'inappropriate', 'harmful',
-    'violent', 'graphic', 'obscene', 'profanity',
-  ];
+  /* ─── State ────────────────────────────────────────────────── */
+  let domains = [];
+  let keywords = [];
 
   /* ─── Helpers ──────────────────────────────────────────────────── */
   function shieldIcon() {

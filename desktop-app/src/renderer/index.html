@@ -14,6 +14,10 @@
 
   <!-- Custom Title Bar -->
   <div class="title-bar">
+    <div class="title-bar-brand">
+      <img src="assets/icon48.png" alt="Logo" class="title-bar-logo">
+      <span class="title-bar-text">Pure Path</span>
+    </div>
     <div class="window-controls">
       <button class="window-btn" id="btn-minimize" title="Minimize">
         <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -63,13 +67,19 @@
 
       <!-- Bottom anchored: Identity Hub -->
       <div class="sidebar-bottom">
+        <button class="sidebar-item" data-page="themes" id="nav-themes">
+          <span class="sidebar-item-icon">
+            <svg viewBox="0 0 24 24"><path d="M12 2.69l5.66 4.2c.57.42.9 1.09.9 1.81v9.6c0 1.1-.9 2-2 2H7.44c-1.1 0-2-.9-2-2v-9.6c0-.72.33-1.39.9-1.81L12 2.69z"/><path d="M12 22v-8"/></svg>
+          </span>
+          <span class="sidebar-item-label">Themes</span>
+        </button>
         <button class="sidebar-item" data-page="settings" id="nav-settings">
           <span class="sidebar-item-icon">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           </span>
           <span class="sidebar-item-label">Settings</span>
         </button>
-        <button class="sidebar-item" data-page="settings" id="nav-account">
+        <button class="sidebar-item" data-page="account" id="nav-account">
           <span class="sidebar-item-icon">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           </span>
@@ -93,6 +103,12 @@
       <!-- SETTINGS PAGE -->
       <section id="page-settings" class="page-view"></section>
 
+      <!-- ACCOUNT PAGE -->
+      <section id="page-account" class="page-view"></section>
+
+      <!-- THEMES PAGE -->
+      <section id="page-themes" class="page-view"></section>
+
     </main>
   </div>
 
@@ -110,6 +126,8 @@
   <script src="js/pages/blocking.js"></script>
   <script src="js/pages/mentor.js"></script>
   <script src="js/pages/settings.js"></script>
+  <script src="js/pages/account.js"></script>
+  <script src="js/pages/themes.js"></script>
   <script src="js/app.js"></script>
 
 </body>

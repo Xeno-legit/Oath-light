@@ -6,7 +6,7 @@
 window.PurePathTransitions = (function () {
   'use strict';
 
-  const EASE_SPRING  = 'elastic.out(1, 0.55)';
+  const EASE_SPRING  = 'power3.out';
   const EASE_SMOOTH  = 'power3.out';
   const EASE_SNAPPY  = 'power2.out';
 

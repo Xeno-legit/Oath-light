@@ -26,8 +26,12 @@ window.PurePathApp = (function () {
     // Setup Tauri Window controls (Works in v1 and v2 withGlobalTauri)
     if (window.__TAURI__) {
       const invoke = window.__TAURI__.core ? window.__TAURI__.core.invoke : window.__TAURI__.invoke;
+      let isFullscreen = false;
       if (btnMin)   btnMin.addEventListener('click', () => invoke('plugin:window|minimize'));
-      if (btnMax)   btnMax.addEventListener('click', () => invoke('plugin:window|toggle_maximize'));
+      if (btnMax)   btnMax.addEventListener('click', () => {
+        isFullscreen = !isFullscreen;
+        invoke('plugin:window|set_fullscreen', { fullscreen: isFullscreen });
+      });
       if (btnClose) btnClose.addEventListener('click', () => invoke('plugin:window|close'));
     }
   })();
@@ -38,10 +42,13 @@ window.PurePathApp = (function () {
 
     sidebar.addEventListener('mouseenter', () => {
       clearTimeout(hoverTimeout);
-      T.sidebarExpand(sidebar, labels);
+      hoverTimeout = setTimeout(() => {
+        T.sidebarExpand(sidebar, labels);
+      }, 150);
     });
 
     sidebar.addEventListener('mouseleave', () => {
+      clearTimeout(hoverTimeout);
       hoverTimeout = setTimeout(() => {
         T.sidebarCollapse(sidebar, labels);
       }, 100);
