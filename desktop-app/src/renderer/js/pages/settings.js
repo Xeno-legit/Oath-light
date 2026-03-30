@@ -34,7 +34,7 @@ window.PurePathPages.settings = (function () {
           <div class="account-avatar">PP</div>
           <div class="account-info">
             <h3>Pure Path User</h3>
-            <p>user@purepath.app · Premium Plan</p>
+            <p>user@purepath.app</p>
           </div>
         </div>
 
@@ -181,7 +181,7 @@ window.PurePathPages.settings = (function () {
     });
   }
 
-  function destroy() {}
+  function destroy() { }
 
   return { render, init, destroy };
 })();
