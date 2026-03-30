@@ -30,7 +30,7 @@ Pure Path is built on the principle of accessible protection. This application i
 ## Development Status
 
 ### Phase 1: Browser Extension (Completed)
-- Implementation of core blocking logic (Domain/Keyword).
+- Implementation of core smart blocking logic.
 - Password protection for extension settings.
 - Manifest V3 compliance.
 - Basic statistics tracking.
