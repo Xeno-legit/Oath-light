@@ -2,6 +2,9 @@
 
 Pure Path is a comprehensive content filtering system designed to block NSFW content and promote personal productivity. It consists of a browser extension for real-time traffic monitoring and a desktop application for persistent protection and system-level enforcement.
 
+![Pure Path Demonstration](Demogif.gif)
+
+
 ## Core Philosophy
 
 Pure Path is built on the principle of accessible protection. This application is free and open-source. It will never feature paid subscriptions, premium tiers, or locked features. The goal is to provide a robust tool for anyone seeking to improve their digital environment without financial barriers.
@@ -26,6 +29,22 @@ Pure Path is built on the principle of accessible protection. This application i
 - **Progress Tracking**: Monitors statistics such as total blocked attempts and days of protection.
 - **Mentor Dashboard**: (Phase 2) A dedicated interface for goal setting and productivity prompts.
 - **Themes & Customization**: Extensible theme system and configurable blocklists.
+
+### Feature Comparison
+
+The following table compares the protection layers of Pure Path against typical industry standards:
+
+| Capability | Standard Filters | Pure Path |
+| :--- | :---: | :---: |
+| Domain & Keyword Blocking | Yes | Yes |
+| Browser Password Protection | Partial | Yes |
+| 100% Free / No Subscriptions | No | Yes |
+| Search Engine SafeSearch Enforcement | No | Yes |
+| Leet Speak Normalization | No | Yes |
+| Desktop-Level Process Watchdog | No | Yes |
+| High-Friction Uninstall Protection | No | Yes |
+| Native Messaging Bridge | No | Yes |
+
 
 ## Development Status
 
