@@ -8,7 +8,7 @@ let stats = { totalBlocks: 0 };
 let isDataLoaded = false; // Track if data is loaded
 
 // Debug mode flag
-const DEBUG = true;
+const DEBUG = false;
 
 function debugLog(category, message, data = null) {
   if (!DEBUG) return;
@@ -308,9 +308,9 @@ domainSearch.addEventListener('input', (e) => {
         <span class="result-icon">❌</span>
         <div style="flex: 1;">
           <div class="result-text">No matches found</div>
-          <div class="result-detail"><strong>${cleanSearch}</strong> is not in the blocklist</div>
+          <div class="result-detail"><strong>${cleanSearch.replace(/[<>"'&]/g, '')}</strong> is not in the blocklist</div>
           <div class="result-detail" style="margin-top: 4px; font-size: 12px;">
-            <button onclick="document.getElementById('addDomainBtn').click(); document.getElementById('domainInput').value='${cleanSearch}';" 
+            <button class="add-from-search-btn" data-type="domain" data-value="${cleanSearch.replace(/["'\\]/g, '')}"
                     style="background: #4dabf7; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; margin-top: 4px;">
               + Add to blocklist
             </button>
@@ -410,9 +410,9 @@ keywordSearch.addEventListener('input', (e) => {
         <span class="result-icon">❌</span>
         <div style="flex: 1;">
           <div class="result-text">No matches found</div>
-          <div class="result-detail"><strong>${searchTerm}</strong> is not in the blocklist</div>
+          <div class="result-detail"><strong>${searchTerm.replace(/[<>"'&]/g, '')}</strong> is not in the blocklist</div>
           <div class="result-detail" style="margin-top: 4px; font-size: 12px;">
-            <button onclick="document.getElementById('addKeywordBtn').click(); document.getElementById('keywordInput').value='${searchTerm}';" 
+            <button class="add-from-search-btn" data-type="keyword" data-value="${searchTerm.replace(/["'\\]/g, '')}"
                     style="background: #7b1fa2; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; margin-top: 4px;">
               + Add to blocklist
             </button>
@@ -711,5 +711,24 @@ keywordInput.addEventListener('keypress', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
     saveKeywordBtn.click();
+  }
+});
+
+// ============================================================================
+// DELEGATED CLICK HANDLER — replaces inline onclick (XSS-safe)
+// ============================================================================
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.add-from-search-btn');
+  if (!btn) return;
+  
+  const type = btn.dataset.type;
+  const value = btn.dataset.value;
+  
+  if (type === 'domain') {
+    document.getElementById('addDomainBtn').click();
+    document.getElementById('domainInput').value = value;
+  } else if (type === 'keyword') {
+    document.getElementById('addKeywordBtn').click();
+    document.getElementById('keywordInput').value = value;
   }
 });

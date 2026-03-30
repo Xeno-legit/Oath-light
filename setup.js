@@ -1,9 +1,23 @@
 // Setup page script
-async function hashPassword(password) {
+
+// Generate a random salt
+function generateSalt() {
+  const array = new Uint8Array(16);
+  crypto.getRandomValues(array);
+  return Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Hash password with PBKDF2 + salt for proper security
+async function hashPassword(password, salt) {
   const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']
+  );
+  const derivedBits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: encoder.encode(salt), iterations: 100000, hash: 'SHA-256' },
+    keyMaterial, 256
+  );
+  const hashArray = Array.from(new Uint8Array(derivedBits));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
@@ -40,12 +54,14 @@ setupBtn.addEventListener('click', async () => {
     return;
   }
   
-  // Hash password
-  const hash = await hashPassword(password);
+  // Generate salt and hash password with PBKDF2
+  const salt = generateSalt();
+  const hash = await hashPassword(password, salt);
   
-  // Save to storage
+  // Save to storage (salt stored alongside hash)
   chrome.storage.local.set({
     passwordHash: hash,
+    passwordSalt: salt,
     userGoal: goal,
     setupComplete: true,
     stats: {
