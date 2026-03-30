@@ -4,3 +4,4 @@
 fn main() {
   app_lib::run();
 }
+// Forced rebuild to apply new icon
