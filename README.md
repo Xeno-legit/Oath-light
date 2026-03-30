@@ -87,4 +87,4 @@ This project is licensed under the GNU General Public License v3.0. See the LICE
 
 ---
 
-Pure Path is maintained by [Xeno-legit](https://github.com/Xeno-legit).
+Pure Path is founded and maintained by [Xeno-legit](https://github.com/Xeno-legit).
