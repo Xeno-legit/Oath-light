@@ -49,7 +49,7 @@ The following table compares the protection layers of Pure Path against typical 
 ## Development Status
 
 ### Phase 1: Browser Extension (Completed)
-- Implementation of core blocking logic (Domain/Keyword).
+- Implementation of core smart blocking logic.
 - Password protection for extension settings.
 - Manifest V3 compliance.
 - Basic statistics tracking.
@@ -106,4 +106,4 @@ This project is licensed under the GNU General Public License v3.0. See the LICE
 
 ---
 
-Pure Path is maintained by [Xeno-legit](https://github.com/Xeno-legit).
+Pure Path is founded and maintained by [Xeno-legit](https://github.com/Xeno-legit).
