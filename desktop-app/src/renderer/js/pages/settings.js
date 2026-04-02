@@ -157,8 +157,8 @@ window.PurePathPages.settings = (function () {
 
         <!-- App Info -->
         <div class="glass-card-static" id="settings-info" style="text-align: center; padding: 24px;">
-          <p class="text-muted" style="font-size: 13px;">Pure Path Desktop v1.0.0</p>
-          <p class="text-muted" style="font-size: 12px; margin-top: 4px;">© 2026 Pure Path. Built with 💜 for your clarity.</p>
+          <p class="text-muted" style="font-size: 13px;">Pure Path Desktop v2.3.5</p>
+          <p class="text-muted" style="font-size: 12px; margin-top: 4px;">© 2026 Pure Path. Built with love for your clarity.</p>
         </div>
       </div>
     `;

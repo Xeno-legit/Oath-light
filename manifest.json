@@ -3,10 +3,12 @@
   "name": "Pure Path - Content Filter",
   "version": "1.7.4",
   "description": "A content filtering system to help you stay focused on personal growth",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArLvuu+z+MXsH2p/XUmSlbYco75ZLy0xUmvEEkMNsn7tTA1oa52KsPypIVPJCg3t5ROgekzyazC3EfIHPCajVApJYVT7riuMfSw68lt1WO9XWOYfTpzSZ1jWxYBqSUjra+RiA4oK44LCusarvt1FXxBNdr3YM/3bYAgzBjo/xsm5UVzAeVklySSl+jI8rmPg47XtHRLVmZTNGX7Hf9E+gRdqx2F/joeIJnm/WTRE+OBPehNxRoglmnxq7NrFQoVY3htsNESz8B1ERxNK540AcCrxy6mMBFupkslBYYLVEsUI9KOdJmQVpLgRb4JensFL3PL8mmQLQgkpz79VbzzQcSQIDAQAB",
   "permissions": [
     "storage",
     "tabs",
-    "webNavigation"
+    "webNavigation",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "<all_urls>"

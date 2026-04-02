@@ -5,12 +5,18 @@ let blocklistDomains = [];
 let blocklistKeywords = [];
 let blocklistSet = new Set(); // O(1) domain lookup
 
+let defaultDomains = [];
+let defaultKeywords = [];
+
 // Deduplication map: tabId -> last checked URL (prevents triple-firing)
 const tabLastChecked = new Map();
 
 // Initialize extension
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('Pure Path installed');
+
+  // Load defaults into memory for sync reference
+  await loadDefaultListsIntoMemory();
 
   // On first install or update, load blocklists from JSON and save to storage
   if (details.reason === 'install' || details.reason === 'update') {
@@ -37,20 +43,32 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 // Load blocklists on startup
 chrome.runtime.onStartup.addListener(async () => {
   console.log('Pure Path starting up');
+  await loadDefaultListsIntoMemory();
   await loadBlocklistsFromStorage();
 });
+
+// Cache default lists into variables to send to Desktop app
+async function loadDefaultListsIntoMemory() {
+  try {
+    const dRes = await fetch(chrome.runtime.getURL('blocklists/domains.json'));
+    const dData = await dRes.json();
+    defaultDomains = dData.domains || [];
+
+    const kRes = await fetch(chrome.runtime.getURL('blocklists/keywords.json'));
+    const kData = await kRes.json();
+    defaultKeywords = kData.keywords || [];
+  } catch(e) {
+    console.error('❌ Error caching default lists:', e);
+  }
+}
 
 // Initialize blocklists from JSON files (only on install/update)
 async function initializeBlocklistsFromJSON() {
   try {
     console.log('📋 Pure Path: Initializing blocklists from JSON files...');
-    const domainsResponse = await fetch(chrome.runtime.getURL('blocklists/domains.json'));
-    const domainsData = await domainsResponse.json();
-    const domains = domainsData.domains || [];
-
-    const keywordsResponse = await fetch(chrome.runtime.getURL('blocklists/keywords.json'));
-    const keywordsData = await keywordsResponse.json();
-    const keywords = keywordsData.keywords || [];
+    // We can use the already loaded memory variables if present
+    const domains = defaultDomains.length > 0 ? defaultDomains : [];
+    const keywords = defaultKeywords.length > 0 ? defaultKeywords : [];
 
     // Save to storage
     await chrome.storage.local.set({
@@ -548,6 +566,23 @@ function checkSearchEngineQuery(url, hostname) {
     // Normalize leet speak in the query
     const normalizedQuery = normalizeLeetSpeak(lowerQuery);
 
+    // Check for custom user-added keywords first
+    for (const kw of blocklistKeywords) {
+      if (!kw) continue;
+      const lowerKw = kw.toLowerCase();
+      // Block if the custom keyword is inside the normalized search query
+      if (normalizedQuery.includes(lowerKw)) {
+        return {
+          blocked: true,
+          reason: isImageSearch ? 'search_images' : 'search_query',
+          match: kw,
+          query: query,
+          severity: 'explicit',
+          normalized: normalizedQuery
+        };
+      }
+    }
+
     // Check for hard porn keywords (immediate block) — word-boundary aware
     for (const { kw, regex } of HARD_KEYWORD_REGEXES) {
       if (regex.test(normalizedQuery)) {
@@ -713,6 +748,18 @@ function shouldBlockUrl(url) {
     }
 
     // ========================================================================
+    // STEP 4.5: Check custom user-added keywords in the full URL
+    // ========================================================================
+    for (const keyword of blocklistKeywords) {
+      if (!keyword) continue;
+      const lowerKw = keyword.toLowerCase();
+      // We check fullUrl to ensure paths/queries can also trigger custom keywords
+      if (fullUrl.includes(lowerKw)) {
+        return { blocked: true, reason: 'custom_keyword', match: keyword, tier: 'blacklist' };
+      }
+    }
+
+    // ========================================================================
     // STEP 5: Check GRAYLIST domains with basic monitoring
     // ========================================================================
     let isGraylist = false;
@@ -812,6 +859,11 @@ async function recordBlockAndRedirect(tabId, url, reason, match) {
   const blockedUrl = chrome.runtime.getURL('blocked.html') +
     `?reason=${reason}&match=${encodeURIComponent(match)}`;
   chrome.tabs.update(tabId, { url: blockedUrl });
+
+  // Notify desktop app of the new block (if connected)
+  if (typeof NativeMessagingBridge !== 'undefined') {
+    NativeMessagingBridge.sendStatsUpdate();
+  }
 }
 
 async function handleBlock(tabId, url) {
@@ -926,6 +978,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       } else {
         console.log('✅ Pure Path: Blocklists updated in storage');
         sendResponse({ success: true });
+        // Notify desktop app of the change
+        if (typeof NativeMessagingBridge !== 'undefined') {
+          NativeMessagingBridge.sendBlocklistUpdate();
+        }
       }
     });
     return true;
@@ -989,6 +1045,226 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return false;
 });
 
-// Remove the periodic reload since we're using storage now
-// Blocklists will persist and load automatically
+// ============================================================================
+// NATIVE MESSAGING BRIDGE — Desktop App Communication
+// Connects to Pure Path desktop companion via chrome.runtime.connectNative()
+// ============================================================================
 
+const NativeMessagingBridge = (function () {
+  const HOST_NAME = 'com.purepath.companion';
+  const HEARTBEAT_INTERVAL = 15000;  // 15 seconds — keeps connection alive
+  const SYNC_INTERVAL = 60000;       // 60 seconds — full data refresh
+  const MAX_RECONNECT_DELAY = 15000; // 15 seconds max backoff
+
+  let port = null;
+  let heartbeatTimer = null;
+  let syncTimer = null;
+  let reconnectDelay = 250;
+  let reconnectTimer = null;
+  let isConnected = false;
+
+  // ─── Connect to desktop app ────────────────────────────────────
+  function connect() {
+    try {
+      port = chrome.runtime.connectNative(HOST_NAME);
+
+      port.onMessage.addListener(handleMessage);
+
+      port.onDisconnect.addListener(() => {
+        const err = chrome.runtime.lastError;
+        console.log(`🔌 Native host disconnected${err ? ': ' + err.message : ''}`);
+        cleanup();
+        scheduleReconnect();
+      });
+
+      // Send handshake immediately
+      sendHandshake();
+
+      // Start periodic heartbeat and sync
+      heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL);
+      syncTimer = setInterval(sendFullSync, SYNC_INTERVAL);
+
+      isConnected = true;
+      reconnectDelay = 250; // Reset backoff on successful connect
+      console.log('🔗 Connected to Pure Path desktop app');
+    } catch (err) {
+      console.log('⚠️ Native messaging connect failed:', err.message);
+      scheduleReconnect();
+    }
+  }
+
+  // ─── Cleanup on disconnect ─────────────────────────────────────
+  function cleanup() {
+    isConnected = false;
+    port = null;
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    if (syncTimer) { clearInterval(syncTimer); syncTimer = null; }
+  }
+
+  // ─── Reconnect with exponential backoff ────────────────────────
+  function scheduleReconnect() {
+    if (reconnectTimer) return;
+    console.log(`🔄 Reconnecting in ${reconnectDelay / 1000}s...`);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+      connect();
+    }, reconnectDelay);
+  }
+
+  // ─── Send a message to the desktop app ─────────────────────────
+  function send(msg) {
+    if (!port || !isConnected) return false;
+    try {
+      port.postMessage(msg);
+      return true;
+    } catch (err) {
+      console.log('⚠️ Native send failed:', err.message);
+      return false;
+    }
+  }
+
+  // ─── Handshake ─────────────────────────────────────────────────
+  async function sendHandshake() {
+    const { stats } = await chrome.storage.local.get(['stats']);
+    send({
+      type: 'handshake',
+      extensionVersion: chrome.runtime.getManifest().version,
+      installDate: stats?.installDate || new Date().toISOString()
+    });
+    // Send full sync immediately — no delay
+    sendFullSync();
+  }
+
+  // ─── Heartbeat ─────────────────────────────────────────────────
+  function sendHeartbeat() {
+    send({
+      type: 'heartbeat',
+      timestamp: Date.now()
+    });
+  }
+
+  // ─── Full sync (stats + blocklists) ────────────────────────────
+  async function sendFullSync() {
+    // Send stats
+    const { stats } = await chrome.storage.local.get(['stats']);
+    if (stats) {
+      const installDate = stats.installDate ? new Date(stats.installDate) : new Date();
+      const daysProtected = Math.floor((Date.now() - installDate.getTime()) / (1000 * 60 * 60 * 24));
+      send({
+        type: 'stats_sync',
+        totalBlocks: stats.totalBlocks || 0,
+        installDate: stats.installDate || '',
+        lastBlockDate: stats.lastBlockDate || '',
+        daysProtected: daysProtected
+      });
+    }
+
+    // Send blocklists
+    const { blocklistDomains, blocklistKeywords } = await chrome.storage.local.get([
+      'blocklistDomains', 'blocklistKeywords'
+    ]);
+    send({
+      type: 'blocklist_sync',
+      domains: blocklistDomains || [],
+      keywords: blocklistKeywords || [],
+      domainCount: (blocklistDomains || []).length,
+      keywordCount: (blocklistKeywords || []).length,
+      builtInDomains: defaultDomains,
+      builtInKeywords: defaultKeywords
+    });
+  }
+
+  // ─── Incremental stats update (called after each block) ────────
+  async function sendStatsUpdate() {
+    const { stats } = await chrome.storage.local.get(['stats']);
+    if (stats) {
+      const installDate = stats.installDate ? new Date(stats.installDate) : new Date();
+      const daysProtected = Math.floor((Date.now() - installDate.getTime()) / (1000 * 60 * 60 * 24));
+      send({
+        type: 'stats_update',
+        totalBlocks: stats.totalBlocks || 0,
+        lastBlockDate: stats.lastBlockDate || '',
+        daysProtected: daysProtected
+      });
+    }
+  }
+
+  // ─── Blocklist change notification ─────────────────────────────
+  async function sendBlocklistUpdate() {
+    const { blocklistDomains, blocklistKeywords } = await chrome.storage.local.get([
+      'blocklistDomains', 'blocklistKeywords'
+    ]);
+    send({
+      type: 'blocklist_sync',
+      domains: blocklistDomains || [],
+      keywords: blocklistKeywords || [],
+      domainCount: (blocklistDomains || []).length,
+      keywordCount: (blocklistKeywords || []).length,
+      builtInDomains: defaultDomains,
+      builtInKeywords: defaultKeywords
+    });
+  }
+
+  // ─── Handle messages FROM the desktop app ──────────────────────
+  function handleMessage(msg) {
+    console.log('📩 Message from desktop app:', msg.type);
+
+    switch (msg.type) {
+      case 'ack':
+        console.log('✅ Desktop app acknowledged connection');
+        break;
+
+      case 'request_sync':
+        // Desktop app wants fresh data
+        sendFullSync();
+        break;
+
+      case 'update_blocklist':
+        // Desktop app pushed a blocklist change
+        handleBlocklistUpdate(msg);
+        break;
+
+      default:
+        console.log('❓ Unknown message from desktop:', msg.type);
+    }
+  }
+
+  // ─── Handle blocklist updates from desktop ─────────────────────
+  async function handleBlocklistUpdate(msg) {
+    const updates = {};
+
+    if (msg.listType === 'domains' && Array.isArray(msg.data)) {
+      updates.blocklistDomains = msg.data;
+      // Update in-memory blocklists
+      blocklistDomains = msg.data;
+      blocklistSet = new Set(msg.data.map(d => d.toLowerCase()));
+    } else if (msg.listType === 'keywords' && Array.isArray(msg.data)) {
+      updates.blocklistKeywords = msg.data;
+      blocklistKeywords = msg.data;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await chrome.storage.local.set(updates);
+      console.log('✅ Blocklist updated from desktop app:', msg.listType);
+    }
+  }
+
+  // ─── Public API ────────────────────────────────────────────────
+  return {
+    connect,
+    sendStatsUpdate,
+    sendBlocklistUpdate,
+    isConnected: () => isConnected
+  };
+})();
+
+// ─── Connect immediately on startup ─────────────────────────────
+NativeMessagingBridge.connect();
+
+// Also connect/reconnect when the extension is installed or updated
+chrome.runtime.onInstalled.addListener(() => {
+  // The main onInstalled listener (line 12) handles blocklist init.
+  // This ensures the native bridge connects after setup.
+  setTimeout(() => NativeMessagingBridge.connect(), 500);
+});

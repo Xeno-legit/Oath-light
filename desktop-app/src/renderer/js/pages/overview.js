@@ -1,6 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════
    Pure Path — Overview Page
    Main dashboard: status, stats, activity, quote, quick actions
+   Connected to extension via Native Messaging (Tauri commands + events)
    ═══════════════════════════════════════════════════════════════════ */
 
 window.PurePathPages = window.PurePathPages || {};
@@ -10,15 +11,22 @@ window.PurePathPages.overview = (function () {
 
   const T = window.PurePathTransitions;
 
-  /* ─── Data State (will come from Native Messaging later) ────────── */
-  const mockData = {
+  /* ─── Data State (populated from extension via Native Messaging) ── */
+  let liveData = {
     sitesBlocked: 0,
     daysProtected: 0,
     keywordsActive: 0,
     threatsToday: 0,
     weeklyActivity: [0, 0, 0, 0, 0, 0, 0],
     weekDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+    extensionConnected: false,
+    extensionVersion: '',
   };
+
+  // Event unlisten handles
+  let unlistenStats = null;
+  let unlistenStatus = null;
+  let unlistenBlocklist = null;
 
   const quotes = [
     { text: '"Discipline is choosing between what you want now and what you want most."', author: 'Abraham Lincoln' },
@@ -33,10 +41,117 @@ window.PurePathPages.overview = (function () {
     return quotes[Math.floor(Math.random() * quotes.length)];
   }
 
+  /* ─── Tauri Interop Helpers ─────────────────────────────────────── */
+  function invoke(cmd, args) {
+    if (window.__TAURI__ && window.__TAURI__.core) {
+      return window.__TAURI__.core.invoke(cmd, args);
+    }
+    return Promise.resolve(null);
+  }
+
+  function listen(event, handler) {
+    if (window.__TAURI__ && window.__TAURI__.event) {
+      return window.__TAURI__.event.listen(event, handler);
+    }
+    return Promise.resolve(() => {});
+  }
+
+  /* ─── Update UI Elements ────────────────────────────────────────── */
+  function updateStatsUI() {
+    const sitesEl = document.getElementById('stat-sites');
+    const daysEl = document.getElementById('stat-days');
+    const keywordsEl = document.getElementById('stat-keywords');
+
+    if (sitesEl) sitesEl.textContent = liveData.sitesBlocked.toLocaleString();
+    if (daysEl) daysEl.textContent = liveData.daysProtected.toLocaleString();
+    if (keywordsEl) keywordsEl.textContent = liveData.keywordsActive.toLocaleString();
+  }
+
+  function updateStatusUI() {
+    const badgeLabel = document.getElementById('overview-badge-label');
+    const statusTitle = document.getElementById('overview-status-title');
+    const statusSubtitle = document.getElementById('overview-status-subtitle');
+    const pulseDot = document.querySelector('#overview-banner .pulse-dot-inner');
+
+    if (liveData.extensionConnected) {
+      if (badgeLabel) badgeLabel.textContent = 'System Secure';
+      if (statusTitle) statusTitle.textContent = 'Protection Active';
+      if (statusSubtitle) statusSubtitle.textContent = `Extension v${liveData.extensionVersion || '?'} connected · All shields operational`;
+      if (pulseDot) pulseDot.style.background = 'var(--color-success, #22c55e)';
+    } else {
+      if (badgeLabel) badgeLabel.textContent = 'Extension Offline';
+      if (statusTitle) statusTitle.textContent = 'Waiting for Extension';
+      if (statusSubtitle) statusSubtitle.textContent = 'Open Chrome with Pure Path extension to sync';
+      if (pulseDot) pulseDot.style.background = 'var(--color-warning, #f59e0b)';
+    }
+  }
+
+  /* ─── Fetch initial data from Tauri backend ─────────────────────── */
+  async function fetchInitialData() {
+    try {
+      // Get stats
+      const stats = await invoke('get_extension_stats');
+      if (stats) {
+        liveData.sitesBlocked = stats.total_blocks || 0;
+        liveData.daysProtected = stats.days_protected || 0;
+      }
+
+      // Get blocklists (for keyword count)
+      const blocklists = await invoke('get_extension_blocklists');
+      if (blocklists) {
+        liveData.keywordsActive = blocklists.keyword_count || 0;
+      }
+
+      // Get connection status
+      const status = await invoke('get_extension_status');
+      if (status) {
+        liveData.extensionConnected = status.connected || false;
+        liveData.extensionVersion = status.extension_version || '';
+      }
+
+      updateStatsUI();
+      updateStatusUI();
+    } catch (err) {
+      console.log('Overview: Could not fetch initial data:', err);
+    }
+  }
+
+  /* ─── Subscribe to real-time events ─────────────────────────────── */
+  async function subscribeToEvents() {
+    // Stats updates (after each block)
+    unlistenStats = await listen('extension-stats', (event) => {
+      const stats = event.payload;
+      if (stats) {
+        liveData.sitesBlocked = stats.total_blocks || 0;
+        liveData.daysProtected = stats.days_protected || 0;
+        updateStatsUI();
+      }
+    });
+
+    // Connection status changes
+    unlistenStatus = await listen('extension-status', (event) => {
+      const status = event.payload;
+      if (status) {
+        liveData.extensionConnected = status.connected || false;
+        liveData.extensionVersion = status.extension_version || '';
+        updateStatusUI();
+      }
+    });
+
+    // Blocklist updates (for keyword count)
+    unlistenBlocklist = await listen('extension-blocklist', (event) => {
+      const bl = event.payload;
+      if (bl) {
+        liveData.keywordsActive = bl.keyword_count || 0;
+        updateStatsUI();
+      }
+    });
+  }
+
   /* ─── Render ───────────────────────────────────────────────────── */
   function render() {
     const q = getRandomQuote();
-    const maxActivity = Math.max(...mockData.weeklyActivity);
+    const maxActivity = Math.max(...liveData.weeklyActivity, 1);
 
     return `
       <!-- Status Banner -->
@@ -46,10 +161,10 @@ window.PurePathPages.overview = (function () {
             <div class="pulse-dot-ring"></div>
             <div class="pulse-dot-inner"></div>
           </div>
-          <span class="status-badge-label">System Secure</span>
+          <span class="status-badge-label" id="overview-badge-label">Connecting…</span>
         </div>
-        <h2 class="status-title">Protection Active</h2>
-        <p class="status-subtitle">Monitoring all traffic · All shields operational</p>
+        <h2 class="status-title" id="overview-status-title">Initializing</h2>
+        <p class="status-subtitle" id="overview-status-subtitle">Connecting to extension…</p>
       </div>
 
       <!-- Stats -->
@@ -82,12 +197,12 @@ window.PurePathPages.overview = (function () {
         <div class="section-title" style="margin-bottom: 4px;">Weekly Activity</div>
         <p class="text-muted" style="font-size: 13px; margin-bottom: 8px;">Blocked attempts this week</p>
         <div class="activity-chart">
-          ${mockData.weeklyActivity.map((val, i) =>
-            `<div class="activity-bar" style="height: ${(val / maxActivity) * 100}%;" title="${mockData.weekDays[i]}: ${val} blocked"></div>`
+          ${liveData.weeklyActivity.map((val, i) =>
+            `<div class="activity-bar" style="height: ${(val / maxActivity) * 100}%;" title="${liveData.weekDays[i]}: ${val} blocked"></div>`
           ).join('')}
         </div>
         <div class="activity-labels">
-          ${mockData.weekDays.map(d => `<span class="activity-label">${d}</span>`).join('')}
+          ${liveData.weekDays.map(d => `<span class="activity-label">${d}</span>`).join('')}
         </div>
       </div>
 
@@ -132,10 +247,10 @@ window.PurePathPages.overview = (function () {
 
   /* ─── Init (called after render) ───────────────────────────────── */
   function init() {
-    // Animate counters
-    T.animateCounter(document.getElementById('stat-sites'), mockData.sitesBlocked, 1.6);
-    T.animateCounter(document.getElementById('stat-days'), mockData.daysProtected, 1.2);
-    T.animateCounter(document.getElementById('stat-keywords'), mockData.keywordsActive, 1.4);
+    // Animate counters from 0 (they'll update when data arrives)
+    T.animateCounter(document.getElementById('stat-sites'), 0, 0.5);
+    T.animateCounter(document.getElementById('stat-days'), 0, 0.5);
+    T.animateCounter(document.getElementById('stat-keywords'), 0, 0.5);
 
     // Stagger cards entrance
     const cards = document.querySelectorAll('#page-overview .glass-card, #page-overview .quick-action-btn');
@@ -152,10 +267,17 @@ window.PurePathPages.overview = (function () {
         if (window.PurePathApp) window.PurePathApp.navigateTo('settings');
       });
     });
+
+    // Fetch data from Tauri backend and subscribe to events
+    fetchInitialData();
+    subscribeToEvents();
   }
 
   function destroy() {
-    // Cleanup if needed
+    // Cleanup event listeners
+    if (unlistenStats) { unlistenStats(); unlistenStats = null; }
+    if (unlistenStatus) { unlistenStatus(); unlistenStatus = null; }
+    if (unlistenBlocklist) { unlistenBlocklist(); unlistenBlocklist = null; }
   }
 
   return { render, init, destroy };

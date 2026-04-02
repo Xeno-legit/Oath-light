@@ -15,21 +15,21 @@ window.PurePathPages.themes = (function () {
     {
       id: 'electric-ether',
       name: 'Electric Ether',
-      description: 'The default state. Deep midnight blue meets ethereal violet.',
+      description: 'Deep midnight blue meets ethereal violet.',
       active: true,
       colors: ['#0A0E17', '#8B5CF6']
     },
     {
       id: 'midnight-void',
       name: 'Midnight Void',
-      description: 'Pure OLED black base for maximum contrast and battery saving.',
+      description: 'Deep black with a hint of blue.',
       active: false,
       colors: ['#000000', '#3B82F6']
     },
     {
       id: 'frost-light',
       name: 'Frost Light',
-      description: 'A clean, high-visibility light theme for bright environments.',
+      description: 'High-visibility light theme for bright environments, Creator favorite.',
       active: false,
       colors: ['#F1F5F9', '#7C3AED']
     }
@@ -37,6 +37,8 @@ window.PurePathPages.themes = (function () {
 
   /* ─── Render ───────────────────────────────────────────────────── */
   function render() {
+    const activeThemeId = window.PurePathThemeManager ? window.PurePathThemeManager.getActiveTheme() : 'electric-ether';
+
     return `
       <div class="mb-24">
         <h1 class="page-title">Appearance & Themes</h1>
@@ -44,20 +46,23 @@ window.PurePathPages.themes = (function () {
       </div>
 
       <div class="stats-row" id="themes-grid">
-        ${themesList.map(t => `
-          <div class="glass-card flex-col gap-16 theme-card" style="cursor: pointer; position: relative;">
-            ${t.active ? `
-              <div style="position: absolute; top: 12px; right: 12px; font-size: 11px; background: rgba(139, 92, 246, 0.2); color: var(--violet-light); padding: 4px 8px; border-radius: 12px; border: 1px solid var(--violet-glow);">
-                ACTIVE
-              </div>
-            ` : ''}
-            
-            <div style="height: 100px; border-radius: 12px; border: 1px solid var(--glass-border); background: linear-gradient(135deg, ${t.colors[0]}, ${t.colors[1]}); margin-bottom: 8px;"></div>
-            
-            <div class="section-title">${t.name}</div>
-            <p class="text-muted" style="font-size: 13px; line-height: 1.5;">${t.description}</p>
-          </div>
-        `).join('')}
+        ${themesList.map(t => {
+      const isActive = t.id === activeThemeId;
+      return `
+            <div class="glass-card flex-col gap-16 theme-card" data-theme-id="${t.id}" style="cursor: pointer; position: relative; border-color: ${isActive ? 'var(--violet)' : 'var(--glass-border)'}">
+              ${isActive ? `
+                <div style="position: absolute; top: 16px; right: 16px; width: 22px; height: 22px; font-size: 11px; font-weight: bold; background: var(--violet); color: white; border-radius: 50%; z-index: 10; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px var(--violet-glow); border: 2px solid var(--bg-surface);">
+                  ✔
+                </div>
+              ` : ''}
+              
+              <div style="height: 100px; border-radius: 12px; border: 1px solid var(--glass-border); background: linear-gradient(135deg, ${t.colors[0]}, ${t.colors[1]}); margin-bottom: 8px;"></div>
+              
+              <div class="section-title">${t.name}</div>
+              <p class="text-muted" style="font-size: 13px; line-height: 1.5;">${t.description}</p>
+            </div>
+          `;
+    }).join('')}
       </div>
 
       <div class="glass-card mt-24">
@@ -68,7 +73,7 @@ window.PurePathPages.themes = (function () {
             <div style="font-size: 13px; color: var(--frost-muted); margin-top: 4px;">Enable the interactive WebGL fluid background.</div>
           </div>
           <label class="toggle">
-            <input type="checkbox" checked>
+            <input type="checkbox" id="fluid-anim-toggle" ${localStorage.getItem('purepath_fluid_enabled') !== 'false' ? 'checked' : ''}>
             <div class="toggle-slider"></div>
           </label>
         </div>
@@ -82,16 +87,36 @@ window.PurePathPages.themes = (function () {
     const cards = document.querySelectorAll('#page-themes .glass-card');
     T.staggerCards(cards, 0.1);
 
-    // Placeholder interactivity
+    // Apply theme logic
     document.querySelectorAll('.theme-card').forEach(card => {
       card.addEventListener('click', () => {
-         // Future: apply theme logic here
-         T.scalePop(card);
+        const themeId = card.getAttribute('data-theme-id');
+        if (window.PurePathThemeManager) {
+          window.PurePathThemeManager.setTheme(themeId).then(() => {
+            // Re-render local block after storage is definitely updated
+            const container = document.getElementById('page-themes');
+            if (container) {
+              container.innerHTML = render();
+              init();
+            }
+          });
+        }
+        T.scalePop(card);
       });
     });
+
+    // Animation Toggle
+    const fluidToggle = document.getElementById('fluid-anim-toggle');
+    if (fluidToggle) {
+      fluidToggle.addEventListener('change', (e) => {
+        window.dispatchEvent(new CustomEvent('fluidAnimationToggled', {
+          detail: { enabled: e.target.checked }
+        }));
+      });
+    }
   }
 
-  function destroy() {}
+  function destroy() { }
 
   return { render, init, destroy };
 })();
