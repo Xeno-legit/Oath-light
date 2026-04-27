@@ -1,0 +1,17 @@
+{
+	"mcpServers": {
+		"puppeteer": {
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"npx",
+				"-y",
+				"@modelcontextprotocol/server-puppeteer"
+			],
+			"alwaysAllow": [
+				"puppeteer_navigate",
+				"puppeteer_evaluate"
+			]
+		}
+	}
+}
