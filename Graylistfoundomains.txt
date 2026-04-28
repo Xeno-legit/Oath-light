@@ -178,3 +178,123 @@ NOTES
 - Some domains may already exist in the main blocklist with subdomains
 - Shorteners cannot be effectively blocked without collateral damage
 ================================================================================
+
+================================================================================
+REFINED FILTER ANALYSIS: RELIABILITY OF BUILT-IN NSFW FILTERS
+================================================================================
+
+[RELIABLE FILTERS]
+-- Robust site-wide Safe Search, Blur features, or Age-Gates that work consistently --
+- archiveofourown.org
+- bluesky.social
+- bsky.app
+- dailymotion.com
+- deviantart.com
+- furaffinity.net
+- gumroad.com
+- newgrounds.com
+- nexusmods.com
+- patreon.com
+- pixiv.net
+- reddit.com
+- tumblr.com
+- twitter.com
+- vimeo.com
+- x.com
+
+[NOT SO RELIABLE FILTERS]
+-- Filters exist but are easily bypassed, depend on user tagging, or require manual blacklisting --
+- bitchute.com
+- buymeacoffee.com
+- cohost.org
+- disboard.org
+- discadia.com
+- discord.com
+- discord.gg
+- discord.me
+- discordlist.io
+- fanfiction.net
+- fosstodon.org
+- gab.com
+- gamebanana.com
+- inkbunny.net
+- itaku.ee
+- ko-fi.com
+- koo.app
+- mas.to
+- mastodon.online
+- mastodon.social
+- mewe.com
+- minds.com
+- mstdn.social
+- odysee.com
+- parler.com
+- pillowfort.io
+- rumble.com
+- snapchat.com
+- sofurry.com
+- speakbits.com
+- subscribestar.com
+- t.me
+- techhub.social
+- telegram.org
+- top.gg
+
+[NO FILTERS AT ALL]
+-- Zero content moderation for NSFW, or pure file/chat hosts with no filtering interface --
+- 420chan.org
+- 4chan.org
+- 7chan.org
+- 8kun.top
+- baraag.net
+- bazoocam.org
+- bit.ly
+- camgo.com
+- catbox.moe
+- chathub.cam
+- chatroulette.com
+- chyoa.com
+- coomeet.me
+- danbooru.donmai.us
+- dirtyroulette.com
+- e621.net
+- endchan.net
+- f95zone.to
+- files.catbox.moe
+- gelbooru.com
+- gfycat.com
+- imagebam.com
+- imagevenue.com
+- imgur.com
+- kik.com
+- konachan.com
+- lainchan.org
+- lewdrg.com
+- literotica.com
+- litterbox.catbox.moe
+- loverslab.com
+- ome.tv
+- omegle.com
+- pawoo.net
+- poa.st
+- pomf.cat
+- postimg.cc
+- redgifs.com
+- rule34.paheal.net
+- rule34.xxx
+- safebooru.donmai.us
+- shagle.com
+- shorturl.at
+- strangercam.com
+- streamable.com
+- subscribestar.adult
+- t.ly
+- tbib.org
+- tinyurl.com
+- uguu.se
+- whatsapp.com
+- wizchan.org
+- writing.com
+- yande.re
+
+================================================================================
