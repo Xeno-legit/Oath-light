@@ -8,7 +8,9 @@
     "storage",
     "tabs",
     "webNavigation",
-    "nativeMessaging"
+    "nativeMessaging",
+    "cookies",
+    "unlimitedStorage"
   ],
   "host_permissions": [
     "<all_urls>"

@@ -6,8 +6,9 @@ let blocklistSet = new Set(); // O(1) domain lookup
 
 let defaultDomains = [];
 
-// Deduplication map: tabId -> last checked URL (prevents triple-firing)
+// Deduplication maps: prevents multi-firing stats while allowing re-blocks
 const tabLastChecked = new Map();
+const tabLastCheckedTime = new Map();
 
 // Initialize extension
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -60,14 +61,23 @@ async function loadDefaultListsIntoMemory() {
 async function initializeBlocklistsFromJSON() {
   try {
     console.log('📋 Pure Path: Initializing blocklists from JSON files...');
-    const domains = defaultDomains.length > 0 ? defaultDomains : [];
+    
+    // Ensure we have default domains loaded
+    if (!defaultDomains || defaultDomains.length === 0) {
+      console.log('🔄 defaultDomains empty, fetching now...');
+      await loadDefaultListsIntoMemory();
+    }
+    
+    if (!defaultDomains || defaultDomains.length === 0) {
+      throw new Error('Could not load domains from JSON file');
+    }
 
     // Save to storage
     await chrome.storage.local.set({
-      blocklistDomains: domains
+      blocklistDomains: defaultDomains
     });
 
-    console.log(`✅ Pure Path: Initialized ${domains.length} domains in storage`);
+    console.log(`✅ Pure Path: Initialized ${defaultDomains.length} domains in storage`);
   } catch (error) {
     console.error('❌ Pure Path: Error initializing blocklists from JSON:', error);
   }
@@ -79,16 +89,31 @@ async function loadBlocklistsFromStorage() {
     console.log('📋 Pure Path: Loading blocklists from storage...');
     const result = await chrome.storage.local.get(['blocklistDomains']);
 
-    if (result.blocklistDomains) {
+    if (result.blocklistDomains && result.blocklistDomains.length > 0) {
       blocklistDomains = result.blocklistDomains;
-      // Build the Set for O(1) lookups
-      blocklistSet = new Set(blocklistDomains.map(d => d.toLowerCase()));
+      // Build the Set for O(1) lookups — more memory efficient for-loop
+      blocklistSet = new Set();
+      for (let i = 0; i < blocklistDomains.length; i++) {
+        blocklistSet.add(blocklistDomains[i].toLowerCase());
+      }
       console.log(`✅ Pure Path: Loaded ${blocklistDomains.length} domains from storage`);
     } else {
       // If not in storage, initialize from JSON
-      console.log('⚠️ Pure Path: Blocklists not found in storage, initializing from JSON...');
+      console.log('⚠️ Pure Path: Blocklists empty or not found in storage, initializing from JSON...');
       await initializeBlocklistsFromJSON();
-      await loadBlocklistsFromStorage(); // Reload after initialization
+      
+      // Load again after initialization
+      const retryResult = await chrome.storage.local.get(['blocklistDomains']);
+      if (retryResult.blocklistDomains && retryResult.blocklistDomains.length > 0) {
+          blocklistDomains = retryResult.blocklistDomains;
+          blocklistSet = new Set();
+          for (let i = 0; i < blocklistDomains.length; i++) {
+            blocklistSet.add(blocklistDomains[i].toLowerCase());
+          }
+          console.log(`✅ Pure Path: Successfully initialized ${blocklistDomains.length} domains`);
+      } else {
+          console.error('❌ Pure Path: Failed to load blocklists even after initialization');
+      }
     }
   } catch (error) {
     console.error('❌ Pure Path: Error loading blocklists from storage:', error);
@@ -282,6 +307,109 @@ function checkSearchEngineSafeSearch(url, hostname) {
 }
 
 // ============================================================================
+// GRAYLIST ENFORCEMENT — Cookies & URL rewrites for gray-area domains
+// Forces maximum restriction on sites that have NSFW filters.
+// ============================================================================
+
+// Pre-built Map: base domain → array of cookie configs (O(1) lookup)
+const GRAYLIST_COOKIE_MAP = new Map([
+  ['reddit.com', [
+    { domain: 'reddit.com',  name: 'over18', value: '0', path: '/' },
+    { domain: '.reddit.com', name: 'over18', value: '0', path: '/' }
+  ]],
+  ['pixiv.net', [
+    { domain: 'pixiv.net',  name: 'R18', value: '0', path: '/' },
+    { domain: '.pixiv.net', name: 'R18', value: '0', path: '/' }
+  ]],
+  ['twitter.com', [
+    { domain: 'twitter.com',  name: 'sensitive_content_flag', value: 'false', path: '/' },
+    { domain: '.twitter.com', name: 'sensitive_content_flag', value: 'false', path: '/' }
+  ]],
+  ['x.com', [
+    { domain: 'x.com',  name: 'sensitive_content_flag', value: 'false', path: '/' },
+    { domain: '.x.com', name: 'sensitive_content_flag', value: 'false', path: '/' }
+  ]]
+]);
+
+// Pre-built Map: base domain → enforce(urlObj) function
+const GRAYLIST_URL_REWRITE_MAP = new Map([
+  ['archiveofourown.org', (urlObj) => {
+    const p = urlObj.pathname;
+    if (p.includes('/works') || p.includes('/tags') || p.includes('/search')) {
+      let changed = false;
+      const params = urlObj.searchParams;
+      if (!params.getAll('work_search[excl_tag_names][]').includes('Explicit')) {
+        params.append('work_search[excl_tag_names][]', 'Explicit');
+        changed = true;
+      }
+      if (!params.getAll('work_search[excl_tag_names][]').includes('Mature')) {
+        params.append('work_search[excl_tag_names][]', 'Mature');
+        changed = true;
+      }
+      return changed ? urlObj.toString() : null;
+    }
+    return null;
+  }],
+  ['dailymotion.com', (urlObj) => {
+    if (urlObj.searchParams.get('family_filter') !== 'true') {
+      urlObj.searchParams.set('family_filter', 'true');
+      return urlObj.toString();
+    }
+    return null;
+  }]
+]);
+
+// Fast set of all graylist domains that need any enforcement
+const GRAYLIST_ENFORCE_DOMAINS = new Set([
+  ...GRAYLIST_COOKIE_MAP.keys(),
+  ...GRAYLIST_URL_REWRITE_MAP.keys()
+]);
+
+// Match hostname to a graylist enforcement domain (or null)
+function matchGraylistEnforceDomain(hostname) {
+  if (GRAYLIST_ENFORCE_DOMAINS.has(hostname)) return hostname;
+  const parts = hostname.split('.');
+  for (let i = 1; i < parts.length - 1; i++) {
+    const parent = parts.slice(i).join('.');
+    if (GRAYLIST_ENFORCE_DOMAINS.has(parent)) return parent;
+  }
+  return null;
+}
+
+// Set restrictive cookies — only called for matching domains
+async function enforceGraylistCookies(baseDomain) {
+  const cookies = GRAYLIST_COOKIE_MAP.get(baseDomain);
+  if (!cookies) return;
+  for (const cookie of cookies) {
+    const cleanDomain = cookie.domain.replace(/^\./, '');
+    try {
+      await chrome.cookies.set({
+        url: `https://${cleanDomain}`,
+        name: cookie.name,
+        value: cookie.value,
+        domain: cookie.domain,
+        path: cookie.path,
+        secure: true,
+        sameSite: 'lax'
+      });
+    } catch (e) {
+      // chrome.cookies may not be available
+    }
+  }
+}
+
+// Rewrite URL with safe-mode params — only called for matching domains
+function enforceGraylistUrlRewrite(url, baseDomain) {
+  const enforce = GRAYLIST_URL_REWRITE_MAP.get(baseDomain);
+  if (!enforce) return null;
+  try {
+    return enforce(new URL(url));
+  } catch (_) {
+    return null;
+  }
+}
+
+// ============================================================================
 // URL BLOCKING LOGIC — Domain-only blocking
 // ============================================================================
 
@@ -303,26 +431,26 @@ function shouldBlockUrl(url) {
     // ========================================================================
     for (const whitelistDomain of WHITELIST_DOMAINS) {
       if (hostname === whitelistDomain || hostname.endsWith('.' + whitelistDomain)) {
-        return { blocked: false, tier: 'whitelist' };
+        return { blocked: false, tier: 'whitelist', hostname };
       }
     }
 
     // ========================================================================
     // STEP 3: Check BLACKLIST (explicit NSFW domains from blocklist)
     // ========================================================================
-    // O(1) Set lookup for exact match
-    if (blocklistSet.has(hostname)) {
-      return { blocked: true, reason: 'blacklist_domain', match: hostname, tier: 'blacklist' };
+    if (!blocklistSet || blocklistSet.size === 0) {
+      return { blocked: false, tier: 'unknown', hostname };
     }
-    // Check subdomain matches (e.g., sub.pornhub.com)
-    for (const domain of blocklistSet) {
-      if (hostname.endsWith('.' + domain)) {
-        return { blocked: true, reason: 'blacklist_domain', match: domain, tier: 'blacklist' };
+
+    const parts = hostname.split('.');
+    for (let i = 0; i < parts.length - 1; i++) {
+      const domainToCheck = parts.slice(i).join('.');
+      if (blocklistSet.has(domainToCheck)) {
+        return { blocked: true, reason: 'blacklist_domain', match: domainToCheck, tier: 'blacklist', hostname };
       }
     }
 
-    // Allow if not in blocklist
-    return { blocked: false, tier: 'unknown' };
+    return { blocked: false, tier: 'unknown', hostname };
 
   } catch (error) {
     console.error('❌ Error checking URL:', error);
@@ -343,25 +471,40 @@ function isIgnoredUrl(url) {
 }
 
 async function recordBlockAndRedirect(tabId, url, reason, match) {
-  // Deduplicate: skip if we already checked this exact URL for this tab
-  if (tabLastChecked.get(tabId) === url) return;
-  tabLastChecked.set(tabId, url);
+  const lastUrl = tabLastChecked.get(tabId);
+  const lastTime = tabLastCheckedTime.get(tabId) || 0;
+  const now = Date.now();
 
-  // Atomically increment stats from storage (avoids MV3 service worker race)
-  const { stats: s } = await chrome.storage.local.get(['stats']);
-  const updatedStats = s || { totalBlocks: 0, installDate: new Date().toISOString() };
-  updatedStats.totalBlocks = (updatedStats.totalBlocks || 0) + 1;
-  updatedStats.lastBlockDate = new Date().toISOString();
-  await chrome.storage.local.set({ stats: updatedStats });
+  // Deduplicate stats: skip if same URL within 2 seconds
+  const isDuplicateStat = (lastUrl === url && (now - lastTime) < 2000);
 
-  // Redirect to blocked page — pass reason/match but NOT the original URL
-  const blockedUrl = chrome.runtime.getURL('blocked.html') +
-    `?reason=${reason}&match=${encodeURIComponent(match)}`;
-  chrome.tabs.update(tabId, { url: blockedUrl });
+  if (!isDuplicateStat) {
+    tabLastChecked.set(tabId, url);
+    tabLastCheckedTime.set(tabId, now);
 
-  // Notify desktop app of the new block (if connected)
-  if (typeof NativeMessagingBridge !== 'undefined') {
-    NativeMessagingBridge.sendStatsUpdate();
+    const { stats: s } = await chrome.storage.local.get(['stats']);
+    const updatedStats = s || { totalBlocks: 0, installDate: new Date().toISOString() };
+    updatedStats.totalBlocks = (updatedStats.totalBlocks || 0) + 1;
+    updatedStats.lastBlockDate = new Date().toISOString();
+    await chrome.storage.local.set({ stats: updatedStats });
+
+    if (typeof NativeMessagingBridge !== 'undefined') {
+      NativeMessagingBridge.sendStatsUpdate();
+    }
+  }
+
+  const blockedPrefix = chrome.runtime.getURL('blocked.html');
+  if (url.startsWith(blockedPrefix)) return;
+
+  const blockedUrl = blockedPrefix + `?reason=${reason}&match=${encodeURIComponent(match)}`;
+  
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab && !tab.url.startsWith(blockedPrefix)) {
+      await chrome.tabs.update(tabId, { url: blockedUrl });
+    }
+  } catch (e) {
+    chrome.tabs.update(tabId, { url: blockedUrl }).catch(() => {});
   }
 }
 
@@ -380,14 +523,33 @@ async function handleBlock(tabId, url) {
     return;
   }
 
-  if (!result || !result.blocked) return;
+  if (!result || !result.blocked) {
+    // Not blocked — check if this is a graylist enforcement domain
+    // Reuse hostname from shouldBlockUrl result to avoid re-parsing
+    const hn = result?.hostname;
+    if (hn) {
+      const baseDomain = matchGraylistEnforceDomain(hn);
+      if (baseDomain) {
+        // Set restrictive cookies (fire-and-forget)
+        enforceGraylistCookies(baseDomain);
+        // Rewrite URL with safe-mode params
+        const rewrittenUrl = enforceGraylistUrlRewrite(url, baseDomain);
+        if (rewrittenUrl && rewrittenUrl !== url) {
+          console.log(`🔒 Graylist URL rewrite: ${baseDomain}`);
+          chrome.tabs.update(tabId, { url: rewrittenUrl });
+        }
+      }
+    }
+    return;
+  }
 
   await recordBlockAndRedirect(tabId, url, result.reason, result.match);
 }
 
-// Clean up dedup map when tabs close
+// Clean up dedup maps when tabs close
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabLastChecked.delete(tabId);
+  tabLastCheckedTime.delete(tabId);
 });
 
 // Handle web requests (main navigation)

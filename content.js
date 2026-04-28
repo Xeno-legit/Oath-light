@@ -33,18 +33,13 @@
     style.id = 'pure-path-safesearch-lock';
     style.textContent = `
       /* ===== GOOGLE ===== */
-      /* SafeSearch button/toggle in search settings */
       #base_safesearch_button,
       [data-safesearch-toggle],
       [jscontroller][data-safesearch],
-      /* SafeSearch menu items */
       g-menu-item:has([data-safesearch]),
-      /* Search settings link that leads to SafeSearch config page */
       a[href*="safesearch"],
-      /* Google settings gear -> SafeSearch option */
       [data-a11y-title*="SafeSearch"],
       [aria-label*="SafeSearch"],
-      /* Google Images/Video SafeSearch controls */
       [data-enable-safesearch-toggle],
       .safesearch-toggle,
       #safesearch-toggle {
@@ -93,16 +88,485 @@
   }
   
   // ============================================================================
+  // GRAYLIST FILTER ENFORCEMENT
+  // Hides NSFW settings UI and force-blocks NSFW content on gray-area domains.
+  // Users cannot re-enable NSFW content; clicking hidden areas shows a popup.
+  // ============================================================================
+
+  // ── Shared CSS blocks (DRY) ─────────────────────────────────────
+  const MASTODON_HIDE_UI = `
+    label:has(input[name*="sensitive"]), [class*="sensitive-toggle"],
+    div[class*="setting"]:has([class*="media"]):has([class*="sensitive"]),
+    label:has(input[name*="display_media"]),
+    .column-settings__row:has([name*="other"]),
+    button[class*="show-filter"]
+  `;
+  const MASTODON_HIDE_CONTENT = `
+    [class*="sensitive-content"],
+    div[class*="media-gallery"]:has([class*="sensitive"]),
+    div[class*="spoiler-button"]
+  `;
+  const DISCORD_DIR_UI = `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"], input[name*="nsfw"]`;
+  const DISCORD_DIR_CONTENT = `[class*="nsfw-server"], div:has([class*="nsfw-badge"])`;
+
+  // Domain → { hideUI, hideContent, rawCSS (optional — injected verbatim) }
+  // Only entries that actually DO something are included.
+  const GRAYLIST_FILTERS = {
+    // ── RELIABLE FILTERS ────────────────────────────────────────────
+    'reddit.com': {
+      hideUI: `
+        label:has(input[name*="mature"]), label:has(input[name*="over18"]),
+        [data-testid="feed-settings-mature"], [class*="nsfw-toggle"],
+        div[class*="Setting"]:has([class*="nsfw"])
+      `,
+      hideContent: `
+        .nsfw-image, .prompt-18plus,
+        shreddit-post[nsfw], shreddit-post[over18],
+        div[data-testid="post-container"]:has(.nsfw-stamp),
+        .thing.over18, .listing-item:has(.nsfw-icon)
+      `
+    },
+    'twitter.com': {
+      hideUI: `
+        a[href="/settings/content_you_see"], a[href*="content_you_see"],
+        div[role="listitem"]:has(a[href*="content_you_see"]),
+        [data-testid="settingsContentYouSee"],
+        div[role="group"]:has(input[name*="sensitive"]),
+        label:has(input[name*="sensitive_media"])
+      `,
+      hideContent: `[data-testid="sensitiveMediaInterstitial"]`
+    },
+    'x.com': {
+      hideUI: `
+        a[href="/settings/content_you_see"], a[href*="content_you_see"],
+        div[role="listitem"]:has(a[href*="content_you_see"]),
+        [data-testid="settingsContentYouSee"],
+        div[role="group"]:has(input[name*="sensitive"]),
+        label:has(input[name*="sensitive_media"])
+      `,
+      hideContent: `[data-testid="sensitiveMediaInterstitial"]`
+    },
+    'bsky.app': {
+      hideUI: `
+        a[href="/settings/moderation"],
+        div[data-testid*="content-filter"], div[data-testid*="ContentFilter"],
+        [class*="contentFilter"], [class*="moderation-setting"],
+        button:has([class*="filter-toggle"])
+      `,
+      hideContent: `
+        [data-testid*="content-warning"], [class*="contentWarning"],
+        div[class*="adult-content"], div[class*="suggestive"]
+      `
+    },
+    'bluesky.social': {
+      hideUI: `
+        a[href="/settings/moderation"],
+        div[data-testid*="content-filter"], div[data-testid*="ContentFilter"],
+        [class*="contentFilter"], [class*="moderation-setting"]
+      `,
+      hideContent: `[data-testid*="content-warning"], [class*="contentWarning"]`
+    },
+    'pixiv.net': {
+      hideUI: `
+        label:has(input[name*="r18"]), label:has(input[name*="R18"]),
+        div:has(> input[name*="restrict"]):has(label),
+        [class*="r18-toggle"], [class*="R18Toggle"],
+        .settings-section:has([name*="r18"])
+      `,
+      hideContent: `
+        .rp, [class*="r-18"], a[href*="mode=r18"],
+        div[data-gtm-value*="R-18"], div[class*="mature-content"]
+      `
+    },
+    'deviantart.com': {
+      hideUI: `
+        label:has(input[name*="mature"]), [class*="mature-toggle"],
+        div[class*="_setting"]:has([class*="mature"]),
+        a[href*="/settings/browsing"]
+      `,
+      hideContent: `
+        [class*="mature-tag"], [data-mature="true"],
+        div[class*="_deviation"]:has([class*="mature"])
+      `
+    },
+    'newgrounds.com': {
+      hideUI: `
+        label:has(input[name*="rating"]):has(input[value="a"]),
+        label:has(input[name*="rating_a"]),
+        [class*="content-setting"]:has([class*="rating"]),
+        input[name*="rating_a"], input[name*="rating"][value="a"]
+      `,
+      hideContent: `.rating-a, .item-A, [class*="rated-a"], a[class*="rated-a"], div:has(> .rating-a)`
+    },
+    'nexusmods.com': {
+      hideUI: `
+        label:has(input[name*="adult"]), [class*="adult-toggle"],
+        div[class*="setting"]:has([class*="adult-content"]),
+        a[href*="content+blocking"]
+      `,
+      hideContent: `[class*="adult-content"], div[class*="mod-tile"]:has([class*="adult"])`
+    },
+    'patreon.com': {
+      hideUI: `
+        label:has(input[name*="nsfw"]), label:has(input[name*="18plus"]),
+        [class*="nsfw-toggle"], [data-tag*="nsfw-setting"],
+        div[class*="setting"]:has([class*="nsfw"])
+      `,
+      hideContent: `[class*="nsfw-label"], div[class*="post"]:has([class*="nsfw-warning"])`
+    },
+    'vimeo.com': {
+      hideUI: `
+        label:has(input[name*="mature"]), [class*="mature-filter"],
+        div[class*="setting"]:has([class*="mature"])
+      `
+    },
+    'tumblr.com': {
+      hideUI: `
+        label:has(input[name*="filtering"]), label:has(input[name*="sensitive"]),
+        [class*="content-filter-toggle"], [class*="sensitive-toggle"],
+        div[class*="setting"]:has([class*="filtering"]),
+        a[href*="/settings/account"]:has([class*="filter"])
+      `,
+      hideContent: `
+        [class*="sensitive-media"],
+        div[class*="post"]:has([class*="mature-content"]),
+        [data-has-cw="true"]
+      `
+    },
+    'furaffinity.net': {
+      hideUI: `
+        select[name*="rating"], input[name*="rating"],
+        label:has(input[name*="sfw"]), label:has(input[name*="mature"]),
+        label:has(input[name*="adult"]),
+        [class*="content-filter"], #rating-selector,
+        form[action*="controls/settings"]:has([name*="rating"])
+      `,
+      hideContent: `
+        [class*="rating-adult"], [class*="rating-mature"],
+        figure:has(img[class*="mature"]), figure:has(img[class*="adult"])
+      `
+    },
+    'dailymotion.com': {
+      hideUI: `
+        [class*="family-filter"], [class*="FamilyFilter"],
+        button[class*="family"], label:has(input[name*="family_filter"]),
+        div[class*="setting"]:has([class*="family"])
+      `
+    },
+    'archiveofourown.org': {
+      // AO3 needs rawCSS because the selectors already contain their own declaration blocks
+      rawCSS: `
+        .blurb:has(.rating-explicit)  { display: none !important; }
+        .blurb:has(.rating-mature)    { display: none !important; }
+        .blurb:has(.rating-notrated)  { display: none !important; }
+        li.work:has(.rating-explicit) { display: none !important; }
+        li.work:has(.rating-mature)   { display: none !important; }
+        li.work:has(.rating-notrated) { display: none !important; }
+      `
+    },
+    'gumroad.com': {
+      hideUI: `label:has(input[name*="adult"]), [class*="adult-toggle"], div[class*="setting"]:has([class*="adult"])`
+    },
+
+    // ── NOT SO RELIABLE FILTERS ─────────────────────────────────────
+    'bitchute.com': {
+      hideUI: `select[name*="sensitivity"], [class*="sensitivity-dropdown"], div[class*="setting"]:has([name*="sensitivity"])`
+    },
+    'discord.com': {
+      hideUI: `
+        div[class*="sensitiveContent"], [class*="explicit-filter"],
+        label:has(input[name*="explicit_content_filter"]),
+        div[class*="setting"]:has([class*="nsfw"]),
+        div[class*="setting"]:has([class*="sensitive"]),
+        [class*="contentFilterOption"]
+      `
+    },
+    'disboard.org': {
+      hideUI: `${DISCORD_DIR_UI}, [class*="nsfw-filter"]`,
+      hideContent: `[class*="nsfw-server"], div[class*="server-card"]:has([class*="nsfw"])`
+    },
+    'discadia.com': {
+      hideUI: DISCORD_DIR_UI,
+      hideContent: DISCORD_DIR_CONTENT
+    },
+    'discord.me': {
+      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"]`,
+      hideContent: `[class*="nsfw-server"]`
+    },
+    'discordlist.io': {
+      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"]`,
+      hideContent: `[class*="nsfw-server"], [class*="nsfw-content"]`
+    },
+    'top.gg': {
+      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-filter"]`,
+      hideContent: `[class*="nsfw-tag"], div:has([class*="nsfw-badge"])`
+    },
+    'fanfiction.net': {
+      hideUI: `select[name*="rating"], option[value="M"], [class*="rating-filter"]`,
+      hideContent: `[class*="rating-M"], div:has([class*="mature-rating"])`
+    },
+    'snapchat.com': {
+      hideUI: `label:has(input[name*="sensitive"]), [class*="sensitive-toggle"], div[class*="setting"]:has([class*="restrict"])`
+    },
+    'gab.com': {
+      hideUI: `[class*="keyword-filter"], form:has(input[name*="filter"]), a[href*="/settings/filters"]`
+    },
+    'telegram.org': {
+      hideUI: `label:has(input[name*="sensitive"]), [class*="sensitive-toggle"], div[class*="setting"]:has([class*="filtering"])`
+    },
+    'odysee.com': {
+      hideUI: `label:has(input[name*="mature"]), [class*="mature-toggle"], div[class*="setting"]:has([class*="mature"]), [class*="show-mature"]`,
+      hideContent: `[class*="mature-content"], div:has([class*="mature-tag"])`
+    },
+    'mewe.com': {
+      hideUI: `label:has(input[name*="content-filter"]), [class*="content-filter"], div[class*="setting"]:has([class*="filtering"])`
+    },
+    'minds.com': {
+      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"], div[class*="setting"]:has([class*="nsfw"])`,
+      hideContent: `[class*="nsfw-content"], div:has([class*="nsfw-overlay"])`
+    },
+    'inkbunny.net': {
+      hideUI: `label:has(input[name*="adult"]), [class*="adult-toggle"], select[name*="rating"], input[name*="rating"], div[class*="setting"]:has([class*="adult"])`,
+      hideContent: `[class*="adult-content"], [class*="rating-adult"]`
+    },
+    'itaku.ee': {
+      hideUI: `label:has(input[name*="mature"]), label:has(input[name*="explicit"]), [class*="content-visibility"], [class*="nsfw-toggle"], div[class*="setting"]:has([class*="mature"])`,
+      hideContent: `[class*="mature-content"], [class*="explicit-content"]`
+    },
+    'sofurry.com': {
+      hideUI: `select[name*="contentlevel"], [class*="content-pref"], label:has(input[name*="adult"]), label:has(input[name*="mature"]), div[class*="setting"]:has([class*="content"])`,
+      hideContent: `[class*="adult-content"], [class*="mature-content"]`
+    },
+    'pillowfort.io': {
+      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"], div[class*="setting"]:has([class*="nsfw"])`,
+      hideContent: `[class*="nsfw-post"], div[class*="post"]:has([class*="nsfw"])`
+    },
+    'speakbits.com': {
+      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"], div[class*="setting"]:has([class*="nsfw"])`,
+      hideContent: `[class*="nsfw-content"], div:has([class*="nsfw-flag"])`
+    },
+    'gamebanana.com': {
+      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"]`,
+      hideContent: `[class*="nsfw-content"], [class*="mature-content"]`
+    },
+    'ko-fi.com': {
+      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"]`
+    },
+    'buymeacoffee.com': {
+      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"]`
+    },
+    'subscribestar.com': {
+      hideUI: `label:has(input[name*="18"]), [class*="age-toggle"], div[class*="setting"]:has([class*="adult"])`
+    },
+
+    // ── MASTODON / FEDIVERSE (shared CSS) ───────────────────────────
+    'mastodon.social': { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT },
+    'mastodon.online':  { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT },
+    'fosstodon.org':    { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT },
+    'mas.to':           { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT },
+    'mstdn.social':     { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT },
+    'techhub.social':   { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT }
+  };
+
+  // ── FAST DOMAIN LOOKUP ──────────────────────────────────────────
+  // Pre-build a Set for O(1) "is this a graylist site?" check so that
+  // content.js exits immediately on the ~99.9% of pages that aren't graylist.
+  const GRAYLIST_DOMAIN_SET = new Set(Object.keys(GRAYLIST_FILTERS));
+
+  function matchGraylistDomain() {
+    if (GRAYLIST_DOMAIN_SET.has(hostname)) return hostname;
+    // Check parent domains (e.g., "www.reddit.com" → "reddit.com")
+    const parts = hostname.split('.');
+    for (let i = 1; i < parts.length - 1; i++) {
+      const parent = parts.slice(i).join('.');
+      if (GRAYLIST_DOMAIN_SET.has(parent)) return parent;
+    }
+    return null;
+  }
+
+  // ── CHEEKY POPUP ────────────────────────────────────────────────
+  const CHEEKY_MESSAGES = [
+    "Oh, Looking for the NSFW filter? pfff... You thought we didn't think of that....? 😏",
+    "Nice try! The NSFW filter settings have left the building 🚪👋",
+    "Looking for something? Whatever it was, it's gone now 🕳️",
+    "NSFW toggle? Never heard of her 💅",
+    "404: NSFW Settings Not Found (and never will be) 🔒",
+    "Pure Path says: No touchy the filter! 🛡️",
+    "You really thought you could sneak past us? Cute. 😊",
+    "The filter toggle has been... ✨ vaporized ✨",
+    "Womp womp..."
+  ];
+
+  let cheekyCooldown = false;
+
+  function showCheekyPopup() {
+    if (cheekyCooldown) return;
+    cheekyCooldown = true;
+    setTimeout(() => { cheekyCooldown = false; }, 5000);
+
+    const msg = CHEEKY_MESSAGES[Math.floor(Math.random() * CHEEKY_MESSAGES.length)];
+
+    // Remove any existing popup
+    const existing = document.getElementById('pure-path-cheeky-popup');
+    if (existing) existing.remove();
+
+    const popup = document.createElement('div');
+    popup.id = 'pure-path-cheeky-popup';
+    popup.textContent = msg;
+    popup.style.cssText = `
+      position: fixed; top: 20px; right: 20px; z-index: 2147483647;
+      max-width: 360px; padding: 18px 24px;
+      background: linear-gradient(135deg, #818cf8, #6366f1);
+      color: #fff; font-family: 'Inter', 'Segoe UI', sans-serif;
+      font-size: 15px; font-weight: 600; line-height: 1.5;
+      border-radius: 16px;
+      box-shadow: 0 12px 40px rgba(99,102,241,0.4), 0 4px 12px rgba(0,0,0,0.15);
+      opacity: 0; transform: translateX(80px) scale(0.9);
+      transition: all 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      pointer-events: none;
+    `;
+
+    document.body.appendChild(popup);
+
+    requestAnimationFrame(() => {
+      popup.style.opacity = '1';
+      popup.style.transform = 'translateX(0) scale(1)';
+    });
+
+    setTimeout(() => {
+      popup.style.opacity = '0';
+      popup.style.transform = 'translateX(80px) scale(0.9)';
+      setTimeout(() => popup.remove(), 500);
+    }, 4000);
+  }
+
+  // ── CSS INJECTION ───────────────────────────────────────────────
+  const NUKE_DECL = `
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    opacity: 0 !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    position: absolute !important;
+    clip: rect(0,0,0,0) !important;
+  `;
+
+  function injectGraylistFilterCSS() {
+    if (document.getElementById('pure-path-graylist-lock')) return;
+
+    const matchedKey = matchGraylistDomain();
+    if (!matchedKey) return;
+
+    const config = GRAYLIST_FILTERS[matchedKey];
+    let css = `/* ═══ Pure Path: Graylist enforcement for ${matchedKey} ═══ */\n`;
+
+    if (config.hideUI) {
+      css += `${config.hideUI} { ${NUKE_DECL} }\n`;
+    }
+    if (config.hideContent) {
+      css += `${config.hideContent} { ${NUKE_DECL} }\n`;
+    }
+    if (config.rawCSS) {
+      css += config.rawCSS + '\n';
+    }
+
+    if (css.length < 80) return; // Only the comment — nothing to inject
+
+    const style = document.createElement('style');
+    style.id = 'pure-path-graylist-lock';
+    style.textContent = css;
+    (document.head || document.documentElement).appendChild(style);
+
+    if (config.hideUI) {
+      setupCheekyClickDetection(config.hideUI);
+    }
+
+    console.log(`🔒 Pure Path: Graylist filters enforced on ${matchedKey}`);
+  }
+
+  // ── CHEEKY CLICK DETECTION ──────────────────────────────────────
+  // Uses a **debounced** MutationObserver to avoid CPU thrashing on SPAs.
+
+  function setupCheekyClickDetection(uiSelectors) {
+    const selectorList = uiSelectors
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => s.length > 0 && !s.startsWith('/*'));
+
+    // Validate selectors once upfront — drop invalid ones
+    const validSelectors = [];
+    for (const sel of selectorList) {
+      try { document.querySelector(sel); validSelectors.push(sel); } catch (_) {}
+    }
+    if (validSelectors.length === 0) return;
+
+    function scanAndIntercept() {
+      for (const sel of validSelectors) {
+        try {
+          const elements = document.querySelectorAll(sel);
+          for (const el of elements) {
+            if (el.dataset.purePathIntercepted) continue;
+            el.dataset.purePathIntercepted = 'true';
+            const parent = el.parentElement;
+            if (parent && !parent.dataset.purePathWatch) {
+              parent.dataset.purePathWatch = 'true';
+              parent.addEventListener('click', (e) => {
+                if (el.contains(e.target) || e.target === el) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  showCheekyPopup();
+                }
+              }, true);
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    // Initial scan
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', scanAndIntercept);
+    } else {
+      scanAndIntercept();
+    }
+
+    // Debounced MutationObserver — max 1 scan per 500ms
+    let mutationTimeout = null;
+    const observer = new MutationObserver(() => {
+      if (mutationTimeout) return;
+      mutationTimeout = setTimeout(() => {
+        mutationTimeout = null;
+        scanAndIntercept();
+      }, 500);
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+
+    // Global settings-page keyword click listener
+    document.addEventListener('click', (e) => {
+      const currentPath = window.location.pathname.toLowerCase();
+      const isSettingsPage = ['settings', 'preferences', 'filter', 'privacy', 'safety', 'moderation']
+        .some(s => currentPath.includes(s));
+      if (!isSettingsPage) return;
+
+      const clickedText = (e.target.textContent || '').toLowerCase();
+      const filterKeywords = ['nsfw', 'mature', 'adult', 'explicit', 'sensitive', 'r-18', 'r18', '18+', 'content filter', 'family filter'];
+      if (filterKeywords.some(kw => clickedText.includes(kw))) {
+        showCheekyPopup();
+      }
+    }, true);
+  }
+
+  // ============================================================================
   // SPA URL MONITORING (delegates URL checking to background.js)
   // ============================================================================
   
   let lastUrl = window.location.href;
   
   function setupSpaMonitoring() {
-    // Method 1: Listen for popstate events (back/forward navigation)
     window.addEventListener('popstate', onSpaNavigation);
     
-    // Method 2: Intercept pushState and replaceState (SPA navigation)
     const originalPushState = history.pushState;
     const originalReplaceState = history.replaceState;
     
@@ -116,12 +580,15 @@
       onSpaNavigation();
     };
     
-    // Check URL immediately on script load
     checkCurrentUrl();
   }
   
   function onSpaNavigation() {
     checkCurrentUrl();
+    // Re-inject if the style was removed (SPA full re-render)
+    if (!document.getElementById('pure-path-graylist-lock')) {
+      injectGraylistFilterCSS();
+    }
   }
   
   async function checkCurrentUrl() {
@@ -130,13 +597,9 @@
     lastUrl = currentUrl;
     
     try {
-      // Delegate to background's handleBlock via checkUrl message
-      await chrome.runtime.sendMessage({
-        action: 'checkUrl',
-        url: currentUrl
-      });
-    } catch (error) {
-      // Silently handle — background script may have restarted
+      await chrome.runtime.sendMessage({ action: 'checkUrl', url: currentUrl });
+    } catch (_) {
+      // Background script may have restarted
     }
   }
   
@@ -145,7 +608,6 @@
   // ============================================================================
   
   function initContentScript() {
-    // ALWAYS hide SafeSearch UI on search engines (user cannot toggle it off)
     if (isSearchEngine) {
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', hideSafeSearchUI);
@@ -153,11 +615,18 @@
         hideSafeSearchUI();
       }
     }
+
+    // Only run graylist logic if this domain is actually in the map
+    if (matchGraylistDomain()) {
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', injectGraylistFilterCSS);
+      } else {
+        injectGraylistFilterCSS();
+      }
+    }
     
-    // Set up SPA navigation monitoring (delegates to background for domain checks)
     setupSpaMonitoring();
   }
   
-  // Start the content script
   initContentScript();
 })();
