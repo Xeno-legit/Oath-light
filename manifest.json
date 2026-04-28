@@ -39,7 +39,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["blocked.html", "blocklists/domains.json", "blocklists/keywords.json"],
+      "resources": ["blocked.html", "blocklists/domains.json"],
       "matches": ["<all_urls>"]
     }
   ]

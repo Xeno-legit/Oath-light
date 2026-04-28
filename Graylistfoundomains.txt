@@ -1,0 +1,180 @@
+================================================================================
+GRAYLIST - Platforms That Host Adult/NSFW Content But Aren't Primarily Porn Sites
+================================================================================
+Generated: 2026-04-27
+Purpose: Domains for the Pure Path NSFW Blocker that allow adult content
+         but are general-purpose platforms (not dedicated porn sites)
+
+These are "gray area" domains - they have legitimate uses but also host
+significant amounts of NSFW/adult content that users may want to block.
+
+================================================================================
+SOCIAL MEDIA PLATFORMS
+================================================================================
+reddit.com              # NSFW subreddits (r/gonewild, r/nsfw, etc.)
+twitter.com             # Allows adult content marked as "Sensitive"
+x.com                   # Same as Twitter - allows adult content
+bsky.app                # Bluesky - allows NSFW with labeling
+bluesky.social          # Bluesky instance
+tumblr.com              # Still hosts some NSFW content (reversed partial ban)
+mastodon.social         # Mastodon flagship instance - many NSFW posts
+vk.com                  # Russian social network, very permissive on adult content
+mewe.com                # Privacy-focused social network, allows adult content
+gab.com                 # Less moderated, allows adult content
+minds.com               # Decentralized social network, allows adult content
+parler.com              # Less moderated platform
+pillowfort.io           # Tumblr alternative, allows NSFW
+cohost.org              # Allows NSFW with content warnings
+speakbits.com           # Reddit alternative, less censorship
+koo.app                 # Indian social platform, some adult content slips through
+
+================================================================================
+CHAT / MESSAGING PLATFORMS
+================================================================================
+discord.com             # NSFW channels/servers widely available
+discord.gg              # Discord invite links (often to NSFW servers)
+telegram.org            # NSFW groups and channels
+t.me                    # Telegram short links to NSFW channels
+kik.com                 # Messaging app used extensively for adult content sharing
+snapchat.com            # Used for sharing adult content privately
+whatsapp.com            # Used for adult content sharing in groups (harder to block)
+
+================================================================================
+IMAGEBOARD / FORUM PLATFORMS
+================================================================================
+4chan.org               # Multiple NSFW boards (/b/, /s/, /hc/, /d/, etc.)
+8kun.top                # Successor to 8chan, NSFW boards
+endchan.net             # Imageboard with NSFW boards
+7chan.org               # Imageboard with NSFW boards
+420chan.org             # Imageboard with NSFW boards
+lainchan.org            # Imageboard, some NSFW
+wizchan.org             # Imageboard, some adult content
+
+================================================================================
+IMAGE / MEDIA HOSTING
+================================================================================
+imgur.com               # Still hosts some NSFW (banned but not fully enforced)
+catbox.moe              # Allows NSFW image hosting
+litterbox.catbox.moe    # Catbox temporary hosting, allows NSFW
+pomf.cat                # Allows NSFW image hosting
+uguu.se                 # File hosting, allows NSFW
+files.catbox.moe        # Catbox file hosting
+postimg.cc              # Some NSFW content
+imagebam.com            # Image hosting, some adult content
+imagevenue.com          # Image hosting, some adult content
+redgifs.com             # GIF hosting, heavily used for NSFW (successor to GFYcat NSFW)
+gfycat.com              # Some NSFW still present
+
+================================================================================
+ART / CREATIVE PLATFORMS
+================================================================================
+pixiv.net               # Japanese art platform, allows R-18 content
+deviantart.com          # Allows artistic nudity and fetish art
+newgrounds.com          # Allows adult art and games (rated A)
+itaku.ee                # Art platform, allows NSFW
+inkbunny.net            # Furry art platform, allows NSFW
+sofurry.com             # Furry community, allows NSFW
+furaffinity.net         # Furry art platform, allows NSFW (with filters)
+e621.net                # Furry image board, primarily NSFW
+danbooru.donmai.us      # Anime image board, allows NSFW
+gelbooru.com            # Anime image board, allows NSFW
+rule34.xxx              # Rule34 image board (borderline - mostly porn but user-generated)
+rule34.paheal.net       # Rule34 image board variant
+tbib.org                # The Big ImageBoard, NSFW anime art
+yande.re               # Anime image board, NSFW content
+konachan.com            # Anime wallpaper board, some NSFW
+safebooru.donmai.us     # Danbooru variant (supposedly SFW but leaks)
+
+================================================================================
+VIDEO PLATFORMS
+================================================================================
+vimeo.com               # More permissive than YouTube, some adult content
+dailymotion.com         # Some adult content slips through
+bitchute.com            # Less moderated, some adult content
+odysee.com              # Decentralized, less moderation, some adult content
+rumble.com              # Less moderated video platform
+streamable.com          # Video hosting, some NSFW content
+
+================================================================================
+SUBSCRIPTION / CREATOR PLATFORMS (not primarily adult but widely used for it)
+================================================================================
+patreon.com             # Allows some adult content from creators
+gumroad.com             # Allows adult content sales
+subscribestar.adult     # Adult variant of SubscribeStar
+subscribestar.com       # Some adult creators
+ko-fi.com               # Some adult creators (against TOS but present)
+buymeacoffee.com        # Some adult creators link here
+
+================================================================================
+MASTODON / FEDIVERSE INSTANCES (known for allowing NSFW)
+================================================================================
+poa.st                  # Mastodon instance, allows NSFW
+baraag.net              # Mastodon instance for NSFW art
+pawoo.net               # Japanese Mastodon instance, allows NSFW
+mastodon.online         # Some NSFW content
+mas.to                  # Some NSFW content
+mstdn.social            # Some NSFW content
+fosstodon.org           # Some NSFW content
+techhub.social          # Some NSFW content
+
+================================================================================
+FANFICTION / STORY PLATFORMS
+================================================================================
+archiveofourown.org     # Fanfiction with explicit content (rated E/M)
+literotica.com          # Erotic stories (borderline - primarily adult)
+fanfiction.net          # Some explicit content (against TOS but present)
+chyoa.com               # Interactive erotic stories
+writing.com             # Some adult interactive stories
+
+================================================================================
+GAMING / MODDING PLATFORMS
+================================================================================
+loverslab.com           # Game modding community focused on adult mods
+nexusmods.com           # Some adult mods available (with age gate)
+gamebanana.com          # Some adult mods/skins
+f95zone.to              # Adult gaming community
+lewdrg.com              # Adult game reviews
+
+================================================================================
+DISCORD SERVER DIRECTORIES (NSFW server listings)
+================================================================================
+disboard.org            # Discord server list, many NSFW servers
+discadia.com            # Discord server list, NSFW servers
+discord.me              # Discord server list, NSFW servers
+discordlist.io          # Discord server list
+top.gg                  # Discord bots/servers, some NSFW
+
+================================================================================
+LINK SHORTENERS / REDIRECTS (used to bypass filters)
+================================================================================
+bit.ly                  # Can link to adult content
+tinyurl.com             # Can link to adult content
+t.ly                    # Can link to adult content
+shorturl.at             # Can link to adult content
+
+================================================================================
+OTHER / MISC
+================================================================================
+ome.tv                  # Video chat, adult content common
+chatroulette.com        # Video chat, adult content common
+omegle.com              # Was shut down but domain may still resolve
+chathub.cam             # Video chat, adult content
+strangercam.com         # Video chat, adult content
+shagle.com              # Video chat, adult content
+dirtyroulette.com       # Video chat (borderline - name implies adult)
+camgo.com               # Video chat, some adult content
+bazoocam.org            # Video chat, adult content
+coomeet.me              # Video chat, adult content
+
+================================================================================
+NOTES
+================================================================================
+- Domains marked as "borderline" are close to being dedicated adult sites
+  but still have some non-adult usage
+- Many of these platforms have legitimate uses - blocking them entirely
+  may cause false positives
+- Consider implementing path-level blocking instead of domain-level
+  (e.g., block reddit.com/r/nsfw* instead of all of reddit.com)
+- Some domains may already exist in the main blocklist with subdomains
+- Shorteners cannot be effectively blocked without collateral damage
+================================================================================

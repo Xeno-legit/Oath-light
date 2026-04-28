@@ -668,11 +668,6 @@
           <div class="stat-label">Blocked Domains</div>
         </div>
         <div class="glass-card stat-card">
-          <div class="stat-icon">🏷️</div>
-          <div class="stat-number" id="keywordCount">0</div>
-          <div class="stat-label">Blocked Keywords</div>
-        </div>
-        <div class="glass-card stat-card">
           <div class="stat-icon">🛡️</div>
           <div class="stat-number" id="threatsCount">0</div>
           <div class="stat-label">Threats Prevented</div>
@@ -699,24 +694,6 @@
           <div id="domainResult" class="hidden"></div>
         </div>
 
-        <!-- Keywords -->
-        <div class="blocklist-section">
-          <div class="section-header">
-            <div class="section-title-group">
-              <div class="section-icon">🏷️</div>
-              <div class="section-title-text">
-                <h3>Blocked Keywords</h3>
-                <p id="keywordStatus">ACTIVE RULES</p>
-              </div>
-            </div>
-            <button class="add-button" id="addKeywordBtn" title="Add Keyword">+</button>
-          </div>
-          <div class="search-container">
-            <span class="search-icon">🔍</span>
-            <input type="text" class="search-input" id="keywordSearch" placeholder="Search keywords...">
-          </div>
-          <div id="keywordResult" class="hidden"></div>
-        </div>
       </div>
     </div>
   </main>
@@ -752,27 +729,7 @@
     </div>
   </div>
 
-  <!-- Add Keyword Modal -->
-  <div id="addKeywordModal" class="modal-overlay hidden">
-    <div class="modal">
-      <div class="modal-header">
-        <h3 class="modal-title">Block a Keyword</h3>
-        <button class="modal-close" id="closeKeywordModal">×</button>
-      </div>
-      <div class="modal-body">
-        <div id="keywordModalMessage"></div>
-        <div class="form-group">
-          <label class="form-label" for="keywordInput">Keyword</label>
-          <input type="text" id="keywordInput" class="form-input" placeholder="keyword" autocomplete="off">
-          <p class="form-help">Enter a single keyword or phrase to block</p>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-cancel" id="cancelKeywordBtn">Cancel</button>
-        <button class="btn btn-primary" id="saveKeywordBtn">Add Keyword</button>
-      </div>
-    </div>
-  </div>
+
 
   <script src="blocklists.js"></script>
   <script>
