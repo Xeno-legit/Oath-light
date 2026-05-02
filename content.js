@@ -117,7 +117,11 @@
       hideUI: `
         label:has(input[name*="mature"]), label:has(input[name*="over18"]),
         [data-testid="feed-settings-mature"], [class*="nsfw-toggle"],
-        div[class*="Setting"]:has([class*="nsfw"])
+        div[class*="Setting"]:has([class*="nsfw"]),
+        [data-testid="is-nsfw-shown"], [data-testid="safe-browsing-mode"],
+        [data-testid="nsfw-posts-and-comments"], [data-testid="is-nsfw"],
+        settings-profile-nsfw-modal, settings-preferences-nsfw-modal,
+        rpl-modal-card#nsfw-rpl-modal-card
       `,
       hideContent: `
         .nsfw-image, .prompt-18plus,
@@ -412,13 +416,23 @@
 
     const popup = document.createElement('div');
     popup.id = 'pure-path-cheeky-popup';
-    popup.textContent = msg;
+    
+    // Use chrome.runtime.getURL to load the icon
+    const iconUrl = chrome.runtime.getURL('icons/icon48.png');
+    
+    popup.innerHTML = `
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center;">
+        <img src="${iconUrl}" style="width: 42px; height: 42px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background: rgba(255,255,255,0.2); padding: 3px;" alt="Pure Path Logo">
+        <div>${msg}</div>
+      </div>
+    `;
+
     popup.style.cssText = `
       position: fixed; top: 20px; right: 20px; z-index: 2147483647;
-      max-width: 360px; padding: 18px 24px;
+      width: 240px; padding: 16px 20px;
       background: linear-gradient(135deg, #818cf8, #6366f1);
       color: #fff; font-family: 'Inter', 'Segoe UI', sans-serif;
-      font-size: 15px; font-weight: 600; line-height: 1.5;
+      font-size: 14px; font-weight: 600; line-height: 1.4;
       border-radius: 16px;
       box-shadow: 0 12px 40px rgba(99,102,241,0.4), 0 4px 12px rgba(0,0,0,0.15);
       opacity: 0; transform: translateX(80px) scale(0.9);
@@ -502,10 +516,33 @@
     }
     if (validSelectors.length === 0) return;
 
+    function querySelectorAllDeep(selector, root = document) {
+      const results = Array.from(root.querySelectorAll(selector));
+      const allEls = root.querySelectorAll('*');
+      for (const el of allEls) {
+        if (el.shadowRoot) {
+          results.push(...querySelectorAllDeep(selector, el.shadowRoot));
+        }
+      }
+      return results;
+    }
+
+    function getAllShadowRoots(root = document) {
+      const roots = [];
+      const allEls = root.querySelectorAll('*');
+      for (const el of allEls) {
+        if (el.shadowRoot) {
+          roots.push(el.shadowRoot);
+          roots.push(...getAllShadowRoots(el.shadowRoot));
+        }
+      }
+      return roots;
+    }
+
     function scanAndIntercept() {
       for (const sel of validSelectors) {
         try {
-          const elements = document.querySelectorAll(sel);
+          const elements = querySelectorAllDeep(sel);
           for (const el of elements) {
             if (el.dataset.purePathIntercepted) continue;
             el.dataset.purePathIntercepted = 'true';
@@ -513,6 +550,7 @@
             if (parent && !parent.dataset.purePathWatch) {
               parent.dataset.purePathWatch = 'true';
               parent.addEventListener('click', (e) => {
+                if (!e.isTrusted) return; // Allow programmatic clicks from our script to pass through to Reddit
                 if (el.contains(e.target) || e.target === el) {
                   e.preventDefault();
                   e.stopPropagation();
@@ -532,16 +570,100 @@
       scanAndIntercept();
     }
 
-    // Debounced MutationObserver — max 1 scan per 500ms
-    let mutationTimeout = null;
-    const observer = new MutationObserver(() => {
-      if (mutationTimeout) return;
-      mutationTimeout = setTimeout(() => {
-        mutationTimeout = null;
-        scanAndIntercept();
-      }, 500);
-    });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    // Global MutationObserver misses shadow DOM updates. 
+    // We use a recurring interval to ensure shadow DOMs are always handled.
+    function enforceShadowDOM() {
+      scanAndIntercept();
+      
+      const cssElement = document.getElementById('pure-path-graylist-lock');
+      if (cssElement) {
+         const cssText = cssElement.textContent;
+         
+         // Create a reusable stylesheet for shadow DOMs
+         if (!window._purePathSheet) {
+            try {
+               window._purePathSheet = new CSSStyleSheet();
+               window._purePathSheet.replaceSync(cssText);
+            } catch (e) {
+               window._purePathSheet = 'fallback'; // For very old browsers
+            }
+         }
+
+         const shadowRoots = getAllShadowRoots();
+         for (const sr of shadowRoots) {
+            // Avoid adding multiple times
+            if (!sr._purePathInjected) {
+               sr._purePathInjected = true;
+               
+               if (window._purePathSheet !== 'fallback') {
+                  // Modern approach: Does not mutate the DOM tree! 
+                  // This prevents React/Lit from crashing during back-navigation DOM diffing.
+                  sr.adoptedStyleSheets = [...sr.adoptedStyleSheets, window._purePathSheet];
+               } else if (!sr.getElementById('pure-path-graylist-lock')) {
+                  // Fallback for older browsers
+                  const style = document.createElement('style');
+                  style.id = 'pure-path-graylist-lock';
+                  style.textContent = cssText;
+                  sr.appendChild(style);
+               }
+            }
+         }
+      }
+
+      // Force Reddit filters to Safe Mode if they are explicitly turned ON.
+      if (matchGraylistDomain() === 'reddit.com') {
+         // Auto-confirm the "Mark as safe" modal that pops up when we force the profile mature setting off
+         const nsfwModals = querySelectorAllDeep('rpl-modal-card#nsfw-rpl-modal-card');
+         for (const modalWrapper of nsfwModals) {
+            const checkbox = querySelectorAllDeep('faceplate-checkbox-input', modalWrapper)[0];
+            if (checkbox && !checkbox.hasAttribute('checked') && checkbox.getAttribute('aria-checked') !== 'true') {
+               checkbox.click();
+            }
+            const confirmBtn = querySelectorAllDeep('button[slot="primary-button"]', modalWrapper)[0];
+            if (confirmBtn && !confirmBtn.hasAttribute('disabled')) {
+               confirmBtn.click();
+            }
+         }
+
+         const togglesToDisable = [
+            '[data-testid="is-nsfw-shown"] faceplate-switch-input',
+            '[data-testid="nsfw-posts-and-comments"] faceplate-switch-input',
+            '[data-testid="is-nsfw"] faceplate-switch-input',
+            '[data-testid="feed-settings-mature"] input',
+            'input[name*="mature"]'
+         ];
+         for (const sel of togglesToDisable) {
+            const els = querySelectorAllDeep(sel);
+            for (const el of els) {
+               if (el.hasAttribute('checked') || el.getAttribute('aria-checked') === 'true' || el.checked) {
+                  if (!el.dataset.purePathForced) {
+                     el.dataset.purePathForced = 'true';
+                     console.log("🔒 Pure Path: Forcing filter off.");
+                     el.click();
+                  }
+               }
+            }
+         }
+         
+         // Safe browsing mode (Blur images) should be ON
+         const blurToggles = querySelectorAllDeep('[data-testid="safe-browsing-mode"] faceplate-switch-input');
+         for (const el of blurToggles) {
+            if (!el.hasAttribute('checked') && el.getAttribute('aria-checked') !== 'true') {
+               if (!el.dataset.purePathForcedBlur) {
+                  el.dataset.purePathForcedBlur = 'true';
+                  console.log("🔒 Pure Path: Forcing blur on.");
+                  el.click();
+               }
+            }
+         }
+      }
+    }
+
+    // Run initially
+    enforceShadowDOM();
+
+    // Run every 800ms to catch dynamic shadow DOM renders (like Reddit SPA)
+    setInterval(enforceShadowDOM, 800);
 
     // Global settings-page keyword click listener
     document.addEventListener('click', (e) => {
@@ -597,7 +719,10 @@
     lastUrl = currentUrl;
     
     try {
-      await chrome.runtime.sendMessage({ action: 'checkUrl', url: currentUrl });
+      const response = await chrome.runtime.sendMessage({ action: 'checkUrl', url: currentUrl });
+      if (response && response.blocked && response.blockedUrl) {
+        window.location.replace(response.blockedUrl);
+      }
     } catch (_) {
       // Background script may have restarted
     }
