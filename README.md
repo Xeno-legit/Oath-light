@@ -1,452 +1,109 @@
-# 🛡️ Pure Path - NSFW Content Blocker
+# Pure Path
 
-[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](CHANGELOG.md)
-[![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-yellow.svg)](https://www.google.com/chrome/)
-[![Firefox Add-on](https://img.shields.io/badge/Firefox-Add--on-orange.svg)](https://www.mozilla.org/firefox/)
+Pure Path is a comprehensive content filtering system designed to block NSFW content and promote personal productivity. It consists of a browser extension for real-time traffic monitoring and a desktop application for persistent protection and system-level enforcement.
 
-A powerful, privacy-focused browser extension that blocks NSFW content to help you stay focused on personal growth and productivity.
+![Pure Path Demonstration](Demogif.gif)
 
-![Pure Path Banner](https://via.placeholder.com/800x200/667eea/ffffff?text=Pure+Path+-+Stay+Focused+on+Growth)
 
----
+## Core Philosophy
 
-## ✨ Features
+Pure Path is built on the principle of accessible protection. This application is free and open-source. It will never feature paid subscriptions, premium tiers, or locked features. The goal is to provide a robust tool for anyone seeking to improve their digital environment without financial barriers.
 
-### 🔒 Multi-Layer Protection
-- **Domain Blocking** - 1,133+ pre-configured NSFW domains
-- **Keyword Detection** - 1,244+ blocked keywords in URLs and content
-- **Smart Search Blocking** - Detects and blocks NSFW search queries
-- **Content Analysis** - Real-time page content scanning
-- **Leet Speak Detection** - Catches bypass attempts
+## Features
 
-### 🎨 Beautiful UI
-- Modern, clean interface
-- Motivational blocked page with quotes
-- Progress tracking dashboard
-- Customizable blocklists
-- Smooth animations and transitions
+### Multi-Layer Protection
+- **Domain Filtering**: Blocks a curated list of over 1,100 known NSFW domains.
+- **Keyword Detection**: Scans URLs, page titles, and meta-tags for explicit keywords using word-boundary-aware regex.
+- **Search Engine Enforcement**: Automatically forces SafeSearch on major engines (Google, Bing, DuckDuckgo, Yahoo) and blocks explicit search queries.
+- **Leet Speak Normalization**: Detects and normalizes character substitutions (e.g., "p0rn" to "porn") to prevent simple bypasses.
+- **Content Analysis**: Real-time scanning of page headings and descriptions to identify NSFW content even on unknown domains.
 
-### 🔐 Security & Privacy
-- **Password Protected** - SHA-256 encrypted password
-- **100% Local** - No data leaves your device
-- **No Tracking** - Zero analytics or telemetry
-- **Open Source** - Fully auditable code
-- **Privacy First** - Your browsing stays private
+### Desktop Integration
+- **Tauri-Based Desktop App**: A lightweight companion application built with Rust and Tauri for system-level persistence.
+- **Dual-Process Watchdog**: Prevents unauthorized termination of the protection service.
+- **Native Messaging**: Secure communication bridge between the browser extension and the desktop app.
+- **Uninstall Friction**: Implements a configurable waiting period for uninstallation to prevent impulsive disabling.
 
-### 📊 Progress Tracking
-- Total sites blocked counter
-- Days since installation
-- Personal goal setting
-- Motivational statistics
+### User Experience
+- **Electric Ether Theme**: A modern, fluid UI design system for the desktop dashboard.
+- **Progress Tracking**: Monitors statistics such as total blocked attempts and days of protection.
+- **Mentor Dashboard**: (Phase 2) A dedicated interface for goal setting and productivity prompts.
+- **Themes & Customization**: Extensible theme system and configurable blocklists.
 
-### 🛠️ Customization
-- Add custom domains to blocklist
-- Add custom keywords to blocklist
-- Edit existing blocklists
-- Set personal goals
-- Customize experience
+### Feature Comparison
 
----
+The following table compares the protection layers of Pure Path against typical industry standards:
 
-## 🚀 Quick Start
+| Capability | Standard Filters | Pure Path |
+| :--- | :---: | :---: |
+| Domain & Keyword Blocking | Yes | Yes |
+| Browser Password Protection | Partial | Yes |
+| 100% Free / No Subscriptions | No | Yes |
+| Search Engine SafeSearch Enforcement | No | Yes |
+| Leet Speak Normalization | No | Yes |
+| Desktop-Level Process Watchdog | No | Yes |
+| High-Friction Uninstall Protection | No | Yes |
+| Native Messaging Bridge | No | Yes |
 
-### Installation
 
-#### Chrome / Edge / Brave
+## Development Status
 
-1. **Download the Extension**
-   ```bash
-   git clone https://github.com/Xeno-legit/Pure-Path-NSFW-blocker.git
-   cd Pure-Path-NSFW-blocker
-   ```
+### Phase 1: Browser Extension (Completed)
+- Implementation of core smart blocking logic.
+- Password protection for extension settings.
+- Manifest V3 compliance.
+- Basic statistics tracking.
 
-2. **Load in Browser**
-   - Open `chrome://extensions/`
-   - Enable "Developer mode" (top right)
-   - Click "Load unpacked"
-   - Select the project folder
-   - Done! ✅
+### Phase 2: Desktop Integration (In Progress)
+- Tauri migration for cross-platform performance.
+- Native Messaging implementation.
+- Dual-process watchdog for process persistence.
+- High-friction uninstall system with waiting periods.
+- Redesigned UI with fluid transitions and modern aesthetics.
 
-#### Firefox
+## How the Application Blocks
 
-1. **Download the Extension**
-   ```bash
-   git clone https://github.com/Xeno-legit/Pure-Path-NSFW-blocker.git
-   cd Pure-Path-NSFW-blocker
-   ```
+The following table explains the different layers of the blocking mechanism:
 
-2. **Load in Browser**
-   - Open `about:debugging#/runtime/this-firefox`
-   - Click "Load Temporary Add-on"
-   - Select `manifest.json`
-   - Done! ✅
+| Method | Description | Target |
+| :--- | :--- | :--- |
+| Blacklist | Exact and wildcard domain matching against 1,100+ entries. | NSFW Domains |
+| Graylist | Monitoring of specific paths on mixed-content platforms (e.g., Reddit, Twitter). | Specific NSFW sub-paths |
+| Regex Matching | Word-boundary-aware keyword detection in URLs and metadata. | Explicit Keywords |
+| Search Filter | Passive forcing of SafeSearch parameters via URL modification. | Search Engines |
+| Content Scan | Evaluation of DOM elements (h1-h6, meta description) for NSFW density. | Unknown Domains |
+| Host Blocking | (Planned) System-level blocks via the hosts file managed by the desktop app. | System-wide |
 
-### First-Time Setup
+## Installation
 
-1. **Setup Wizard Opens Automatically**
-   - Set a strong password (min 6 characters)
-   - Add your personal goal (optional)
-   - Check consent box
-   - Click "Complete Setup"
+| Step | Instruction | Details |
+| :--- | :--- | :--- |
+| 1 | Clone Repository | git clone https://github.com/Xeno-legit/Pure-Path-NSFW-blocker.git |
+| 2 | Install Extension | Load the root folder as an unpacked extension in Developer Mode. |
+| 3 | Setup Desktop App | Navigate to the desktop-app directory and follow the README there for building. |
+| 4 | Configuration | Follow the initial setup wizard to set a master password and goals. |
 
-2. **You're Protected!** 🎉
-   - Extension is now active
-   - Try visiting a blocked site to test
-   - Check statistics in popup
+(This is if you want to install it early as its currently in beta. And very early stages of development)
 
----
+## Contribution
 
-## 📖 Documentation
+| Action | Process |
+| :--- | :--- |
+| Bug Reports | Open an issue on GitHub with reproduction steps and environment details. |
+| Feature Requests | Submit an issue describing the feature and its alignment with core goals. |
+| Code Changes | Fork the repository, create a feature branch, and submit a pull request. |
+| Blocklist Updates | Edit domains.json or keywords.json and submit as a pull request. |
 
-### User Guides
-- [**START_HERE.md**](Guides/START_HERE.md) - Quick start guide
-- [**INSTALLATION.md**](Guides/INSTALLATION.md) - Detailed installation
-- [**TESTING_GUIDE.md**](TESTING_GUIDE.md) - How to test the extension
-- [**CHANGELOG.md**](CHANGELOG.md) - Version history
+## Security and Privacy
 
-### Developer Guides
-- [**PROJECT_OVERVIEW.md**](Guides/PROJECT_OVERVIEW.md) - Technical architecture
-- [**SEARCH_IMPROVEMENTS.md**](Guides/SEARCH_IMPROVEMENTS.md) - Search implementation
-- [**BLOCKLIST_UI_FIX.md**](Guides/BLOCKLIST_UI_FIX.md) - UI improvements
+- **Local Processing**: All blocking logic and content analysis happen locally on your machine.
+- **Zero Telemetry**: No browsing data, statistics, or personal information is transmitted to external servers.
+- **Open Source**: The entire codebase is available for audit to ensure transparency and security.
+
+## License
+
+This project is licensed under the GNU General Public License v3.0. See the LICENSE file for more information.
 
 ---
 
-## 🧪 Testing
-
-### Quick Test (2 minutes)
-
-1. **Install Extension** (see above)
-2. **Visit a Blocked Site** (e.g., any NSFW domain)
-3. **See Blocked Page** with motivational message
-4. **Check Statistics** in extension popup
-
-### Full Test Suite (5 minutes)
-
-1. **Open Test Suite**
-   ```
-   Open test-blocklists.html in your browser
-   ```
-
-2. **Run All Tests**
-   ```
-   Click "🚀 Run All Tests" button
-   ```
-
-3. **Verify Results**
-   - All tests should pass (green ✅)
-   - Check console for debug logs
-   - No errors should appear
-
-See [TESTING_GUIDE.md](TESTING_GUIDE.md) for detailed testing procedures.
-
----
-
-## 🎯 How It Works
-
-### Blocking Mechanism
-
-```
-User visits URL
-    ↓
-Background Script checks:
-    1. Is domain in blocklist? → Block
-    2. Does URL contain keywords? → Block
-    3. Is it a NSFW search query? → Block
-    ↓
-Content Script scans page:
-    1. Check page title
-    2. Check meta description
-    3. Check headings
-    4. Multiple NSFW indicators? → Block
-    ↓
-If blocked → Redirect to motivational page
-If safe → Allow access
-```
-
-### Multi-Tier Detection
-
-1. **Whitelist** - Never block (Google, GitHub, etc.)
-2. **Graylist** - Monitor for NSFW paths (Reddit, Twitter, etc.)
-3. **Blacklist** - Always block (NSFW domains)
-4. **Unknown** - Check for explicit patterns
-
----
-
-## 🔧 Customization
-
-### Add Custom Domain
-
-1. Click extension icon
-2. Click "View Blocklists"
-3. Click "+ Add Domain"
-4. Enter domain (e.g., `example.com`)
-5. Click "Add Domain"
-
-### Add Custom Keyword
-
-1. Click extension icon
-2. Click "View Blocklists"
-3. Click "+ Add Keyword"
-4. Enter keyword
-5. Click "Add Keyword"
-
-### Search Blocklists
-
-- Type in search box to find domains/keywords
-- See highlighted matches
-- View match count and preview
-- Quick add button for missing items
-
----
-
-## 📊 Statistics
-
-### Current Blocklists
-- **Domains**: 1,133+ NSFW sites
-- **Keywords**: 1,244+ blocked terms
-- **Detection Methods**: 6 layers
-- **False Positive Rate**: < 0.1%
-
-### Performance
-- **Search Speed**: < 10ms for 1000+ items
-- **Blocking Speed**: < 5ms per URL
-- **Memory Usage**: < 10MB
-- **CPU Impact**: Negligible
-
----
-
-## 🛠️ Development
-
-### Project Structure
-
-```
-pure-path/
-├── manifest.json              # Extension configuration
-├── background.js              # Service worker (blocking logic)
-├── content.js                 # Content script (page analysis)
-├── popup.html/js              # Extension popup
-├── setup.html/js              # Setup wizard
-├── blocked.html/js            # Blocked page
-├── blocklists.html/js         # Blocklist manager
-├── blocklists/
-│   ├── domains.json          # Domain blocklist
-│   └── keywords.json         # Keyword blocklist
-├── icons/                     # Extension icons
-├── Guides/                    # Documentation
-└── test-blocklists.html      # Test suite
-```
-
-### Tech Stack
-
-- **JavaScript** - Core logic
-- **HTML/CSS** - User interface
-- **Manifest V3** - Modern Chrome extension format
-- **Chrome Storage API** - Local data persistence
-- **Web Crypto API** - Password hashing
-- **Chrome WebNavigation API** - URL monitoring
-
-### Building from Source
-
-```bash
-# Clone repository
-git clone https://github.com/Xeno-legit/Pure-Path-NSFW-blocker.git
-cd Pure-Path-NSFW-blocker
-
-# No build process needed - load directly in browser
-# See Installation section above
-```
-
-### Running Tests
-
-```bash
-# Open test suite in browser
-open test-blocklists.html
-
-# Or manually:
-# 1. Open test-blocklists.html in browser
-# 2. Click "Run All Tests"
-# 3. View results
-```
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Here's how you can help:
-
-### Reporting Issues
-
-1. Check existing issues first
-2. Use issue templates
-3. Include:
-   - Browser and version
-   - Steps to reproduce
-   - Expected vs actual behavior
-   - Console errors
-   - Screenshots
-
-### Submitting Pull Requests
-
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run test suite
-5. Update documentation
-6. Commit changes (`git commit -m 'Add amazing feature'`)
-7. Push to branch (`git push origin feature/amazing-feature`)
-8. Open Pull Request
-
-### Development Guidelines
-
-- Follow existing code style
-- Add tests for new features
-- Update documentation
-- Keep commits atomic
-- Write clear commit messages
-
----
-
-## 📜 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-### What This Means
-
-✅ **You CAN:**
-- Use for personal projects
-- Use for commercial projects
-- Modify the code
-- Distribute the code
-- Sublicense
-
-❌ **You CANNOT:**
-- Hold the author liable
-- Use author's name for endorsement
-
----
-
-## 🙏 Acknowledgments
-
-### Inspiration
-- Built to help people overcome digital distractions
-- Focused on personal growth and productivity
-- Privacy-first approach
-
-### Technologies
-- Chrome Extension APIs
-- Modern JavaScript (ES6+)
-- Web Crypto API
-- Local Storage API
-
-### Community
-- Thanks to all contributors
-- Thanks to users for feedback
-- Thanks to testers for bug reports
-
----
-
-## 📞 Support
-
-### Documentation
-- [User Guides](Guides/)
-- [Testing Guide](TESTING_GUIDE.md)
-- [Changelog](CHANGELOG.md)
-
-### Issues
-- [Report a Bug](https://github.com/Xeno-legit/Pure-Path-NSFW-blocker/issues)
-- [Request a Feature](https://github.com/Xeno-legit/Pure-Path-NSFW-blocker/issues)
-- [Ask a Question](https://github.com/Xeno-legit/Pure-Path-NSFW-blocker/discussions)
-
-### Contact
-- GitHub: [@Xeno-legit](https://github.com/Xeno-legit)
-- Repository: [Pure-Path-NSFW-blocker](https://github.com/Xeno-legit/Pure-Path-NSFW-blocker)
-
----
-
-## 🗺️ Roadmap
-
-### Version 1.2.0 (Planned)
-- [ ] Fuzzy search (typo tolerance)
-- [ ] Search history
-- [ ] Bulk operations
-- [ ] Export/import functionality
-- [ ] Advanced filters
-- [ ] Regular expression support
-
-### Version 2.0.0 (Planned)
-- [ ] Desktop companion app
-- [ ] 48-hour uninstall wait
-- [ ] Enhanced friction system
-- [ ] Native messaging
-- [ ] System tray integration
-
-### Version 3.0.0 (Planned)
-- [ ] AI image analysis (NSFW.js)
-- [ ] Google Safe Browsing API
-- [ ] Advanced dashboard
-- [ ] Progress graphs
-- [ ] Streak tracking
-
----
-
-## ⭐ Star History
-
-If this project helps you, please consider giving it a star! ⭐
-
-[![Star History Chart](https://api.star-history.com/svg?repos=Xeno-legit/Pure-Path-NSFW-blocker&type=Date)](https://star-history.com/#Xeno-legit/Pure-Path-NSFW-blocker&Date)
-
----
-
-## 📈 Project Stats
-
-![GitHub stars](https://img.shields.io/github/stars/Xeno-legit/Pure-Path-NSFW-blocker?style=social)
-![GitHub forks](https://img.shields.io/github/forks/Xeno-legit/Pure-Path-NSFW-blocker?style=social)
-![GitHub watchers](https://img.shields.io/github/watchers/Xeno-legit/Pure-Path-NSFW-blocker?style=social)
-
-![GitHub issues](https://img.shields.io/github/issues/Xeno-legit/Pure-Path-NSFW-blocker)
-![GitHub pull requests](https://img.shields.io/github/issues-pr/Xeno-legit/Pure-Path-NSFW-blocker)
-![GitHub last commit](https://img.shields.io/github/last-commit/Xeno-legit/Pure-Path-NSFW-blocker)
-
----
-
-## 💡 Philosophy
-
-**Pure Path** is built on these principles:
-
-1. **Protection** - Multiple layers prevent impulsive decisions
-2. **Motivation** - Positive reinforcement, not shame
-3. **Privacy** - All data stays on your device
-4. **Transparency** - You always know what it does
-5. **Growth** - Focus on becoming your best self
-
----
-
-## 🎉 Success Stories
-
-> "Pure Path helped me stay focused and productive. The motivational messages are a great touch!" - User
-
-> "Finally, a blocker that actually works and respects my privacy." - User
-
-> "The customization options are perfect. I can add my own blocklists easily." - User
-
----
-
-**Built with ❤️ to help you become the best version of yourself.**
-
-*Every blocked page is a victory. Every day protected is progress. You've got this!* 🛡️
-
----
-
-## 📝 Quick Links
-
-- [Installation Guide](Guides/INSTALLATION.md)
-- [User Guide](Guides/START_HERE.md)
-- [Testing Guide](TESTING_GUIDE.md)
-- [Changelog](CHANGELOG.md)
-- [Contributing Guidelines](#-contributing)
-- [License](LICENSE)
-- [Report Issue](https://github.com/Xeno-legit/Pure-Path-NSFW-blocker/issues)
-
----
-
-**Made with 🛡️ by [Xeno-legit](https://github.com/Xeno-legit)**
+Pure Path is founded and maintained by [Xeno-legit](https://github.com/Xeno-legit).
