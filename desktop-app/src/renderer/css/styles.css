@@ -1,23 +1,23 @@
 /* ═══════════════════════════════════════════════════════════════════
-   Pure Path — "Electric Ether" Design System
-   Theme: Deep Midnight Blue · Ethereal Violet · Frost White
+   Pure Path — Unified Design System
+   Theme: Blue · Light Purple · Black · White
    ═══════════════════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 /* ─── Design Tokens ──────────────────────────────────────────────── */
 :root {
-  /* Core palette */
-  --bg-deep: #0A0E17;
-  --bg-surface: #0F1422;
-  --bg-elevated: #151B2B;
-  --violet: #8B5CF6;
+  /* Core palette — matches extension exactly */
+  --bg-deep: #0B0E14;
+  --bg-surface: #10141E;
+  --bg-elevated: #171D2B;
+  --violet: #3B82F6;
   --violet-light: #A78BFA;
-  --violet-dark: #7C3AED;
-  --violet-glow: rgba(139, 92, 246, 0.35);
-  --violet-subtle: rgba(139, 92, 246, 0.08);
+  --violet-dark: #2563EB;
+  --violet-glow: rgba(59, 130, 246, 0.25);
+  --violet-subtle: rgba(59, 130, 246, 0.08);
   --blue: #3B82F6;
-  --blue-glow: rgba(59, 130, 246, 0.3);
+  --blue-glow: rgba(59, 130, 246, 0.25);
   --frost: #F1F5F9;
   --frost-muted: #94A3B8;
   --frost-dim: #64748B;
@@ -29,10 +29,10 @@
   --warning: #F59E0B;
 
   /* Glass */
-  --glass-bg: rgba(15, 20, 34, 0.55);
-  --glass-bg-solid: rgba(15, 20, 34, 0.85);
-  --glass-border: rgba(139, 92, 246, 0.12);
-  --glass-border-hover: rgba(139, 92, 246, 0.28);
+  --glass-bg: rgba(16, 20, 30, 0.55);
+  --glass-bg-solid: rgba(16, 20, 30, 0.85);
+  --glass-border: rgba(59, 130, 246, 0.10);
+  --glass-border-hover: rgba(59, 130, 246, 0.25);
   --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
   --glass-shadow-hover: 0 16px 48px rgba(0, 0, 0, 0.45);
 
@@ -47,7 +47,7 @@
 
   /* Typography */
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-mono: 'Inter', sans-serif;
 }
 
 /* ─── Reset ──────────────────────────────────────────────────────── */
@@ -261,12 +261,12 @@ html, body {
 
 .sidebar-item:hover {
   color: var(--frost);
-  background: rgba(139, 92, 246, 0.08);
+  background: rgba(59, 130, 246, 0.08);
 }
 
 .sidebar-item.active {
   color: var(--violet-light);
-  background: rgba(139, 92, 246, 0.14);
+  background: rgba(59, 130, 246, 0.14);
 }
 
 .sidebar-item.active::before {
@@ -416,7 +416,7 @@ html, body {
 
 /* ─── Status Banner ──────────────────────────────────────────────── */
 .status-banner {
-  background: linear-gradient(135deg, var(--violet-dark), var(--blue));
+  background: linear-gradient(135deg, #3B82F6, #A78BFA);
   border: none;
   color: white;
   position: relative;
@@ -536,7 +536,7 @@ html, body {
 }
 
 .stat-value {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 32px;
   font-weight: 700;
   color: var(--frost);
@@ -611,7 +611,7 @@ html, body {
 .quick-action-btn:hover {
   transform: translateX(4px);
   border-color: var(--glass-border-hover);
-  background: rgba(139, 92, 246, 0.06);
+  background: rgba(59, 130, 246, 0.06);
 }
 
 .quick-action-left {
@@ -715,7 +715,7 @@ html, body {
 }
 
 .blocking-pill-value {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 28px;
   font-weight: 700;
   line-height: 1;
@@ -833,7 +833,7 @@ html, body {
 
 .search-input:focus {
   border-color: var(--violet);
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.12);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
 }
 
 .search-input::placeholder {
@@ -855,13 +855,13 @@ html, body {
   justify-content: space-between;
   padding: 12px 16px;
   background: rgba(10, 14, 23, 0.4);
-  border: 1px solid rgba(139, 92, 246, 0.06);
+  border: 1px solid rgba(59, 130, 246, 0.06);
   border-radius: var(--radius-sm);
   transition: all 0.25s ease;
 }
 
 .block-item:hover {
-  background: rgba(139, 92, 246, 0.06);
+  background: rgba(59, 130, 246, 0.06);
   border-color: var(--glass-border);
 }
 
@@ -948,7 +948,7 @@ html, body {
 
 .keyword-tag:hover {
   border-color: var(--glass-border-hover);
-  background: rgba(139, 92, 246, 0.14);
+  background: rgba(59, 130, 246, 0.14);
 }
 
 .keyword-tag-delete {
@@ -1058,7 +1058,7 @@ html, body {
 .modal-close {
   width: 34px;
   height: 34px;
-  background: rgba(139, 92, 246, 0.08);
+  background: rgba(59, 130, 246, 0.08);
   border: none;
   border-radius: var(--radius-sm);
   color: var(--frost-muted);
@@ -1071,7 +1071,7 @@ html, body {
 }
 
 .modal-close:hover {
-  background: rgba(139, 92, 246, 0.16);
+  background: rgba(59, 130, 246, 0.16);
   color: var(--frost);
   transform: rotate(90deg);
 }
@@ -1103,7 +1103,7 @@ html, body {
 
 .form-input:focus {
   border-color: var(--violet);
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.12);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
 }
 
 .form-input::placeholder {
@@ -1326,7 +1326,7 @@ html, body {
 }
 
 .suggestion-chip:hover {
-  background: rgba(139, 92, 246, 0.16);
+  background: rgba(59, 130, 246, 0.16);
   border-color: var(--glass-border-hover);
   transform: translateY(-2px);
 }
@@ -1462,7 +1462,7 @@ html, body {
 }
 
 .settings-item:hover {
-  background: rgba(139, 92, 246, 0.04);
+  background: rgba(59, 130, 246, 0.04);
 }
 
 .settings-item-left {
@@ -1655,8 +1655,8 @@ html, body {
 }
 
 .mentor-kb-card:hover {
-  background: rgba(139, 92, 246, 0.05);
-  border-color: rgba(139, 92, 246, 0.2);
+  background: rgba(59, 130, 246, 0.05);
+  border-color: rgba(59, 130, 246, 0.2);
 }
 
 .mentor-kb-q {
@@ -1701,7 +1701,7 @@ html, body {
 
 .coming-soon-badge {
   padding: 12px 24px;
-  background: rgba(139, 92, 246, 0.15);
+  background: rgba(59, 130, 246, 0.15);
   border: 1px solid var(--violet-light);
   border-radius: 30px;
   color: var(--violet-light);
@@ -1722,7 +1722,7 @@ html, body {
 
 @keyframes pulse-glow {
   0% {
-    box-shadow: 0 0 10px rgba(139, 92, 246, 0.2);
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
     border-color: rgba(139, 92, 246, 0.5);
     text-shadow: 0 0 5px rgba(139, 92, 246, 0.3);
   }

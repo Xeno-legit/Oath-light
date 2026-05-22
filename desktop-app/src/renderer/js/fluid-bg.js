@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════════
    Pure Path — Interactive Fluid Background (Three.js + GLSL)
-   "Electric Ether" — deep midnight base, violet & blue liquid flow
+   Unified theme — blue & purple palette
    ═══════════════════════════════════════════════════════════════════ */
 
 (function () {
@@ -140,32 +140,14 @@
     uTime: { value: 0.0 },
     uMouse: { value: new THREE.Vector2(0.5, 0.5) },
     uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-    uColorBg: { value: new THREE.Color(0.039, 0.055, 0.090) },
-    uColorViolet: { value: new THREE.Color(0.545, 0.361, 0.965) },
+    uColorBg: { value: new THREE.Color(0.043, 0.055, 0.078) },
+    uColorViolet: { value: new THREE.Color(0.231, 0.510, 0.965) },
     uColorBlue: { value: new THREE.Color(0.231, 0.510, 0.965) },
-    uColorDarkViolet: { value: new THREE.Color(0.25, 0.15, 0.45) },
-    uColorFrost: { value: new THREE.Color(0.65, 0.72, 0.82) }
+    uColorDarkViolet: { value: new THREE.Color(0.15, 0.22, 0.45) },
+    uColorFrost: { value: new THREE.Color(0.655, 0.545, 0.980) }
   };
 
-  /* ─── HMR / Boot Synchronization ───────────────────────────────── */
-  (function syncInitialTheme() {
-    const activeThemeId = localStorage.getItem('purepath_active_theme') || 'electric-ether';
-    if (activeThemeId === 'electric-ether') return; // Default is already loaded natively
-
-    fetch(`themes/${activeThemeId}.json`)
-      .then(r => r.json())
-      .then(theme => {
-        const w = theme.webgl;
-        if (w) {
-          // Immediately set the uniform properties without animation smoothing
-          uniforms.uColorBg.value.setRGB(w.deepBg[0], w.deepBg[1], w.deepBg[2]);
-          uniforms.uColorViolet.value.setRGB(w.violet[0], w.violet[1], w.violet[2]);
-          uniforms.uColorBlue.value.setRGB(w.blue[0], w.blue[1], w.blue[2]);
-          uniforms.uColorDarkViolet.value.setRGB(w.darkViolet[0], w.darkViolet[1], w.darkViolet[2]);
-          uniforms.uColorFrost.value.setRGB(w.frostHint[0], w.frostHint[1], w.frostHint[2]);
-        }
-      }).catch(e => console.error('[fluid-bg] HMR Sync failed:', e));
-  })();
+  /* ─── Single theme — no theme JSON loading needed ────────────── */
 
   const material = new THREE.ShaderMaterial({
     vertexShader,
@@ -193,18 +175,7 @@
   }
   window.addEventListener('resize', onResize);
 
-  /* ─── Theme Integration ────────────────────────────────────────── */
-  window.addEventListener('themeChanged', (e) => {
-    const wColors = e.detail.webgl;
-    if (!wColors) return;
-
-    // Smoothly transition colors using GSAP
-    gsap.to(uniforms.uColorBg.value, { r: wColors.deepBg[0], g: wColors.deepBg[1], b: wColors.deepBg[2], duration: 1.2, ease: "power2.out" });
-    gsap.to(uniforms.uColorViolet.value, { r: wColors.violet[0], g: wColors.violet[1], b: wColors.violet[2], duration: 1.2, ease: "power2.out" });
-    gsap.to(uniforms.uColorBlue.value, { r: wColors.blue[0], g: wColors.blue[1], b: wColors.blue[2], duration: 1.2, ease: "power2.out" });
-    gsap.to(uniforms.uColorDarkViolet.value, { r: wColors.darkViolet[0], g: wColors.darkViolet[1], b: wColors.darkViolet[2], duration: 1.2, ease: "power2.out" });
-    gsap.to(uniforms.uColorFrost.value, { r: wColors.frostHint[0], g: wColors.frostHint[1], b: wColors.frostHint[2], duration: 1.2, ease: "power2.out" });
-  });
+  /* ─── Single theme — no runtime theme switching ─────────────── */
 
   /* ─── Animation Loop ───────────────────────────────────────────── */
   let isFluidEnabled = localStorage.getItem('purepath_fluid_enabled') !== 'false';

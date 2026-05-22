@@ -34,8 +34,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   // Check if password is set
   const { passwordHash: storedHash } = await chrome.storage.local.get(['passwordHash']);
   if (!storedHash) {
-    // Open setup page
-    chrome.tabs.create({ url: 'setup.html' });
+    // Setup page removed — password setup handled in-app
   }
 });
 

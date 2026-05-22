@@ -1,18 +1,4 @@
-// Popup script
-
-// Hash password with PBKDF2 + salt (matches setup.js)
-async function hashPassword(password, salt) {
-  const encoder = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']
-  );
-  const derivedBits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt: encoder.encode(salt), iterations: 100000, hash: 'SHA-256' },
-    keyMaterial, 256
-  );
-  const hashArray = Array.from(new Uint8Array(derivedBits));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
+// Pure Path — Popup Script
 
 // Quotes array
 const quotes = [
@@ -28,22 +14,22 @@ const quotes = [
 
 // Display random quote
 function displayRandomQuote() {
-  const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
-  document.getElementById('quoteText').textContent = `"${randomQuote.text}"`;
-  document.getElementById('quoteAuthor').textContent = randomQuote.author;
+  const q = quotes[Math.floor(Math.random() * quotes.length)];
+  document.getElementById('quoteText').textContent = `"${q.text}"`;
+  document.getElementById('quoteAuthor').textContent = q.author;
 }
 
-// Load stats
+// Load stats from extension
 chrome.runtime.sendMessage({ action: 'getStats' }, (response) => {
   if (chrome.runtime.lastError) {
     console.error('Error loading stats:', chrome.runtime.lastError);
     return;
   }
-  
+
   if (response && response.stats) {
     const stats = response.stats;
     document.getElementById('totalBlocks').textContent = stats.totalBlocks || 0;
-    
+
     if (stats.installDate) {
       const installDate = new Date(stats.installDate);
       const now = new Date();
@@ -53,54 +39,9 @@ chrome.runtime.sendMessage({ action: 'getStats' }, (response) => {
   }
 });
 
-// View blocklists button
+// Manage Blocklists button
 document.getElementById('viewBlocklistsBtn').addEventListener('click', () => {
   chrome.tabs.create({ url: 'blocklists.html' });
-});
-
-// Change password button (placeholder for now)
-document.getElementById('changePasswordBtn').addEventListener('click', () => {
-  alert('Password change feature coming soon! For now, you can reinstall the extension to set a new password.');
-});
-
-// Tab switching logic
-document.querySelectorAll('.nav-item').forEach(btn => {
-  btn.addEventListener('click', () => {
-    // Update tabs
-    document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    
-    // Update views
-    const targetView = btn.getAttribute('data-target');
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    const viewEl = document.getElementById(targetView);
-    if (viewEl) viewEl.classList.add('active');
-  });
-});
-
-// Theme switching logic
-document.querySelectorAll('.theme-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const themeId = btn.getAttribute('data-theme-id');
-    document.documentElement.setAttribute('data-theme', themeId);
-    
-    // Update active class
-    document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-
-    // Save to chrome.storage
-    chrome.storage.local.set({ theme: themeId });
-  });
-});
-
-// Load saved theme
-chrome.storage.local.get(['theme'], (result) => {
-  if (result.theme) {
-    document.documentElement.setAttribute('data-theme', result.theme);
-    document.querySelectorAll('.theme-btn').forEach(b => {
-       b.classList.toggle('active', b.getAttribute('data-theme-id') === result.theme);
-    });
-  }
 });
 
 // Initialize
