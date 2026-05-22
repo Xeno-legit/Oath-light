@@ -732,16 +732,6 @@
 
 
   <script src="blocklists.js"></script>
-  <script>
-    // Load saved theme
-    if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.get(['theme'], (result) => {
-        if (result.theme) {
-          document.documentElement.setAttribute('data-theme', result.theme);
-        }
-      });
-    }
-  </script>
 </body>
 
 </html>

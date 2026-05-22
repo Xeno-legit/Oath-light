@@ -416,13 +416,20 @@
 
     const popup = document.createElement('div');
     popup.id = 'pure-path-cheeky-popup';
-    
-    // Use chrome.runtime.getURL to load the icon
-    const iconUrl = chrome.runtime.getURL('icons/icon48.png');
+    let iconHtml = '';
+    try {
+      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
+        const iconUrl = chrome.runtime.getURL('icons/icon48.png');
+        iconHtml = `<img src="${iconUrl}" style="width: 42px; height: 42px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background: rgba(255,255,255,0.2); padding: 3px;" alt="Pure Path Logo">`;
+      }
+    } catch (e) {
+      // If extension context is invalidated, fallback to an emoji
+      iconHtml = `<div style="font-size: 36px; line-height: 1;">🛡️</div>`;
+    }
     
     popup.innerHTML = `
       <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center;">
-        <img src="${iconUrl}" style="width: 42px; height: 42px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background: rgba(255,255,255,0.2); padding: 3px;" alt="Pure Path Logo">
+        ${iconHtml}
         <div>${msg}</div>
       </div>
     `;

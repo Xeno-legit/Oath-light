@@ -485,3 +485,13 @@ document.addEventListener('click', (e) => {
     document.getElementById('domainInput').value = value;
   }
 });
+
+// Load saved theme
+if (typeof chrome !== 'undefined' && chrome.storage) {
+  chrome.storage.local.get(['theme'], (result) => {
+    if (result.theme) {
+      document.documentElement.setAttribute('data-theme', result.theme);
+    }
+  });
+}
+
