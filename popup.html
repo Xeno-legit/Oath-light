@@ -4,37 +4,37 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Pure Path</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
-    /* ═══ Pure Path — Unified Theme ═══ */
+    /* ═══ Pure Path — Fresh Dawn Theme ═══ */
     :root {
-      --pp-bg-deep: #0B0E14;
-      --pp-bg-surface: #10141E;
-      --pp-bg-elevated: #171D2B;
-      --pp-accent-blue: #3B82F6;
-      --pp-accent-purple: #A78BFA;
-      --pp-accent-glow: rgba(59, 130, 246, 0.25);
-      --pp-gradient: linear-gradient(135deg, #3B82F6, #A78BFA);
-      --pp-text: #F1F5F9;
-      --pp-text-muted: #94A3B8;
-      --pp-text-dim: #64748B;
-      --pp-border: rgba(59, 130, 246, 0.10);
-      --pp-border-hover: rgba(59, 130, 246, 0.25);
-      --pp-success: #10B981;
-      --pp-danger: #EF4444;
-      --pp-glass: rgba(16, 20, 30, 0.55);
-      --pp-glass-solid: rgba(16, 20, 30, 0.85);
-      --pp-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      --bg-primary: #FAFAF9;
+      --bg-secondary: #FFFFFF;
+      --bg-accent: #F5F5F4;
+      --accent-primary: #0D9488;
+      --accent-secondary: #14B8A6;
+      --accent-warm: #F97316;
+      --accent-gradient: linear-gradient(135deg, #0D9488, #14B8A6);
+      --text-primary: #1C1917;
+      --text-secondary: #44403C;
+      --text-muted: #78716C;
+      --border-subtle: rgba(0, 0, 0, 0.06);
+      --border-focus: rgba(13, 148, 136, 0.3);
+      --shadow-soft: 0 2px 8px rgba(0, 0, 0, 0.04);
+      --shadow-medium: 0 4px 16px rgba(0, 0, 0, 0.06);
+      --shadow-strong: 0 8px 32px rgba(0, 0, 0, 0.08);
+      --success: #059669;
+      --danger: #DC2626;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
       width: 375px;
       height: 580px;
-      background: var(--pp-bg-deep);
-      color: var(--pp-text);
+      background: var(--bg-primary);
+      color: var(--text-primary);
       overflow-y: auto;
       overflow-x: hidden;
       -webkit-font-smoothing: antialiased;
@@ -43,40 +43,17 @@
     /* ─── Scrollbar ─── */
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(59, 130, 246, 0.2); border-radius: 10px; }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(59, 130, 246, 0.4); }
+    ::-webkit-scrollbar-thumb { background: rgba(13, 148, 136, 0.2); border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(13, 148, 136, 0.4); }
 
-    /* ─── Ambient Background ─── */
-    .ambient-bg {
+    /* ─── Subtle Background Pattern ─── */
+    .bg-pattern {
       position: fixed;
       top: 0; left: 0; width: 100%; height: 100%;
-      pointer-events: none; z-index: 0; overflow: hidden;
-    }
-    .orb {
-      position: absolute;
-      border-radius: 50%;
-      filter: blur(80px);
-      will-change: transform;
-    }
-    .orb-1 {
-      width: 280px; height: 280px;
-      background: rgba(59, 130, 246, 0.15);
-      top: -80px; right: -80px;
-      animation: drift-1 22s ease-in-out infinite alternate;
-    }
-    .orb-2 {
-      width: 220px; height: 220px;
-      background: rgba(167, 139, 250, 0.10);
-      bottom: 30px; left: -60px;
-      animation: drift-2 26s ease-in-out infinite alternate;
-    }
-    @keyframes drift-1 {
-      0% { transform: translate(0, 0) scale(1); }
-      100% { transform: translate(-30px, 40px) scale(1.08); }
-    }
-    @keyframes drift-2 {
-      0% { transform: translate(0, 0) scale(1); }
-      100% { transform: translate(25px, -35px) scale(1.05); }
+      pointer-events: none; z-index: 0;
+      background-image: 
+        radial-gradient(circle at 20% 30%, rgba(13, 148, 136, 0.03) 0%, transparent 50%),
+        radial-gradient(circle at 80% 70%, rgba(249, 115, 22, 0.03) 0%, transparent 50%);
     }
 
     /* ─── App Container ─── */
@@ -86,7 +63,7 @@
       min-height: 100%;
       display: flex;
       flex-direction: column;
-      padding: 0 20px 24px 20px;
+      padding: 0 24px 24px 24px;
     }
 
     /* ─── Header ─── */
@@ -94,20 +71,19 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 20px 0 16px 0;
-      animation: fade-down 0.5s ease-out;
+      padding: 24px 0 20px 0;
     }
     .header-left {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 14px;
     }
     .logo {
-      width: 38px; height: 38px;
-      border-radius: 10px;
-      background: var(--pp-bg-surface);
-      border: 1px solid var(--pp-border);
-      padding: 4px;
+      width: 42px; height: 42px;
+      border-radius: 12px;
+      background: var(--bg-secondary);
+      box-shadow: var(--shadow-soft);
+      padding: 6px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -118,64 +94,46 @@
       object-fit: contain;
     }
     .header-title h1 {
-      font-size: 17px;
+      font-size: 18px;
       font-weight: 700;
       letter-spacing: -0.02em;
-      color: var(--pp-text);
+      color: var(--text-primary);
     }
     .header-version {
       font-size: 11px;
       font-weight: 500;
-      color: var(--pp-text-dim);
+      color: var(--text-muted);
       letter-spacing: 0.02em;
-    }
-    @keyframes fade-down {
-      from { opacity: 0; transform: translateY(-8px); }
-      to { opacity: 1; transform: translateY(0); }
     }
 
     /* ─── Status Banner ─── */
     .status-banner {
-      background: var(--pp-gradient);
-      border-radius: 16px;
-      padding: 22px 24px;
-      margin-bottom: 16px;
+      background: var(--accent-gradient);
+      border-radius: 20px;
+      padding: 24px 28px;
+      margin-bottom: 20px;
       position: relative;
       overflow: hidden;
-      animation: slide-up 0.5s ease-out 0.1s both;
+      box-shadow: 0 4px 20px rgba(13, 148, 136, 0.25);
     }
     .status-banner::before {
       content: '';
       position: absolute;
       top: -50%; right: -30%;
       width: 200px; height: 200px;
-      background: radial-gradient(circle, rgba(255,255,255,0.08), transparent 70%);
+      background: radial-gradient(circle, rgba(255,255,255,0.15), transparent 70%);
       border-radius: 50%;
       pointer-events: none;
-    }
-    /* Shimmer sweep */
-    .status-banner::after {
-      content: '';
-      position: absolute;
-      top: 0; left: -100%;
-      width: 100%; height: 100%;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
-      animation: shimmer 4s ease-in-out infinite;
-    }
-    @keyframes shimmer {
-      0% { left: -100%; }
-      50% { left: 100%; }
-      100% { left: 100%; }
     }
     .status-badge {
       display: flex;
       align-items: center;
-      gap: 8px;
-      margin-bottom: 10px;
+      gap: 10px;
+      margin-bottom: 12px;
     }
     .pulse-dot {
       position: relative;
-      width: 8px; height: 8px;
+      width: 10px; height: 10px;
     }
     .pulse-inner {
       position: absolute;
@@ -198,125 +156,116 @@
       font-size: 10px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: rgba(255,255,255,0.85);
+      letter-spacing: 0.12em;
+      color: rgba(255,255,255,0.9);
     }
     .status-title {
-      font-size: 22px;
+      font-size: 24px;
       font-weight: 700;
       color: #fff;
-      margin-bottom: 3px;
-      text-shadow: 0 1px 4px rgba(0,0,0,0.15);
+      margin-bottom: 4px;
     }
     .status-subtitle {
-      font-size: 12px;
-      color: rgba(255,255,255,0.8);
+      font-size: 13px;
+      color: rgba(255,255,255,0.85);
       font-weight: 400;
-    }
-
-    @keyframes slide-up {
-      from { opacity: 0; transform: translateY(16px); }
-      to { opacity: 1; transform: translateY(0); }
     }
 
     /* ─── Stats Grid ─── */
     .stats-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 16px;
-      animation: slide-up 0.5s ease-out 0.2s both;
+      gap: 14px;
+      margin-bottom: 18px;
     }
     .stat-card {
-      background: var(--pp-glass);
-      border: 1px solid var(--pp-border);
-      border-radius: 14px;
-      padding: 18px 16px;
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      transition: border-color 0.3s ease;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 20px 18px;
+      box-shadow: var(--shadow-soft);
+      transition: all 0.25s ease;
     }
     .stat-card:hover {
-      border-color: var(--pp-border-hover);
+      box-shadow: var(--shadow-medium);
+      transform: translateY(-2px);
     }
     .stat-icon {
-      width: 32px; height: 32px;
-      border-radius: 9px;
+      width: 36px; height: 36px;
+      border-radius: 10px;
       display: flex;
       align-items: center;
       justify-content: center;
-      margin-bottom: 12px;
+      margin-bottom: 14px;
     }
     .stat-icon.blue {
-      background: rgba(59, 130, 246, 0.12);
-      color: var(--pp-accent-blue);
+      background: rgba(13, 148, 136, 0.1);
+      color: var(--accent-primary);
     }
-    .stat-icon.purple {
-      background: rgba(167, 139, 250, 0.12);
-      color: var(--pp-accent-purple);
+    .stat-icon.orange {
+      background: rgba(249, 115, 22, 0.1);
+      color: var(--accent-warm);
     }
     .stat-icon svg {
-      width: 18px; height: 18px;
+      width: 20px; height: 20px;
       stroke: currentColor; stroke-width: 2;
       fill: none; stroke-linecap: round; stroke-linejoin: round;
     }
     .stat-value {
-      font-size: 28px;
+      font-size: 30px;
       font-weight: 700;
-      color: var(--pp-text);
-      margin-bottom: 2px;
+      color: var(--text-primary);
+      margin-bottom: 4px;
       line-height: 1;
     }
     .stat-label {
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 500;
-      color: var(--pp-text-muted);
-      letter-spacing: 0.01em;
+      color: var(--text-muted);
+      letter-spacing: 0.02em;
     }
 
     /* ─── Quote Card ─── */
     .quote-card {
-      background: var(--pp-glass);
-      border: 1px solid var(--pp-border);
-      border-radius: 14px;
-      padding: 18px 20px;
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 20px 22px;
+      box-shadow: var(--shadow-soft);
       display: flex;
-      gap: 14px;
+      gap: 16px;
       align-items: flex-start;
-      margin-bottom: 16px;
-      animation: slide-up 0.5s ease-out 0.3s both;
-      transition: border-color 0.3s ease;
+      margin-bottom: 18px;
+      transition: all 0.25s ease;
     }
     .quote-card:hover {
-      border-color: var(--pp-border-hover);
+      box-shadow: var(--shadow-medium);
     }
     .quote-icon {
-      color: var(--pp-accent-purple);
-      opacity: 0.4;
+      color: var(--accent-primary);
+      opacity: 0.3;
       flex-shrink: 0;
       margin-top: 2px;
     }
     .quote-icon svg {
-      width: 18px; height: 18px;
+      width: 20px; height: 20px;
       stroke: currentColor; stroke-width: 2;
       fill: none;
     }
     .quote-text {
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 400;
       line-height: 1.6;
-      color: var(--pp-text);
-      margin-bottom: 6px;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
       font-style: italic;
     }
     .quote-author {
-      font-size: 10px;
+      font-size: 11px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--pp-accent-blue);
+      letter-spacing: 0.08em;
+      color: var(--accent-primary);
     }
 
     /* ─── Action Button ─── */
@@ -325,55 +274,50 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 16px 18px;
-      background: var(--pp-glass);
-      border: 1px solid var(--pp-border);
-      border-radius: 14px;
+      padding: 18px 20px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
       cursor: pointer;
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      box-shadow: var(--shadow-soft);
       transition: all 0.25s ease;
-      color: var(--pp-text);
+      color: var(--text-primary);
       font-family: inherit;
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 600;
-      animation: slide-up 0.5s ease-out 0.4s both;
     }
     .action-btn:hover {
-      border-color: var(--pp-border-hover);
-      transform: translateX(3px);
-      background: rgba(59, 130, 246, 0.04);
+      border-color: var(--border-focus);
+      box-shadow: var(--shadow-medium);
+      transform: translateX(4px);
     }
     .action-left {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 14px;
     }
     .action-icon {
-      width: 34px; height: 34px;
-      background: rgba(59, 130, 246, 0.10);
-      color: var(--pp-accent-blue);
-      border-radius: 9px;
+      width: 38px; height: 38px;
+      background: rgba(13, 148, 136, 0.1);
+      color: var(--accent-primary);
+      border-radius: 10px;
       display: flex;
       align-items: center;
       justify-content: center;
     }
     .action-icon svg, .action-arrow svg {
-      width: 18px; height: 18px;
+      width: 19px; height: 19px;
       stroke: currentColor; stroke-width: 2;
       fill: none; stroke-linecap: round; stroke-linejoin: round;
     }
     .action-arrow {
-      color: var(--pp-text-dim);
+      color: var(--text-muted);
     }
   </style>
 </head>
 <body>
-  <!-- Ambient Background -->
-  <div class="ambient-bg">
-    <div class="orb orb-1"></div>
-    <div class="orb orb-2"></div>
-  </div>
+  <!-- Background Pattern -->
+  <div class="bg-pattern"></div>
 
   <div class="app-container">
     <!-- Header -->
@@ -412,7 +356,7 @@
         <div class="stat-label">Sites Blocked</div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon purple">
+        <div class="stat-icon orange">
           <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
         </div>
         <div class="stat-value" id="daysProtected">0</div>
