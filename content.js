@@ -125,6 +125,7 @@
       `,
       hideContent: `
         .nsfw-image, .prompt-18plus,
+        shreddit-post[is-nsfw], shreddit-post[is-over-18],
         shreddit-post[nsfw], shreddit-post[over18],
         div[data-testid="post-container"]:has(.nsfw-stamp),
         .thing.over18, .listing-item:has(.nsfw-icon)
@@ -132,21 +133,25 @@
     },
     'twitter.com': {
       hideUI: `
+        section[aria-label="Section details"]:has(input[aria-describedby="CHECKBOX_2_LABEL"]),
+        label:has(input[type="checkbox"][aria-describedby="CHECKBOX_2_LABEL"]),
         a[href="/settings/content_you_see"], a[href*="content_you_see"],
-        div[role="listitem"]:has(a[href*="content_you_see"]),
-        [data-testid="settingsContentYouSee"],
-        div[role="group"]:has(input[name*="sensitive"]),
-        label:has(input[name*="sensitive_media"])
+        a[href="/settings/explore"][data-testid="pivot"],
+        a[href="/settings/search"][data-testid="pivot"],
+        dialog:has(input[type="checkbox"]):has([class*="r-"]),
+        [data-testid="settingsContentYouSee"]
       `,
       hideContent: `[data-testid="sensitiveMediaInterstitial"]`
     },
     'x.com': {
       hideUI: `
+        section[aria-label="Section details"]:has(input[aria-describedby="CHECKBOX_2_LABEL"]),
+        label:has(input[type="checkbox"][aria-describedby="CHECKBOX_2_LABEL"]),
         a[href="/settings/content_you_see"], a[href*="content_you_see"],
-        div[role="listitem"]:has(a[href*="content_you_see"]),
-        [data-testid="settingsContentYouSee"],
-        div[role="group"]:has(input[name*="sensitive"]),
-        label:has(input[name*="sensitive_media"])
+        a[href="/settings/explore"][data-testid="pivot"],
+        a[href="/settings/search"][data-testid="pivot"],
+        dialog:has(input[type="checkbox"]):has([class*="r-"]),
+        [data-testid="settingsContentYouSee"]
       `,
       hideContent: `[data-testid="sensitiveMediaInterstitial"]`
     },
@@ -198,9 +203,31 @@
         label:has(input[name*="rating"]):has(input[value="a"]),
         label:has(input[name*="rating_a"]),
         [class*="content-setting"]:has([class*="rating"]),
-        input[name*="rating_a"], input[name*="rating"][value="a"]
+        input[name*="rating_a"], input[name*="rating"][value="a"],
+        li:has(input.suitable-a),
+        li:has(input[value="a"][name*="suitabilit"]),
+        #ignore-filter-link, #ignore-warning
       `,
-      hideContent: `.rating-a, .item-A, [class*="rated-a"], a[class*="rated-a"], div:has(> .rating-a)`
+      hideContent: `.rating-a, .item-A, [class*="rated-a"], a[class*="rated-a"], div:has(> .rating-a)`,
+      rawCSS: `
+        /* Nuke the A rating icon everywhere: search sidebar, browse filters, settings */
+        .suitable-a, label[for*="_a"].suitable-a,
+        li:has(> input.suitable-a),
+        li:has(> input[value="a"][name*="suitabilit"]),
+        [role="listitem"]:has(.suitable-a),
+        .checkboxes li:last-child:has(input[value="a"]),
+        /* Hide the entire content settings row on the settings page */
+        #settings_content, .settings-content,
+        form[action*="settings"] .content-ratings,
+        form[action*="settings"] fieldset:has(input.suitable-a) {
+          display: none !important;
+          visibility: hidden !important;
+          width: 0 !important; height: 0 !important;
+          overflow: hidden !important;
+          position: absolute !important;
+          clip: rect(0,0,0,0) !important;
+        }
+      `
     },
     'nexusmods.com': {
       hideUI: `
@@ -507,8 +534,33 @@
     console.log(`🔒 Pure Path: Graylist filters enforced on ${matchedKey}`);
   }
 
+  // ── SHARED DOM UTILITIES ─────────────────────────────────────────
+  function querySelectorAllDeep(selector, root = document) {
+    const results = Array.from(root.querySelectorAll(selector));
+    const allEls = root.querySelectorAll('*');
+    for (const el of allEls) {
+      if (el.shadowRoot) {
+        results.push(...querySelectorAllDeep(selector, el.shadowRoot));
+      }
+    }
+    return results;
+  }
+
+  function getAllShadowRoots(root = document) {
+    const roots = [];
+    const allEls = root.querySelectorAll('*');
+    for (const el of allEls) {
+      if (el.shadowRoot) {
+        roots.push(el.shadowRoot);
+        roots.push(...getAllShadowRoots(el.shadowRoot));
+      }
+    }
+    return roots;
+  }
+
   // ── CHEEKY CLICK DETECTION ──────────────────────────────────────
-  // Uses a **debounced** MutationObserver to avoid CPU thrashing on SPAs.
+  // Places invisible overlay divs on top of hidden NSFW toggle areas
+  // so that clicking where the toggle WOULD be triggers the popup.
 
   function setupCheekyClickDetection(uiSelectors) {
     const selectorList = uiSelectors
@@ -523,29 +575,6 @@
     }
     if (validSelectors.length === 0) return;
 
-    function querySelectorAllDeep(selector, root = document) {
-      const results = Array.from(root.querySelectorAll(selector));
-      const allEls = root.querySelectorAll('*');
-      for (const el of allEls) {
-        if (el.shadowRoot) {
-          results.push(...querySelectorAllDeep(selector, el.shadowRoot));
-        }
-      }
-      return results;
-    }
-
-    function getAllShadowRoots(root = document) {
-      const roots = [];
-      const allEls = root.querySelectorAll('*');
-      for (const el of allEls) {
-        if (el.shadowRoot) {
-          roots.push(el.shadowRoot);
-          roots.push(...getAllShadowRoots(el.shadowRoot));
-        }
-      }
-      return roots;
-    }
-
     function scanAndIntercept() {
       for (const sel of validSelectors) {
         try {
@@ -553,11 +582,26 @@
           for (const el of elements) {
             if (el.dataset.purePathIntercepted) continue;
             el.dataset.purePathIntercepted = 'true';
+
+            // Strategy: listen on the parent for clicks in the area where the
+            // hidden element lives.  Since the element itself is display:none,
+            // clicks can never target it — so instead we intercept ALL clicks
+            // on the parent container while on a settings-like page.
             const parent = el.parentElement;
             if (parent && !parent.dataset.purePathWatch) {
               parent.dataset.purePathWatch = 'true';
               parent.addEventListener('click', (e) => {
-                if (!e.isTrusted) return; // Allow programmatic clicks from our script to pass through to Reddit
+                if (!e.isTrusted) return;
+                // If the hidden element is still display:none, the click
+                // must have hit the parent area — trigger the popup.
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  showCheekyPopup();
+                  return;
+                }
+                // Fallback: direct hit on the element
                 if (el.contains(e.target) || e.target === el) {
                   e.preventDefault();
                   e.stopPropagation();
@@ -577,100 +621,8 @@
       scanAndIntercept();
     }
 
-    // Global MutationObserver misses shadow DOM updates. 
-    // We use a recurring interval to ensure shadow DOMs are always handled.
-    function enforceShadowDOM() {
-      scanAndIntercept();
-      
-      const cssElement = document.getElementById('pure-path-graylist-lock');
-      if (cssElement) {
-         const cssText = cssElement.textContent;
-         
-         // Create a reusable stylesheet for shadow DOMs
-         if (!window._purePathSheet) {
-            try {
-               window._purePathSheet = new CSSStyleSheet();
-               window._purePathSheet.replaceSync(cssText);
-            } catch (e) {
-               window._purePathSheet = 'fallback'; // For very old browsers
-            }
-         }
-
-         const shadowRoots = getAllShadowRoots();
-         for (const sr of shadowRoots) {
-            // Avoid adding multiple times
-            if (!sr._purePathInjected) {
-               sr._purePathInjected = true;
-               
-               if (window._purePathSheet !== 'fallback') {
-                  // Modern approach: Does not mutate the DOM tree! 
-                  // This prevents React/Lit from crashing during back-navigation DOM diffing.
-                  sr.adoptedStyleSheets = [...sr.adoptedStyleSheets, window._purePathSheet];
-               } else if (!sr.getElementById('pure-path-graylist-lock')) {
-                  // Fallback for older browsers
-                  const style = document.createElement('style');
-                  style.id = 'pure-path-graylist-lock';
-                  style.textContent = cssText;
-                  sr.appendChild(style);
-               }
-            }
-         }
-      }
-
-      // Force Reddit filters to Safe Mode if they are explicitly turned ON.
-      if (matchGraylistDomain() === 'reddit.com') {
-         // Auto-confirm the "Mark as safe" modal that pops up when we force the profile mature setting off
-         const nsfwModals = querySelectorAllDeep('rpl-modal-card#nsfw-rpl-modal-card');
-         for (const modalWrapper of nsfwModals) {
-            const checkbox = querySelectorAllDeep('faceplate-checkbox-input', modalWrapper)[0];
-            if (checkbox && !checkbox.hasAttribute('checked') && checkbox.getAttribute('aria-checked') !== 'true') {
-               checkbox.click();
-            }
-            const confirmBtn = querySelectorAllDeep('button[slot="primary-button"]', modalWrapper)[0];
-            if (confirmBtn && !confirmBtn.hasAttribute('disabled')) {
-               confirmBtn.click();
-            }
-         }
-
-         const togglesToDisable = [
-            '[data-testid="is-nsfw-shown"] faceplate-switch-input',
-            '[data-testid="nsfw-posts-and-comments"] faceplate-switch-input',
-            '[data-testid="is-nsfw"] faceplate-switch-input',
-            '[data-testid="feed-settings-mature"] input',
-            'input[name*="mature"]'
-         ];
-         for (const sel of togglesToDisable) {
-            const els = querySelectorAllDeep(sel);
-            for (const el of els) {
-               if (el.hasAttribute('checked') || el.getAttribute('aria-checked') === 'true' || el.checked) {
-                  if (!el.dataset.purePathForced) {
-                     el.dataset.purePathForced = 'true';
-                     console.log("🔒 Pure Path: Forcing filter off.");
-                     el.click();
-                  }
-               }
-            }
-         }
-         
-         // Safe browsing mode (Blur images) should be ON
-         const blurToggles = querySelectorAllDeep('[data-testid="safe-browsing-mode"] faceplate-switch-input');
-         for (const el of blurToggles) {
-            if (!el.hasAttribute('checked') && el.getAttribute('aria-checked') !== 'true') {
-               if (!el.dataset.purePathForcedBlur) {
-                  el.dataset.purePathForcedBlur = 'true';
-                  console.log("🔒 Pure Path: Forcing blur on.");
-                  el.click();
-               }
-            }
-         }
-      }
-    }
-
-    // Run initially
-    enforceShadowDOM();
-
-    // Run every 800ms to catch dynamic shadow DOM renders (like Reddit SPA)
-    setInterval(enforceShadowDOM, 800);
+    // Re-scan periodically for SPA-injected elements
+    setInterval(scanAndIntercept, 800);
 
     // Global settings-page keyword click listener
     document.addEventListener('click', (e) => {
@@ -736,10 +688,204 @@
   }
   
   // ============================================================================
+  // SHADOW DOM ENFORCEMENT + SITE-SPECIFIC TOGGLE ENFORCEMENT
+  // Runs independently of click detection — ensures CSS is injected into all
+  // shadow roots and that NSFW toggles are always forced to safe state.
+  // ============================================================================
+
+  function enforceShadowDOM() {
+    const cssElement = document.getElementById('pure-path-graylist-lock');
+    if (cssElement) {
+      const cssText = cssElement.textContent;
+
+      // Create a reusable stylesheet for shadow DOMs
+      if (!window._purePathSheet) {
+        try {
+          window._purePathSheet = new CSSStyleSheet();
+          window._purePathSheet.replaceSync(cssText);
+        } catch (e) {
+          window._purePathSheet = 'fallback'; // For very old browsers
+        }
+      }
+
+      const shadowRoots = getAllShadowRoots();
+      for (const sr of shadowRoots) {
+        if (!sr._purePathInjected) {
+          sr._purePathInjected = true;
+          if (window._purePathSheet !== 'fallback') {
+            sr.adoptedStyleSheets = [...sr.adoptedStyleSheets, window._purePathSheet];
+          } else if (!sr.getElementById('pure-path-graylist-lock')) {
+            const style = document.createElement('style');
+            style.id = 'pure-path-graylist-lock';
+            style.textContent = cssText;
+            sr.appendChild(style);
+          }
+        }
+      }
+    }
+
+    // ── REDDIT TOGGLE ENFORCEMENT ──────────────────────────────────────
+    if (matchGraylistDomain() === 'reddit.com') {
+      enforceRedditToggles();
+    }
+
+    // ── X / TWITTER TOGGLE ENFORCEMENT ─────────────────────────────────
+    const xDomain = matchGraylistDomain();
+    if (xDomain === 'x.com' || xDomain === 'twitter.com') {
+      enforceTwitterToggles();
+    }
+
+    // ── NEWGROUNDS RATING ENFORCEMENT ──────────────────────────────────
+    if (matchGraylistDomain() === 'newgrounds.com') {
+      enforceNewgroundsRatings();
+    }
+  }
+
+  // ── REDDIT: Force all NSFW toggles to safe state ──────────────────
+  function enforceRedditToggles() {
+    // Auto-confirm the "Mark as safe" modal
+    const nsfwModals = querySelectorAllDeep('rpl-modal-card#nsfw-rpl-modal-card');
+    for (const modalWrapper of nsfwModals) {
+      const checkbox = querySelectorAllDeep('faceplate-checkbox-input', modalWrapper)[0];
+      if (checkbox && !checkbox.hasAttribute('checked') && checkbox.getAttribute('aria-checked') !== 'true') {
+        checkbox.click();
+      }
+      const confirmBtn = querySelectorAllDeep('button[slot="primary-button"]', modalWrapper)[0];
+      if (confirmBtn && !confirmBtn.hasAttribute('disabled')) {
+        confirmBtn.click();
+      }
+    }
+
+    // Force NSFW toggles OFF — check actual state every cycle, not a flag
+    const togglesToDisable = [
+      '[data-testid="is-nsfw-shown"] faceplate-switch-input',
+      '[data-testid="nsfw-posts-and-comments"] faceplate-switch-input',
+      '[data-testid="is-nsfw"] faceplate-switch-input',
+      '[data-testid="feed-settings-mature"] input',
+      'input[name*="mature"]'
+    ];
+    for (const sel of togglesToDisable) {
+      const els = querySelectorAllDeep(sel);
+      for (const el of els) {
+        if (el.hasAttribute('checked') || el.getAttribute('aria-checked') === 'true' || el.checked) {
+          console.log("🔒 Pure Path: Forcing filter off.");
+          el.click();
+        }
+      }
+    }
+
+    // Safe browsing mode (Blur images) should be ON
+    const blurToggles = querySelectorAllDeep('[data-testid="safe-browsing-mode"] faceplate-switch-input');
+    for (const el of blurToggles) {
+      if (!el.hasAttribute('checked') && el.getAttribute('aria-checked') !== 'true') {
+        console.log("🔒 Pure Path: Forcing blur on.");
+        el.click();
+      }
+    }
+  }
+
+  // ── X/TWITTER: Force sensitive content toggles to safe state ──────
+  function enforceTwitterToggles() {
+    // 1. Force-UNCHECK "Display media that may contain sensitive content"
+    const sensitiveCheckbox = document.querySelector('input[type="checkbox"][aria-describedby="CHECKBOX_2_LABEL"]');
+    if (sensitiveCheckbox && sensitiveCheckbox.checked) {
+      console.log('🔒 Pure Path: Forcing X "Display sensitive media" OFF.');
+      sensitiveCheckbox.click();
+    }
+
+    // 2. Force-CHECK "Hide sensitive content" in Search Settings dialog
+    const searchDialogs = document.querySelectorAll('div[role="dialog"]');
+    for (const dialog of searchDialogs) {
+      const heading = dialog.querySelector('h2');
+      if (!heading || !heading.textContent.includes('Search settings')) continue;
+      const checkboxes = dialog.querySelectorAll('input[type="checkbox"]');
+      for (const cb of checkboxes) {
+        const labelText = cb.closest('label')?.textContent || '';
+        if (labelText.includes('Hide sensitive content') && !cb.checked) {
+          console.log('🔒 Pure Path: Forcing X "Hide sensitive content" ON.');
+          cb.click();
+        }
+      }
+    }
+
+    // 3. Force-close any open Search/Explore settings dialogs
+    for (const dialog of searchDialogs) {
+      const closeBtn = dialog.querySelector('button[aria-label="Close"]') || dialog.querySelector('[data-testid="app-bar-close"]');
+      if (closeBtn && !dialog.dataset.purePathClosed) {
+        dialog.dataset.purePathClosed = 'true';
+        setTimeout(() => closeBtn.click(), 200);
+      }
+    }
+  }
+
+  // ── NEWGROUNDS: Force A-rating checkbox to unchecked ──────────────
+  function enforceNewgroundsRatings() {
+    // Uncheck any "A" rating checkboxes that are checked
+    const aRatingInputs = document.querySelectorAll(
+      'input.suitable-a, input[value="a"][name*="suitabilit"], input[name*="rating_a"], input[name*="rating"][value="a"]'
+    );
+    for (const input of aRatingInputs) {
+      if (input.checked) {
+        console.log('🔒 Pure Path: Forcing Newgrounds A-rating OFF.');
+        input.checked = false;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+  }
+
+  // ============================================================================
   // INITIALIZATION
   // ============================================================================
   
+  // ============================================================================
+  // NEWGROUNDS "CONTENT FILTERED" BYPASS BLOCKER
+  // Detects the "show it to me anyway" page and immediately redirects to blocked.html.
+  // Runs at the TOP LEVEL so it fires before anything else on the page.
+  // ============================================================================
+
+  function blockNewgroundsBypassPage() {
+    if (matchGraylistDomain() !== 'newgrounds.com') return;
+    if (window._purePathBlockedNG) return;
+
+    function doBlock() {
+      // Check for the bypass link or the page title
+      const bypassLink = document.getElementById('ignore-filter-link');
+      const title = document.title;
+      const hasFilterPage = bypassLink || title === 'Content Filtered';
+      if (!hasFilterPage) return;
+
+      window._purePathBlockedNG = true;
+      // Hide everything immediately
+      document.documentElement.style.display = 'none';
+      try {
+        window.location.replace(chrome.runtime.getURL('blocked.html'));
+      } catch (e) {
+        // Fallback: nuke the page entirely
+        document.documentElement.innerHTML = '<html><body style="background:#0f172a;"></body></html>';
+      }
+    }
+
+    // Run immediately if DOM is ready
+    if (document.readyState !== 'loading') {
+      doBlock();
+    }
+    // Also run on DOMContentLoaded in case we beat the DOM
+    document.addEventListener('DOMContentLoaded', doBlock);
+    // Failsafe: poll for a short burst in case the element loads late
+    let checks = 0;
+    const interval = setInterval(() => {
+      if (window._purePathBlockedNG || checks++ > 15) {
+        clearInterval(interval);
+        return;
+      }
+      doBlock();
+    }, 200);
+  }
+
   function initContentScript() {
+    // FIRST: check for Newgrounds bypass page before doing anything else
+    blockNewgroundsBypassPage();
+
     if (isSearchEngine) {
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', hideSafeSearchUI);
@@ -755,6 +901,18 @@
       } else {
         injectGraylistFilterCSS();
       }
+
+      // Start the enforcement loop for shadow DOM + toggle enforcement
+      // Runs independently of cheeky click detection
+      const startEnforcement = () => {
+        enforceShadowDOM();
+        setInterval(enforceShadowDOM, 800);
+      };
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', startEnforcement);
+      } else {
+        startEnforcement();
+      }
     }
     
     setupSpaMonitoring();
@@ -762,3 +920,4 @@
   
   initContentScript();
 })();
+

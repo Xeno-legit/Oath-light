@@ -610,28 +610,38 @@ function shouldBlockUrl(url) {
     // STEP 4: REDDIT-SPECIFIC CONTENT FILTERING (Paths and Keywords)
     // ========================================================================
     if (hostname === 'reddit.com' || hostname.endsWith('.reddit.com')) {
-      const decodedUrl = decodeURIComponent(url).toLowerCase();
       const pathname = urlObj.pathname.toLowerCase();
       
-      for (const keyword of HARD_PORN_KEYWORDS) {
-        // Regex word boundary match for hard keywords
-        const regex = new RegExp(`\\b${keyword.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'i');
-        if (regex.test(decodedUrl)) {
-          return { blocked: true, reason: 'reddit_hard_keyword', match: keyword, tier: 'blacklist', hostname };
-        }
-      }
-      
-      for (const keyword of SOFT_PORN_KEYWORDS) {
-        const regex = new RegExp(`\\b${keyword.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'i');
-        if (regex.test(decodedUrl)) {
-          return { blocked: true, reason: 'reddit_soft_keyword', match: keyword, tier: 'blacklist', hostname };
-        }
-      }
-      
+      // 4a. Check explicit NSFW paths FIRST (exact, no false positives)
       for (const path of GRAYLIST_EXPLICIT_PATHS) {
          if (pathname === path || pathname.startsWith(path + '/')) {
             return { blocked: true, reason: 'reddit_explicit_path', match: path, tier: 'blacklist', hostname };
          }
+      }
+
+      // 4b. Check keywords against the subreddit name only, with proper
+      //     word boundary splitting to avoid false positives.
+      //     e.g., /r/AssassinsCreed → ["assassins", "creed"] — won't match "ass"
+      const subredditMatch = pathname.match(/^\/r\/([^\/]+)/i);
+      if (subredditMatch) {
+        const subName = decodeURIComponent(subredditMatch[1]).toLowerCase();
+        // Split camelCase, underscores, hyphens into individual words
+        const subWords = subName.replace(/([a-z])([A-Z])/g, '$1 $2')
+                                .replace(/[_-]+/g, ' ')
+                                .split(/\s+/);
+        const subText = ' ' + subWords.join(' ') + ' '; // pad for boundary matching
+
+        for (const keyword of HARD_PORN_KEYWORDS) {
+          if (subText.includes(' ' + keyword + ' ') || subName === keyword) {
+            return { blocked: true, reason: 'reddit_hard_keyword', match: keyword, tier: 'blacklist', hostname };
+          }
+        }
+        
+        for (const keyword of SOFT_PORN_KEYWORDS) {
+          if (subText.includes(' ' + keyword + ' ') || subName === keyword) {
+            return { blocked: true, reason: 'reddit_soft_keyword', match: keyword, tier: 'blacklist', hostname };
+          }
+        }
       }
     }
 

@@ -10,7 +10,7 @@ This document contains a 1:1 mapping of all filtered domains from the `Graylistf
 | Platform | Filter Location (URL) | Setting Name / Mechanism | Notes |
 | :--- | :--- | :--- | :--- |
 | **Reddit** | [reddit.com/settings/feed](https://www.reddit.com/settings/feed) | `Show mature content` | Force block via `over18` cookie. |
-| **X (Twitter)** | [x.com/settings/content_you_see](https://x.com/settings/content_you_see) | `Display media that...` | Controls feed/search blurring. |
+| **X (Twitter)** | [x.com/settings/content_you_see](https://x.com/settings/content_you_see) | `Display media that...` checkbox (`aria-describedby="CHECKBOX_2_LABEL"`) | Controls feed/search blurring. Also: `/settings/search` dialog has `Hide sensitive content` checkbox. |
 | **X.com** | (Same as Twitter) | (Same as Twitter) | Map both domains to the same logic. |
 | **Bluesky** | [bsky.app/settings/moderation](https://bsky.app/settings/moderation) | `Content Filters` | Granular: Adult, Suggestive, Graphic. |
 | **Bluesky.social**| (Same as bsky.app) | (Same as bsky.app) | Main instance domain. |
@@ -79,8 +79,11 @@ This document contains a 1:1 mapping of all filtered domains from the `Graylistf
 ### CSS Selector Targets (for Blurring/Hiding)
 - **Reddit**: `.nsfw-image`, `.prompt-18plus`
 - **Pixiv**: `.rp` (mature thumbnails)
-- **Newgrounds**: `.rating-a`, `.item-A`
+- **Newgrounds**: `.rating-a`, `.item-A`, `.suitable-a`, `#ignore-filter-link`
 - **AO3**: `.blurb:has(.rating-explicit)`, `.blurb:has(.rating-mature)`
+- **X/Twitter** (UI hide): `section[aria-label="Section details"]:has(input[aria-describedby="CHECKBOX_2_LABEL"])`, `label:has(input[type="checkbox"][aria-describedby="CHECKBOX_2_LABEL"])`, `a[href="/settings/content_you_see"]`, `a[href="/settings/explore"][data-testid="pivot"]`, `a[href="/settings/search"][data-testid="pivot"]`
+- **X/Twitter** (content hide): `[data-testid="sensitiveMediaInterstitial"]`
+- **X/Twitter** (enforcement): Force-uncheck `input[type="checkbox"][aria-describedby="CHECKBOX_2_LABEL"]` if checked; Force-check "Hide sensitive content" checkbox in `div[role="dialog"]` with heading "Search settings"
 
 ### Key Cookies to Enforce
 - **Reddit**: `over18=0`
