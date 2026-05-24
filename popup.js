@@ -1,6 +1,6 @@
 // Popup script
 
-// Hash password with PBKDF2 + salt (matches setup.js)
+// Hash password with PBKDF2 + salt
 async function hashPassword(password, salt) {
   const encoder = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey(
@@ -52,55 +52,22 @@ chrome.runtime.sendMessage({ action: 'getStats' }, (response) => {
     }
   }
 });
-
-// View blocklists button
-document.getElementById('viewBlocklistsBtn').addEventListener('click', () => {
-  chrome.tabs.create({ url: 'blocklists.html' });
-});
-
-// Change password button (placeholder for now)
-document.getElementById('changePasswordBtn').addEventListener('click', () => {
-  alert('Password change feature coming soon! For now, you can reinstall the extension to set a new password.');
-});
-
-// Tab switching logic
-document.querySelectorAll('.nav-item').forEach(btn => {
-  btn.addEventListener('click', () => {
-    // Update tabs
-    document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    
-    // Update views
-    const targetView = btn.getAttribute('data-target');
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    const viewEl = document.getElementById(targetView);
-    if (viewEl) viewEl.classList.add('active');
+// Go To App button
+document.getElementById('gotoAppBtn').addEventListener('click', () => {
+  chrome.runtime.sendMessage({ action: 'launchDesktopApp' }, (response) => {
+    if (chrome.runtime.lastError || !response || !response.success) {
+      // If native messaging isn't available, try opening a local app protocol
+      // or show a subtle feedback
+      const btn = document.getElementById('gotoAppBtn');
+      const originalText = btn.innerHTML;
+      btn.innerHTML = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:white;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg> App Not Found`;
+      btn.style.background = 'linear-gradient(135deg, #64748b 0%, #475569 100%)';
+      setTimeout(() => {
+        btn.innerHTML = originalText;
+        btn.style.background = '';
+      }, 2000);
+    }
   });
-});
-
-// Theme switching logic
-document.querySelectorAll('.theme-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const themeId = btn.getAttribute('data-theme-id');
-    document.documentElement.setAttribute('data-theme', themeId);
-    
-    // Update active class
-    document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-
-    // Save to chrome.storage
-    chrome.storage.local.set({ theme: themeId });
-  });
-});
-
-// Load saved theme
-chrome.storage.local.get(['theme'], (result) => {
-  if (result.theme) {
-    document.documentElement.setAttribute('data-theme', result.theme);
-    document.querySelectorAll('.theme-btn').forEach(b => {
-       b.classList.toggle('active', b.getAttribute('data-theme-id') === result.theme);
-    });
-  }
 });
 
 // Initialize

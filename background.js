@@ -31,11 +31,12 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     await chrome.storage.local.set({ stats: { totalBlocks: 0, installDate: new Date().toISOString() } });
   }
 
-  // Check if password is set
+  // Initialize password hash if not set (blocking works without setup page)
   const { passwordHash: storedHash } = await chrome.storage.local.get(['passwordHash']);
   if (!storedHash) {
-    // Open setup page
-    chrome.tabs.create({ url: 'setup.html' });
+    // Auto-initialize with a default hash so blocking is always active
+    const defaultHash = 'auto_initialized';
+    await chrome.storage.local.set({ passwordHash: defaultHash });
   }
 });
 
