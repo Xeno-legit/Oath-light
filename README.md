@@ -79,7 +79,7 @@ The following table explains the different layers of the blocking mechanism:
 | Step | Instruction | Details |
 | :--- | :--- | :--- |
 | 1 | Clone Repository | git clone https://github.com/Xeno-legit/Pure-Path-NSFW-blocker.git |
-| 2 | Install Extension | Load the root folder as an unpacked extension in Developer Mode. |
+| 2 | Install Extension | Load the `extension` folder as an unpacked extension in Developer Mode. |
 | 3 | Setup Desktop App | Navigate to the desktop-app directory and follow the README there for building. |
 | 4 | Configuration | Follow the initial setup wizard to set a master password and goals. |
 

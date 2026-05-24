@@ -662,6 +662,7 @@ function shouldBlockUrl(url) {
 function isIgnoredUrl(url) {
   return url.startsWith('chrome://') ||
     url.startsWith('chrome-extension://') ||
+    url.startsWith('moz-extension://') ||
     url.startsWith('about:') ||
     url.startsWith('edge://');
 }

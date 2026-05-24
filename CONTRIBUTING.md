@@ -75,17 +75,18 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 ```
 pure-path/
-├── manifest.json              # Extension configuration
-├── background.js              # Service worker
-├── content.js                 # Content script
-├── popup.html/js              # Extension popup
-├── setup.html/js              # Setup wizard
-├── blocked.html/js            # Blocked page
-├── blocklists.html/js         # Blocklist manager
-├── blocklists/                # Blocklist data
-├── icons/                     # Extension icons
+├── extension/                 # Browser extension
+│   ├── manifest.json          # Extension configuration
+│   ├── background.js          # Service worker
+│   ├── content.js             # Content script
+│   ├── popup.html/js          # Extension popup
+│   ├── blocked.html/js        # Blocked page
+│   ├── blocklists.html/js     # Blocklist manager
+│   ├── blocklists/            # Blocklist data
+│   └── icons/                 # Extension icons
+├── desktop-app/               # Desktop application
 ├── Guides/                    # Documentation
-└── test-blocklists.html      # Test suite
+└── test-blocklists.html       # Test suite
 ```
 
 ## Adding New Features

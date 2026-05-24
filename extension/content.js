@@ -4,6 +4,7 @@
   
   // Don't run on extension pages or chrome URLs
   if (window.location.protocol === 'chrome-extension:' || 
+      window.location.protocol === 'moz-extension:' ||
       window.location.protocol === 'chrome:' ||
       window.location.protocol === 'about:' ||
       window.location.protocol === 'edge:') {
