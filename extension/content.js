@@ -1,4 +1,3 @@
-// Content script for Pure Path
 (function() {
   'use strict';
   
@@ -20,11 +19,9 @@
     hostname === se || hostname.endsWith('.' + se)
   );
   
-  // ============================================================================
   // SAFESEARCH UI HIDING — ALWAYS ON
   // Prevents the user from disabling SafeSearch on any search engine.
   // Runs unconditionally on all search engine pages (all tabs/sections).
-  // ============================================================================
   
   function hideSafeSearchUI() {
     if (!isSearchEngine) return;
@@ -88,13 +85,11 @@
     (document.head || document.documentElement).appendChild(style);
   }
   
-  // ============================================================================
   // GRAYLIST FILTER ENFORCEMENT
   // Hides NSFW settings UI and force-blocks NSFW content on gray-area domains.
   // Users cannot re-enable NSFW content; clicking hidden areas shows a popup.
-  // ============================================================================
 
-  // ── Shared CSS blocks (DRY) ─────────────────────────────────────
+  // Shared CSS blocks (DRY) ───────────────────────────────────
   const MASTODON_HIDE_UI = `
     label:has(input[name*="sensitive"]), [class*="sensitive-toggle"],
     div[class*="setting"]:has([class*="media"]):has([class*="sensitive"]),
@@ -113,7 +108,7 @@
   // Domain → { hideUI, hideContent, rawCSS (optional — injected verbatim) }
   // Only entries that actually DO something are included.
   const GRAYLIST_FILTERS = {
-    // ── RELIABLE FILTERS ────────────────────────────────────────────
+    // RELIABLE FILTERS ──────────────────────────────────────────
     'reddit.com': {
       hideUI: `
         label:has(input[name*="mature"]), label:has(input[name*="over18"]),
@@ -300,7 +295,7 @@
       hideUI: `label:has(input[name*="adult"]), [class*="adult-toggle"], div[class*="setting"]:has([class*="adult"])`
     },
 
-    // ── NOT SO RELIABLE FILTERS ─────────────────────────────────────
+    // NOT SO RELIABLE FILTERS ───────────────────────────────────
     'bitchute.com': {
       hideUI: `select[name*="sensitivity"], [class*="sensitivity-dropdown"], div[class*="setting"]:has([name*="sensitivity"])`
     },
@@ -391,7 +386,7 @@
       hideUI: `label:has(input[name*="18"]), [class*="age-toggle"], div[class*="setting"]:has([class*="adult"])`
     },
 
-    // ── MASTODON / FEDIVERSE (shared CSS) ───────────────────────────
+    // MASTODON / FEDIVERSE (shared CSS) ─────────────────────────
     'mastodon.social': { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT },
     'mastodon.online':  { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT },
     'fosstodon.org':    { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT },
@@ -400,7 +395,7 @@
     'techhub.social':   { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT }
   };
 
-  // ── FAST DOMAIN LOOKUP ──────────────────────────────────────────
+  // FAST DOMAIN LOOKUP ────────────────────────────────────────
   // Pre-build a Set for O(1) "is this a graylist site?" check so that
   // content.js exits immediately on the ~99.9% of pages that aren't graylist.
   const GRAYLIST_DOMAIN_SET = new Set(Object.keys(GRAYLIST_FILTERS));
@@ -416,7 +411,7 @@
     return null;
   }
 
-  // ── CHEEKY POPUP ────────────────────────────────────────────────
+  // CHEEKY POPUP ──────────────────────────────────────────────
   const CHEEKY_MESSAGES = [
     "Oh, Looking for the NSFW filter? pfff... You thought we didn't think of that....? 😏",
     "Nice try! The NSFW filter settings have left the building 🚪👋",
@@ -489,7 +484,7 @@
     }, 4000);
   }
 
-  // ── CSS INJECTION ───────────────────────────────────────────────
+  // CSS INJECTION ─────────────────────────────────────────────
   const NUKE_DECL = `
     display: none !important;
     visibility: hidden !important;
@@ -532,10 +527,10 @@
       setupCheekyClickDetection(config.hideUI);
     }
 
-    console.log(`🔒 Pure Path: Graylist filters enforced on ${matchedKey}`);
+    console.log(`Pure Path: Graylist filters enforced on ${matchedKey}`);
   }
 
-  // ── SHARED DOM UTILITIES ─────────────────────────────────────────
+  // SHARED DOM UTILITIES ───────────────────────────────────────
   function querySelectorAllDeep(selector, root = document) {
     const results = Array.from(root.querySelectorAll(selector));
     const allEls = root.querySelectorAll('*');
@@ -559,7 +554,7 @@
     return roots;
   }
 
-  // ── CHEEKY CLICK DETECTION ──────────────────────────────────────
+  // CHEEKY CLICK DETECTION ────────────────────────────────────
   // Places invisible overlay divs on top of hidden NSFW toggle areas
   // so that clicking where the toggle WOULD be triggers the popup.
 
@@ -640,9 +635,7 @@
     }, true);
   }
 
-  // ============================================================================
   // SPA URL MONITORING (delegates URL checking to background.js)
-  // ============================================================================
   
   let lastUrl = window.location.href;
   
@@ -688,11 +681,9 @@
     }
   }
   
-  // ============================================================================
   // SHADOW DOM ENFORCEMENT + SITE-SPECIFIC TOGGLE ENFORCEMENT
   // Runs independently of click detection — ensures CSS is injected into all
   // shadow roots and that NSFW toggles are always forced to safe state.
-  // ============================================================================
 
   function enforceShadowDOM() {
     const cssElement = document.getElementById('pure-path-graylist-lock');
@@ -725,24 +716,24 @@
       }
     }
 
-    // ── REDDIT TOGGLE ENFORCEMENT ──────────────────────────────────────
+    // REDDIT TOGGLE ENFORCEMENT ────────────────────────────────────
     if (matchGraylistDomain() === 'reddit.com') {
       enforceRedditToggles();
     }
 
-    // ── X / TWITTER TOGGLE ENFORCEMENT ─────────────────────────────────
+    // X / TWITTER TOGGLE ENFORCEMENT ───────────────────────────────
     const xDomain = matchGraylistDomain();
     if (xDomain === 'x.com' || xDomain === 'twitter.com') {
       enforceTwitterToggles();
     }
 
-    // ── NEWGROUNDS RATING ENFORCEMENT ──────────────────────────────────
+    // NEWGROUNDS RATING ENFORCEMENT ────────────────────────────────
     if (matchGraylistDomain() === 'newgrounds.com') {
       enforceNewgroundsRatings();
     }
   }
 
-  // ── REDDIT: Force all NSFW toggles to safe state ──────────────────
+  // REDDIT: Force all NSFW toggles to safe state ────────────────
   function enforceRedditToggles() {
     // Auto-confirm the "Mark as safe" modal
     const nsfwModals = querySelectorAllDeep('rpl-modal-card#nsfw-rpl-modal-card');
@@ -769,7 +760,7 @@
       const els = querySelectorAllDeep(sel);
       for (const el of els) {
         if (el.hasAttribute('checked') || el.getAttribute('aria-checked') === 'true' || el.checked) {
-          console.log("🔒 Pure Path: Forcing filter off.");
+          console.log("Pure Path: Forcing filter off.");
           el.click();
         }
       }
@@ -779,18 +770,18 @@
     const blurToggles = querySelectorAllDeep('[data-testid="safe-browsing-mode"] faceplate-switch-input');
     for (const el of blurToggles) {
       if (!el.hasAttribute('checked') && el.getAttribute('aria-checked') !== 'true') {
-        console.log("🔒 Pure Path: Forcing blur on.");
+        console.log("Pure Path: Forcing blur on.");
         el.click();
       }
     }
   }
 
-  // ── X/TWITTER: Force sensitive content toggles to safe state ──────
+  // X/TWITTER: Force sensitive content toggles to safe state ────
   function enforceTwitterToggles() {
     // 1. Force-UNCHECK "Display media that may contain sensitive content"
     const sensitiveCheckbox = document.querySelector('input[type="checkbox"][aria-describedby="CHECKBOX_2_LABEL"]');
     if (sensitiveCheckbox && sensitiveCheckbox.checked) {
-      console.log('🔒 Pure Path: Forcing X "Display sensitive media" OFF.');
+      console.log('Pure Path: Forcing X "Display sensitive media" OFF.');
       sensitiveCheckbox.click();
     }
 
@@ -803,7 +794,7 @@
       for (const cb of checkboxes) {
         const labelText = cb.closest('label')?.textContent || '';
         if (labelText.includes('Hide sensitive content') && !cb.checked) {
-          console.log('🔒 Pure Path: Forcing X "Hide sensitive content" ON.');
+          console.log('Pure Path: Forcing X "Hide sensitive content" ON.');
           cb.click();
         }
       }
@@ -819,7 +810,7 @@
     }
   }
 
-  // ── NEWGROUNDS: Force A-rating checkbox to unchecked ──────────────
+  // NEWGROUNDS: Force A-rating checkbox to unchecked ────────────
   function enforceNewgroundsRatings() {
     // Uncheck any "A" rating checkboxes that are checked
     const aRatingInputs = document.querySelectorAll(
@@ -827,22 +818,18 @@
     );
     for (const input of aRatingInputs) {
       if (input.checked) {
-        console.log('🔒 Pure Path: Forcing Newgrounds A-rating OFF.');
+        console.log('Pure Path: Forcing Newgrounds A-rating OFF.');
         input.checked = false;
         input.dispatchEvent(new Event('change', { bubbles: true }));
       }
     }
   }
 
-  // ============================================================================
   // INITIALIZATION
-  // ============================================================================
   
-  // ============================================================================
   // NEWGROUNDS "CONTENT FILTERED" BYPASS BLOCKER
   // Detects the "show it to me anyway" page and immediately redirects to blocked.html.
   // Runs at the TOP LEVEL so it fires before anything else on the page.
-  // ============================================================================
 
   function blockNewgroundsBypassPage() {
     if (matchGraylistDomain() !== 'newgrounds.com') return;

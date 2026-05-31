@@ -1,8 +1,8 @@
-/* ═══════════════════════════════════════════════════════════════════
+/*
    Pure Path — Theme Manager
    Responsible for applying CSS variable overrides and dispatching
    events for WebGL shader updates.
-   ═══════════════════════════════════════════════════════════════════ */
+   */
 
 window.PurePathThemeManager = (function () {
   'use strict';

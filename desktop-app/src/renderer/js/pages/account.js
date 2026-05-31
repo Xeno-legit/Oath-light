@@ -1,7 +1,7 @@
-/* ═══════════════════════════════════════════════════════════════════
+/*
    Pure Path — Account Page
    User profile and identity hub placeholder
-   ═══════════════════════════════════════════════════════════════════ */
+   */
 
 window.PurePathPages = window.PurePathPages || {};
 
@@ -10,7 +10,7 @@ window.PurePathPages.account = (function () {
 
   const T = window.PurePathTransitions;
 
-  /* ─── Render ───────────────────────────────────────────────────── */
+  /* Render */
   function render() {
     return `
       <div class="mb-24">
@@ -36,7 +36,7 @@ window.PurePathPages.account = (function () {
     `;
   }
 
-  /* ─── Init ─────────────────────────────────────────────────────── */
+  /* Init */
   function init() {
     // Stagger cards
     const cards = document.querySelectorAll('#page-account .account-card');

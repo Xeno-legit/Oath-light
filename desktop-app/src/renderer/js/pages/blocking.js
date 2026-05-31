@@ -1,8 +1,8 @@
-/* ═══════════════════════════════════════════════════════════════════
+/*
    Pure Path — Blocking Manager Page
    Domains & keywords management with search, add, delete
    Connected to extension via Native Messaging (bidirectional sync)
-   ═══════════════════════════════════════════════════════════════════ */
+   */
 
 window.PurePathPages = window.PurePathPages || {};
 
@@ -11,14 +11,14 @@ window.PurePathPages.blocking = (function () {
 
   const T = window.PurePathTransitions;
 
-  /* ─── State ────────────────────────────────────────────────── */
+  /* State */
   let domains = [];
   let keywords = [];
   let builtInDomains = new Set();
   let builtInKeywords = new Set();
   let unlistenBlocklist = null;
 
-  /* ─── Tauri Interop ─────────────────────────────────────────────── */
+  /* Tauri Interop */
   function invoke(cmd, args) {
     if (window.__TAURI__ && window.__TAURI__.core) {
       return window.__TAURI__.core.invoke(cmd, args);
@@ -33,7 +33,7 @@ window.PurePathPages.blocking = (function () {
     return Promise.resolve(() => {});
   }
 
-  /* ─── Helpers ──────────────────────────────────────────────────── */
+  /* Helpers */
   function shieldIcon() {
     return '<svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>';
   }
@@ -104,7 +104,7 @@ window.PurePathPages.blocking = (function () {
     `}).join('');
   }
 
-  /* ─── Modal HTML ───────────────────────────────────────────────── */
+  /* Modal HTML */
   function addModal(type) {
     const isDomain = type === 'domain';
     return `
@@ -129,7 +129,7 @@ window.PurePathPages.blocking = (function () {
     `;
   }
 
-  /* ─── Render ───────────────────────────────────────────────────── */
+  /* Render */
   function render() {
     return `
       <div class="mb-24">
@@ -202,7 +202,7 @@ window.PurePathPages.blocking = (function () {
     `;
   }
 
-  /* ─── Refresh Lists ────────────────────────────────────────────── */
+  /* Refresh Lists */
   function refreshDomains(filter) {
     const el = document.getElementById('domain-list');
     if (el) el.innerHTML = renderDomainList(filter);
@@ -228,26 +228,26 @@ window.PurePathPages.blocking = (function () {
     if (kpc) kpc.textContent = `${keywords.length} ACTIVE RULES`;
   }
 
-  /* ─── Push changes to extension via Tauri ───────────────────────── */
+  /* Push changes to extension via Tauri */
   async function pushDomainsToExtension() {
     try {
       await invoke('update_blocklist_domains', { domains: domains });
-      console.log('✅ Domains pushed to extension');
+      console.log(' Domains pushed to extension');
     } catch (err) {
-      console.log('⚠️ Failed to push domains:', err);
+      console.log('️ Failed to push domains:', err);
     }
   }
 
   async function pushKeywordsToExtension() {
     try {
       await invoke('update_blocklist_keywords', { keywords: keywords });
-      console.log('✅ Keywords pushed to extension');
+      console.log(' Keywords pushed to extension');
     } catch (err) {
-      console.log('⚠️ Failed to push keywords:', err);
+      console.log('️ Failed to push keywords:', err);
     }
   }
 
-  /* ─── Delete Handlers ──────────────────────────────────────────── */
+  /* Delete Handlers */
   function bindDeleteHandlers() {
     document.querySelectorAll('[data-delete-domain]').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -294,7 +294,7 @@ window.PurePathPages.blocking = (function () {
     });
   }
 
-  /* ─── Modal Logic ──────────────────────────────────────────────── */
+  /* Modal Logic */
   function openModal(type) {
     const root = document.getElementById('modal-root');
     if (!root) return;
@@ -344,7 +344,7 @@ window.PurePathPages.blocking = (function () {
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
   }
 
-  /* ─── Fetch blocklists from Tauri backend ───────────────────────── */
+  /* Fetch blocklists from Tauri backend */
   async function fetchBlocklists() {
     try {
       const bl = await invoke('get_extension_blocklists');
@@ -362,7 +362,7 @@ window.PurePathPages.blocking = (function () {
     }
   }
 
-  /* ─── Subscribe to real-time blocklist events ───────────────────── */
+  /* Subscribe to real-time blocklist events */
   async function subscribeToEvents() {
     unlistenBlocklist = await listen('extension-blocklist', (event) => {
       const bl = event.payload;
@@ -378,7 +378,7 @@ window.PurePathPages.blocking = (function () {
     });
   }
 
-  /* ─── Init ─────────────────────────────────────────────────────── */
+  /* Init */
   function init() {
     // Animate counters
     T.animateCounter(document.getElementById('block-domain-count'), domains.length, 1.0);

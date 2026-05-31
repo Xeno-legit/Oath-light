@@ -1,4 +1,3 @@
-// Background service worker for Pure Path
 let isExtensionEnabled = true;
 let passwordHash = null;
 let blocklistDomains = [];
@@ -10,7 +9,6 @@ let defaultDomains = [];
 const tabLastChecked = new Map();
 const tabLastCheckedTime = new Map();
 
-// Initialize extension
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('Pure Path installed');
 
@@ -40,7 +38,6 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   }
 });
 
-// Load blocklists on startup
 chrome.runtime.onStartup.addListener(async () => {
   console.log('Pure Path starting up');
   await loadDefaultListsIntoMemory();
@@ -54,18 +51,17 @@ async function loadDefaultListsIntoMemory() {
     const dData = await dRes.json();
     defaultDomains = dData.domains || [];
   } catch(e) {
-    console.error('❌ Error caching default lists:', e);
+    console.error('Error caching default lists:', e);
   }
 }
 
-// Initialize blocklists from JSON files (only on install/update)
 async function initializeBlocklistsFromJSON() {
   try {
-    console.log('📋 Pure Path: Initializing blocklists from JSON files...');
+    console.log('Pure Path: Initializing blocklists from JSON files...');
     
     // Ensure we have default domains loaded
     if (!defaultDomains || defaultDomains.length === 0) {
-      console.log('🔄 defaultDomains empty, fetching now...');
+      console.log(' defaultDomains empty, fetching now...');
       await loadDefaultListsIntoMemory();
     }
     
@@ -78,16 +74,15 @@ async function initializeBlocklistsFromJSON() {
       blocklistDomains: defaultDomains
     });
 
-    console.log(`✅ Pure Path: Initialized ${defaultDomains.length} domains in storage`);
+    console.log(`Pure Path: Initialized ${defaultDomains.length} domains in storage`);
   } catch (error) {
-    console.error('❌ Pure Path: Error initializing blocklists from JSON:', error);
+    console.error('Pure Path: Error initializing blocklists from JSON:', error);
   }
 }
 
-// Load blocklists from Chrome storage
 async function loadBlocklistsFromStorage() {
   try {
-    console.log('📋 Pure Path: Loading blocklists from storage...');
+    console.log('Pure Path: Loading blocklists from storage...');
     const result = await chrome.storage.local.get(['blocklistDomains']);
 
     if (result.blocklistDomains && result.blocklistDomains.length > 0) {
@@ -97,10 +92,10 @@ async function loadBlocklistsFromStorage() {
       for (let i = 0; i < blocklistDomains.length; i++) {
         blocklistSet.add(blocklistDomains[i].toLowerCase());
       }
-      console.log(`✅ Pure Path: Loaded ${blocklistDomains.length} domains from storage`);
+      console.log(`Pure Path: Loaded ${blocklistDomains.length} domains from storage`);
     } else {
       // If not in storage, initialize from JSON
-      console.log('⚠️ Pure Path: Blocklists empty or not found in storage, initializing from JSON...');
+      console.log('️ Pure Path: Blocklists empty or not found in storage, initializing from JSON...');
       await initializeBlocklistsFromJSON();
       
       // Load again after initialization
@@ -111,24 +106,21 @@ async function loadBlocklistsFromStorage() {
           for (let i = 0; i < blocklistDomains.length; i++) {
             blocklistSet.add(blocklistDomains[i].toLowerCase());
           }
-          console.log(`✅ Pure Path: Successfully initialized ${blocklistDomains.length} domains`);
+          console.log(`Pure Path: Successfully initialized ${blocklistDomains.length} domains`);
       } else {
-          console.error('❌ Pure Path: Failed to load blocklists even after initialization');
+          console.error('Pure Path: Failed to load blocklists even after initialization');
       }
     }
   } catch (error) {
-    console.error('❌ Pure Path: Error loading blocklists from storage:', error);
+    console.error('Pure Path: Error loading blocklists from storage:', error);
   }
 }
 
-// Load blocklists from JSON files (legacy function, kept for compatibility)
 async function loadBlocklists() {
   await loadBlocklistsFromStorage();
 }
 
-// ============================================================================
 // WHITELIST - Completely safe domains (never block)
-// ============================================================================
 
 const WHITELIST_DOMAINS = [
   // Search engines & AI
@@ -247,9 +239,7 @@ const WHITELIST_DOMAINS = [
   'epicgames.com'
 ];
 
-// ============================================================================
 // REDDIT-SPECIFIC CONTENT FILTERING (Paths and Keywords)
-// ============================================================================
 
 const GRAYLIST_EXPLICIT_PATHS = [
   // General NSFW
@@ -403,9 +393,7 @@ const HARD_PORN_KEYWORDS = [
   'shotacon', 'lolicon', 'doujinshi', 'ero manga', 'eroge'
 ].map(k => k.toLowerCase());
 
-// ============================================================================
 // SEARCH ENGINE SAFESEARCH ENFORCEMENT
-// ============================================================================
 
 const SEARCH_ENGINES = [
   { domain: 'google.com', queryParam: 'q', safeParam: 'active' },
@@ -414,9 +402,7 @@ const SEARCH_ENGINES = [
   { domain: 'yahoo.com', queryParam: 'p', safeParam: 'r' }
 ];
 
-// ============================================================================
 // SAFESEARCH ENFORCEMENT (always-on)
-// ============================================================================
 
 function checkSearchEngineSafeSearch(url, hostname) {
   const searchEngine = SEARCH_ENGINES.find(se =>
@@ -431,7 +417,7 @@ function checkSearchEngineSafeSearch(url, hostname) {
     // Block attempts to disable SafeSearch
     const hasSafeSearchOff = url.includes('safe=off') || url.includes('safesearch=off') || url.includes('safe=0');
     if (hasSafeSearchOff) {
-      console.log('🚫 SafeSearch disabled - blocking bypass attempt');
+      console.log('SafeSearch disabled - blocking bypass attempt');
       return {
         blocked: true,
         reason: 'safesearch_bypass',
@@ -457,16 +443,14 @@ function checkSearchEngineSafeSearch(url, hostname) {
       };
     }
   } catch (error) {
-    console.error('❌ Error checking search engine:', error);
+    console.error(' Error checking search engine:', error);
   }
 
   return null;
 }
 
-// ============================================================================
 // GRAYLIST ENFORCEMENT — Cookies & URL rewrites for gray-area domains
 // Forces maximum restriction on sites that have NSFW filters.
-// ============================================================================
 
 // Pre-built Map: base domain → array of cookie configs (O(1) lookup)
 const GRAYLIST_COOKIE_MAP = new Map([
@@ -566,35 +550,27 @@ function enforceGraylistUrlRewrite(url, baseDomain) {
   }
 }
 
-// ============================================================================
 // URL BLOCKING LOGIC — Domain-only blocking
-// ============================================================================
 
 function shouldBlockUrl(url) {
   try {
     const urlObj = new URL(url);
     const hostname = urlObj.hostname.toLowerCase();
 
-    // ========================================================================
     // STEP 1: Check search engine SafeSearch enforcement
-    // ========================================================================
     const searchCheck = checkSearchEngineSafeSearch(url, hostname);
     if (searchCheck && (searchCheck.blocked || searchCheck.safesearch)) {
       return searchCheck;
     }
 
-    // ========================================================================
     // STEP 2: Check WHITELIST (never block these)
-    // ========================================================================
     for (const whitelistDomain of WHITELIST_DOMAINS) {
       if (hostname === whitelistDomain || hostname.endsWith('.' + whitelistDomain)) {
         return { blocked: false, tier: 'whitelist', hostname };
       }
     }
 
-    // ========================================================================
     // STEP 3: Check BLACKLIST (explicit NSFW domains from blocklist)
-    // ========================================================================
     if (!blocklistSet || blocklistSet.size === 0) {
       return { blocked: false, tier: 'unknown', hostname };
     }
@@ -607,9 +583,7 @@ function shouldBlockUrl(url) {
       }
     }
 
-    // ========================================================================
     // STEP 4: REDDIT-SPECIFIC CONTENT FILTERING (Paths and Keywords)
-    // ========================================================================
     if (hostname === 'reddit.com' || hostname.endsWith('.reddit.com')) {
       const pathname = urlObj.pathname.toLowerCase();
       
@@ -649,15 +623,13 @@ function shouldBlockUrl(url) {
     return { blocked: false, tier: 'unknown', hostname };
 
   } catch (error) {
-    console.error('❌ Error checking URL:', error);
+    console.error(' Error checking URL:', error);
     return { blocked: false };
   }
 }
 
-// ============================================================================
 // SHARED BLOCK HANDLER — single source of truth for blocking + stats
 // Deduplicates across the 3 navigation listeners per tabId+URL pair.
-// ============================================================================
 
 function isIgnoredUrl(url) {
   return url.startsWith('chrome://') ||
@@ -736,7 +708,7 @@ async function handleBlock(tabId, url, skipTabUpdate = false) {
         // Rewrite URL with safe-mode params
         const rewrittenUrl = enforceGraylistUrlRewrite(url, baseDomain);
         if (rewrittenUrl && rewrittenUrl !== url) {
-          console.log(`🔒 Graylist URL rewrite: ${baseDomain}`);
+          console.log(`Graylist URL rewrite: ${baseDomain}`);
           chrome.tabs.update(tabId, { url: rewrittenUrl });
         }
       }
@@ -833,7 +805,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (chrome.runtime.lastError) {
         sendResponse({ success: false, error: chrome.runtime.lastError.message });
       } else {
-        console.log('✅ Pure Path: Blocklists updated in storage');
+        console.log('Pure Path: Blocklists updated in storage');
         sendResponse({ success: true });
         // Notify desktop app of the change
         if (typeof NativeMessagingBridge !== 'undefined') {
@@ -905,10 +877,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return false;
 });
 
-// ============================================================================
 // NATIVE MESSAGING BRIDGE — Desktop App Communication
 // Connects to Pure Path desktop companion via chrome.runtime.connectNative()
-// ============================================================================
 
 const NativeMessagingBridge = (function () {
   const HOST_NAME = 'com.purepath.companion';
@@ -923,7 +893,7 @@ const NativeMessagingBridge = (function () {
   let reconnectTimer = null;
   let isConnected = false;
 
-  // ─── Connect to desktop app ────────────────────────────────────
+  // ─ Connect to desktop app ──────────────────────────────────
   function connect() {
     try {
       port = chrome.runtime.connectNative(HOST_NAME);
@@ -932,7 +902,7 @@ const NativeMessagingBridge = (function () {
 
       port.onDisconnect.addListener(() => {
         const err = chrome.runtime.lastError;
-        console.log(`🔌 Native host disconnected${err ? ': ' + err.message : ''}`);
+        console.log(`Native host disconnected${err ? ': ' + err.message : ''}`);
         cleanup();
         scheduleReconnect();
       });
@@ -946,14 +916,14 @@ const NativeMessagingBridge = (function () {
 
       isConnected = true;
       reconnectDelay = 250; // Reset backoff on successful connect
-      console.log('🔗 Connected to Pure Path desktop app');
+      console.log('Connected to Pure Path desktop app');
     } catch (err) {
-      console.log('⚠️ Native messaging connect failed:', err.message);
+      console.log('️ Native messaging connect failed:', err.message);
       scheduleReconnect();
     }
   }
 
-  // ─── Cleanup on disconnect ─────────────────────────────────────
+  // ─ Cleanup on disconnect ───────────────────────────────────
   function cleanup() {
     isConnected = false;
     port = null;
@@ -961,10 +931,10 @@ const NativeMessagingBridge = (function () {
     if (syncTimer) { clearInterval(syncTimer); syncTimer = null; }
   }
 
-  // ─── Reconnect with exponential backoff ────────────────────────
+  // ─ Reconnect with exponential backoff ──────────────────────
   function scheduleReconnect() {
     if (reconnectTimer) return;
-    console.log(`🔄 Reconnecting in ${reconnectDelay / 1000}s...`);
+    console.log(` Reconnecting in ${reconnectDelay / 1000}s...`);
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
@@ -972,19 +942,19 @@ const NativeMessagingBridge = (function () {
     }, reconnectDelay);
   }
 
-  // ─── Send a message to the desktop app ─────────────────────────
+  // ─ Send a message to the desktop app ───────────────────────
   function send(msg) {
     if (!port || !isConnected) return false;
     try {
       port.postMessage(msg);
       return true;
     } catch (err) {
-      console.log('⚠️ Native send failed:', err.message);
+      console.log('️ Native send failed:', err.message);
       return false;
     }
   }
 
-  // ─── Handshake ─────────────────────────────────────────────────
+  // ─ Handshake ───────────────────────────────────────────────
   async function sendHandshake() {
     const { stats } = await chrome.storage.local.get(['stats']);
     send({
@@ -996,7 +966,7 @@ const NativeMessagingBridge = (function () {
     sendFullSync();
   }
 
-  // ─── Heartbeat ─────────────────────────────────────────────────
+  // ─ Heartbeat ───────────────────────────────────────────────
   function sendHeartbeat() {
     send({
       type: 'heartbeat',
@@ -1004,7 +974,7 @@ const NativeMessagingBridge = (function () {
     });
   }
 
-  // ─── Full sync (stats + blocklists) ────────────────────────────
+  // ─ Full sync (stats + blocklists) ──────────────────────────
   async function sendFullSync() {
     // Send stats
     const { stats } = await chrome.storage.local.get(['stats']);
@@ -1030,7 +1000,7 @@ const NativeMessagingBridge = (function () {
     });
   }
 
-  // ─── Incremental stats update (called after each block) ────────
+  // ─ Incremental stats update (called after each block) ──────
   async function sendStatsUpdate() {
     const { stats } = await chrome.storage.local.get(['stats']);
     if (stats) {
@@ -1045,7 +1015,7 @@ const NativeMessagingBridge = (function () {
     }
   }
 
-  // ─── Blocklist change notification ─────────────────────────────
+  // ─ Blocklist change notification ───────────────────────────
   async function sendBlocklistUpdate() {
     const { blocklistDomains } = await chrome.storage.local.get(['blocklistDomains']);
     send({
@@ -1056,13 +1026,13 @@ const NativeMessagingBridge = (function () {
     });
   }
 
-  // ─── Handle messages FROM the desktop app ──────────────────────
+  // ─ Handle messages FROM the desktop app ────────────────────
   function handleMessage(msg) {
-    console.log('📩 Message from desktop app:', msg.type);
+    console.log(' Message from desktop app:', msg.type);
 
     switch (msg.type) {
       case 'ack':
-        console.log('✅ Desktop app acknowledged connection');
+        console.log('Desktop app acknowledged connection');
         break;
 
       case 'request_sync':
@@ -1076,11 +1046,11 @@ const NativeMessagingBridge = (function () {
         break;
 
       default:
-        console.log('❓ Unknown message from desktop:', msg.type);
+        console.log('Unknown message from desktop:', msg.type);
     }
   }
 
-  // ─── Handle blocklist updates from desktop ─────────────────────
+  // ─ Handle blocklist updates from desktop ───────────────────
   async function handleBlocklistUpdate(msg) {
     const updates = {};
 
@@ -1093,11 +1063,11 @@ const NativeMessagingBridge = (function () {
 
     if (Object.keys(updates).length > 0) {
       await chrome.storage.local.set(updates);
-      console.log('✅ Blocklist updated from desktop app:', msg.listType);
+      console.log('Blocklist updated from desktop app:', msg.listType);
     }
   }
 
-  // ─── Public API ────────────────────────────────────────────────
+  // ─ Public API ──────────────────────────────────────────────
   return {
     connect,
     sendStatsUpdate,
@@ -1106,7 +1076,7 @@ const NativeMessagingBridge = (function () {
   };
 })();
 
-// ─── Connect immediately on startup ─────────────────────────────
+// ─ Connect immediately on startup ───────────────────────────
 NativeMessagingBridge.connect();
 
 // Also connect/reconnect when the extension is installed or updated

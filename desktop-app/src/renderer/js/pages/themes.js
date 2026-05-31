@@ -1,7 +1,7 @@
-/* ═══════════════════════════════════════════════════════════════════
+/*
    Pure Path — Themes Page
    Interface for future theme management
-   ═══════════════════════════════════════════════════════════════════ */
+   */
 
 window.PurePathPages = window.PurePathPages || {};
 
@@ -10,7 +10,7 @@ window.PurePathPages.themes = (function () {
 
   const T = window.PurePathTransitions;
 
-  /* ─── Available Themes ─────────────────────────────────────────── */
+  /* Available Themes */
   const themesList = [
     {
       id: 'electric-ether',
@@ -35,7 +35,7 @@ window.PurePathPages.themes = (function () {
     }
   ];
 
-  /* ─── Render ───────────────────────────────────────────────────── */
+  /* Render */
   function render() {
     const activeThemeId = window.PurePathThemeManager ? window.PurePathThemeManager.getActiveTheme() : 'electric-ether';
 
@@ -81,7 +81,7 @@ window.PurePathPages.themes = (function () {
     `;
   }
 
-  /* ─── Init ─────────────────────────────────────────────────────── */
+  /* Init */
   function init() {
     // Stagger cards
     const cards = document.querySelectorAll('#page-themes .glass-card');

@@ -1,8 +1,8 @@
-/* ═══════════════════════════════════════════════════════════════════
+/*
    Pure Path — Overview Page
    Main dashboard: status, stats, activity, quote, quick actions
    Connected to extension via Native Messaging (Tauri commands + events)
-   ═══════════════════════════════════════════════════════════════════ */
+   */
 
 window.PurePathPages = window.PurePathPages || {};
 
@@ -11,7 +11,7 @@ window.PurePathPages.overview = (function () {
 
   const T = window.PurePathTransitions;
 
-  /* ─── Data State (populated from extension via Native Messaging) ── */
+  /* Data State (populated from extension via Native Messaging) */
   let liveData = {
     sitesBlocked: 0,
     daysProtected: 0,
@@ -41,7 +41,7 @@ window.PurePathPages.overview = (function () {
     return quotes[Math.floor(Math.random() * quotes.length)];
   }
 
-  /* ─── Tauri Interop Helpers ─────────────────────────────────────── */
+  /* Tauri Interop Helpers */
   function invoke(cmd, args) {
     if (window.__TAURI__ && window.__TAURI__.core) {
       return window.__TAURI__.core.invoke(cmd, args);
@@ -56,7 +56,7 @@ window.PurePathPages.overview = (function () {
     return Promise.resolve(() => {});
   }
 
-  /* ─── Update UI Elements ────────────────────────────────────────── */
+  /* Update UI Elements */
   function updateStatsUI() {
     const sitesEl = document.getElementById('stat-sites');
     const daysEl = document.getElementById('stat-days');
@@ -86,7 +86,7 @@ window.PurePathPages.overview = (function () {
     }
   }
 
-  /* ─── Fetch initial data from Tauri backend ─────────────────────── */
+  /* Fetch initial data from Tauri backend */
   async function fetchInitialData() {
     try {
       // Get stats
@@ -116,7 +116,7 @@ window.PurePathPages.overview = (function () {
     }
   }
 
-  /* ─── Subscribe to real-time events ─────────────────────────────── */
+  /* Subscribe to real-time events */
   async function subscribeToEvents() {
     // Stats updates (after each block)
     unlistenStats = await listen('extension-stats', (event) => {
@@ -148,7 +148,7 @@ window.PurePathPages.overview = (function () {
     });
   }
 
-  /* ─── Render ───────────────────────────────────────────────────── */
+  /* Render */
   function render() {
     const q = getRandomQuote();
     const maxActivity = Math.max(...liveData.weeklyActivity, 1);
@@ -245,7 +245,7 @@ window.PurePathPages.overview = (function () {
     `;
   }
 
-  /* ─── Init (called after render) ───────────────────────────────── */
+  /* Init (called after render) */
   function init() {
     // Animate counters from 0 (they'll update when data arrives)
     T.animateCounter(document.getElementById('stat-sites'), 0, 0.5);

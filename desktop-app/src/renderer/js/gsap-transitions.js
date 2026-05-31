@@ -1,7 +1,7 @@
-/* ═══════════════════════════════════════════════════════════════════
+/*
    Pure Path — GSAP Transition System
    Reusable animation factories for page & component transitions
-   ═══════════════════════════════════════════════════════════════════ */
+   */
 
 window.PurePathTransitions = (function () {
   'use strict';
@@ -10,7 +10,7 @@ window.PurePathTransitions = (function () {
   const EASE_SMOOTH  = 'power3.out';
   const EASE_SNAPPY  = 'power2.out';
 
-  /* ─── Page Enter/Exit ──────────────────────────────────────────── */
+  /* Page Enter/Exit */
   function pageEnter(el, done) {
     if (!el) return;
     gsap.fromTo(el,
@@ -34,7 +34,7 @@ window.PurePathTransitions = (function () {
     });
   }
 
-  /* ─── Card Stagger Entrance ────────────────────────────────────── */
+  /* Card Stagger Entrance */
   function staggerCards(cards, delay) {
     if (!cards || cards.length === 0) return;
     gsap.fromTo(cards,
@@ -49,7 +49,7 @@ window.PurePathTransitions = (function () {
     );
   }
 
-  /* ─── Counter Animation ────────────────────────────────────────── */
+  /* Counter Animation */
   function animateCounter(el, target, duration) {
     if (!el) return;
     const obj = { val: 0 };
@@ -63,7 +63,7 @@ window.PurePathTransitions = (function () {
     });
   }
 
-  /* ─── Sidebar Expand / Collapse ────────────────────────────────── */
+  /* Sidebar Expand / Collapse */
   function sidebarExpand(sidebar, labels) {
     gsap.to(sidebar, {
       width: 240,
@@ -103,7 +103,7 @@ window.PurePathTransitions = (function () {
     });
   }
 
-  /* ─── Fade In ──────────────────────────────────────────────────── */
+  /* Fade In */
   function fadeIn(el, delay) {
     if (!el) return;
     gsap.fromTo(el,
@@ -112,7 +112,7 @@ window.PurePathTransitions = (function () {
     );
   }
 
-  /* ─── Slide Up ─────────────────────────────────────────────────── */
+  /* Slide Up */
   function slideUp(el, delay) {
     if (!el) return;
     gsap.fromTo(el,
@@ -121,7 +121,7 @@ window.PurePathTransitions = (function () {
     );
   }
 
-  /* ─── Scale Pop ────────────────────────────────────────────────── */
+  /* Scale Pop */
   function scalePop(el) {
     if (!el) return;
     gsap.fromTo(el,
@@ -130,7 +130,7 @@ window.PurePathTransitions = (function () {
     );
   }
 
-  /* ─── Modal show/hide  ─────────────────────────────────────────── */
+  /* Modal show/hide */
   function showModal(overlay) {
     if (!overlay) return;
     overlay.classList.add('visible');
@@ -142,7 +142,7 @@ window.PurePathTransitions = (function () {
     setTimeout(done || (() => {}), 350);
   }
 
-  /* ─── Typewriter ───────────────────────────────────────────────── */
+  /* Typewriter */
   function typewriter(el, text, speed) {
     if (!el) return;
     el.textContent = '';

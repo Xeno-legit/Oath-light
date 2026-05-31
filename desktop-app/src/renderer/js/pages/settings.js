@@ -1,7 +1,7 @@
-/* ═══════════════════════════════════════════════════════════════════
+/*
    Pure Path — Settings & Account Page ("Identity Hub")
    Account card, toggle switches, settings groups
-   ═══════════════════════════════════════════════════════════════════ */
+   */
 
 window.PurePathPages = window.PurePathPages || {};
 
@@ -10,7 +10,7 @@ window.PurePathPages.settings = (function () {
 
   const T = window.PurePathTransitions;
 
-  /* ─── Settings State (mock) ────────────────────────────────────── */
+  /* Settings State (mock) */
   const settingsState = {
     maxProtection: true,
     notifications: true,
@@ -20,7 +20,7 @@ window.PurePathPages.settings = (function () {
     analytics: false,
   };
 
-  /* ─── Render ───────────────────────────────────────────────────── */
+  /* Render */
   function render() {
     return `
       <div class="settings-container">
@@ -164,7 +164,7 @@ window.PurePathPages.settings = (function () {
     `;
   }
 
-  /* ─── Init ─────────────────────────────────────────────────────── */
+  /* Init */
   function init() {
     // Stagger entrance
     const cards = document.querySelectorAll('#page-settings .glass-card, #page-settings .glass-card-static');

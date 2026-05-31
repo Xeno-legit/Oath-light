@@ -1,6 +1,4 @@
-// ============================================================================
 // BLOCKLISTS MANAGER SCRIPT — Domain-only
-// ============================================================================
 
 let domains = [];
 let stats = { totalBlocks: 0 };
@@ -22,22 +20,18 @@ function debugLog(category, message, data = null) {
   }
 }
 
-// ============================================================================
 // CACHE MANAGEMENT - Persist counts across page refreshes
-// ============================================================================
 
-// Save counts to localStorage
 function saveCounts() {
   try {
     localStorage.setItem('purepath_domain_count', domains.length);
     localStorage.setItem('purepath_threats_count', stats.totalBlocks || 0);
-    debugLog('CACHE', '💾 Saved counts to localStorage');
+    debugLog('CACHE', 'Saved counts to localStorage');
   } catch (error) {
-    debugLog('CACHE', '❌ Failed to save counts:', error);
+    debugLog('CACHE', 'Failed to save counts:', error);
   }
 }
 
-// Load counts from localStorage
 function loadCachedCounts() {
   try {
     const cachedDomainCount = localStorage.getItem('purepath_domain_count');
@@ -61,56 +55,53 @@ function loadCachedCounts() {
       document.getElementById('threatsCount').textContent = formatted;
     }
     
-    debugLog('CACHE', '✅ Loaded cached counts from localStorage');
+    debugLog('CACHE', 'Loaded cached counts from localStorage');
   } catch (error) {
-    debugLog('CACHE', '❌ Failed to load cached counts:', error);
+    debugLog('CACHE', 'Failed to load cached counts:', error);
   }
 }
 
 // Load cached counts immediately on page load
 loadCachedCounts();
 
-// Load blocklists and stats with error handling
-debugLog('INIT', '🚀 Blocklist Manager initializing...');
+debugLog('INIT', 'Blocklist Manager initializing...');
 
 // Load blocklists from JSON files directly
 async function loadBlocklistsFromFiles() {
   try {
-    debugLog('LOAD', '📂 Loading blocklists from JSON files...');
+    debugLog('LOAD', 'Loading blocklists from JSON files...');
     const domainsResponse = await fetch('blocklists/domains.json');
     const domainsData = await domainsResponse.json();
     
     domains = domainsData.domains || [];
     isDataLoaded = true;
     
-    debugLog('LOAD', `✅ Loaded ${domains.length} domains from files`);
+    debugLog('LOAD', `Loaded ${domains.length} domains from files`);
     
     // Update counts and save to cache
     updateCounts();
     saveCounts();
-    debugLog('UI', '✅ UI updated with counts from files');
+    debugLog('UI', 'UI updated with counts from files');
     
     return true;
   } catch (error) {
-    debugLog('ERROR', '❌ Failed to load from files:', error);
+    debugLog('ERROR', 'Failed to load from files:', error);
     return false;
   }
 }
 
-// Initialize by loading from files first (most reliable)
 loadBlocklistsFromFiles().then(success => {
   if (success) {
-    debugLog('INIT', '✅ Initialization complete from files');
+    debugLog('INIT', ' Initialization complete from files');
   } else {
-    debugLog('ERROR', '❌ Failed to initialize from files');
+    debugLog('ERROR', 'Failed to initialize from files');
     showSystemError('Failed to load blocklists. Please reload the page.');
   }
 });
 
-// Also try to load from background script (for sync purposes)
 chrome.runtime.sendMessage({ action: 'getBlocklists' }, (response) => {
   if (chrome.runtime.lastError) {
-    debugLog('WARN', '⚠️ Background script not available:', chrome.runtime.lastError);
+    debugLog('WARN', '️ Background script not available:', chrome.runtime.lastError);
     return;
   }
   
@@ -120,36 +111,34 @@ chrome.runtime.sendMessage({ action: 'getBlocklists' }, (response) => {
       domains = response.domains;
       isDataLoaded = true;
       
-      debugLog('LOAD', `✅ Updated from background: ${domains.length} domains`);
+      debugLog('LOAD', `Updated from background: ${domains.length} domains`);
       
       // Update counts and save to cache
       updateCounts();
       saveCounts();
-      debugLog('UI', '✅ UI updated with counts from background');
+      debugLog('UI', 'UI updated with counts from background');
     } else {
-      debugLog('WARN', '⚠️ Background returned empty arrays, keeping file data');
+      debugLog('WARN', '️ Background returned empty arrays, keeping file data');
     }
   }
 });
 
-// Load stats with error handling
 chrome.runtime.sendMessage({ action: 'getStats' }, (response) => {
   if (chrome.runtime.lastError) {
-    debugLog('ERROR', '❌ Failed to load stats:', chrome.runtime.lastError);
+    debugLog('ERROR', 'Failed to load stats:', chrome.runtime.lastError);
     return;
   }
   
   if (response && response.stats) {
     stats = response.stats;
-    debugLog('STATS', '✅ Stats loaded:', stats);
+    debugLog('STATS', 'Stats loaded:', stats);
     updateThreatsCount();
     saveCounts();
   } else {
-    debugLog('WARN', '⚠️ No stats available');
+    debugLog('WARN', '️ No stats available');
   }
 });
 
-// Show system error
 function showSystemError(message) {
   const errorDiv = document.createElement('div');
   errorDiv.style.cssText = `
@@ -175,7 +164,6 @@ function showSystemError(message) {
   }, 5000);
 }
 
-// Update all counts
 function updateCounts() {
   // Domain counts
   document.getElementById('domainCount').textContent = domains.length.toLocaleString();
@@ -186,7 +174,6 @@ function updateCounts() {
   saveCounts();
 }
 
-// Update threats count
 function updateThreatsCount() {
   const threatsCount = stats.totalBlocks || 0;
   // Format as "142.8k" style
@@ -204,9 +191,7 @@ function updateThreatsCount() {
   saveCounts();
 }
 
-// ============================================================================
 // ENHANCED DOMAIN SEARCH FUNCTIONALITY
-// ============================================================================
 
 const domainSearch = document.getElementById('domainSearch');
 const domainResult = document.getElementById('domainResult');
@@ -214,7 +199,7 @@ const domainResult = document.getElementById('domainResult');
 domainSearch.addEventListener('input', (e) => {
   const searchTerm = e.target.value.trim().toLowerCase();
   
-  console.log('🔍 Domain Search:', searchTerm);
+  console.log('Domain Search:', searchTerm);
   
   if (searchTerm === '') {
     domainResult.classList.add('hidden');
@@ -227,7 +212,7 @@ domainSearch.addEventListener('input', (e) => {
     .replace(/^www\./, '')
     .replace(/\/$/, '');
   
-  console.log('  Cleaned search:', cleanSearch);
+  console.log('Cleaned search:', cleanSearch);
   console.log('  Total domains:', domains.length);
   
   // Find all matching domains
@@ -313,9 +298,7 @@ function highlightMatch(text, search) {
   return `${before}<span style="background: #fef08a; padding: 0 2px; border-radius: 2px; font-weight: 600;">${match}</span>${after}`;
 }
 
-// ============================================================================
 // ADD DOMAIN FUNCTIONALITY
-// ============================================================================
 
 const addDomainBtn = document.getElementById('addDomainBtn');
 const addDomainModal = document.getElementById('addDomainModal');
@@ -325,7 +308,6 @@ const saveDomainBtn = document.getElementById('saveDomainBtn');
 const domainInput = document.getElementById('domainInput');
 const domainModalMessage = document.getElementById('domainModalMessage');
 
-// Open domain modal
 addDomainBtn.addEventListener('click', () => {
   addDomainModal.classList.remove('hidden');
   domainInput.value = '';
@@ -333,7 +315,6 @@ addDomainBtn.addEventListener('click', () => {
   domainInput.focus();
 });
 
-// Close domain modal
 function closeDomainModalFunc() {
   // Add closing animation
   addDomainModal.classList.add('closing');
@@ -362,16 +343,15 @@ document.querySelector('#addDomainModal .modal').addEventListener('click', (e) =
   e.stopPropagation();
 });
 
-// Save domain with comprehensive debugging
 saveDomainBtn.addEventListener('click', () => {
   const domain = domainInput.value.trim().toLowerCase();
   
-  debugLog('DOMAIN-ADD', '🔄 Attempting to add domain:', domain);
+  debugLog('DOMAIN-ADD', 'Attempting to add domain:', domain);
   
   // Validate domain
   if (!domain) {
-    debugLog('DOMAIN-ADD', '❌ Validation failed: Empty domain');
-    showDomainMessage('⚠️ Please enter a domain', 'error');
+    debugLog('DOMAIN-ADD', 'Validation failed: Empty domain');
+    showDomainMessage('️ Please enter a domain', 'error');
     domainInput.focus();
     return;
   }
@@ -382,20 +362,20 @@ saveDomainBtn.addEventListener('click', () => {
     .replace(/^www\./, '')
     .replace(/\/$/, '');
   
-  debugLog('DOMAIN-ADD', '🧹 Cleaned domain:', cleanDomain);
+  debugLog('DOMAIN-ADD', 'Cleaned domain:', cleanDomain);
   
   // Basic domain validation
   if (!cleanDomain.includes('.') || cleanDomain.includes(' ')) {
-    debugLog('DOMAIN-ADD', '❌ Validation failed: Invalid format');
-    showDomainMessage('⚠️ Please enter a valid domain (e.g., example.com)', 'error');
+    debugLog('DOMAIN-ADD', 'Validation failed: Invalid format');
+    showDomainMessage('️ Please enter a valid domain (e.g., example.com)', 'error');
     domainInput.focus();
     return;
   }
   
   // Check if already exists
   if (domains.includes(cleanDomain)) {
-    debugLog('DOMAIN-ADD', '❌ Domain already exists in blocklist');
-    showDomainMessage('⚠️ This domain is already in the blocklist', 'error');
+    debugLog('DOMAIN-ADD', ' Domain already exists in blocklist');
+    showDomainMessage('️ This domain is already in the blocklist', 'error');
     domainInput.focus();
     return;
   }
@@ -404,13 +384,13 @@ saveDomainBtn.addEventListener('click', () => {
   saveDomainBtn.disabled = true;
   saveDomainBtn.textContent = 'Adding...';
   
-  debugLog('DOMAIN-ADD', '💾 Saving to storage...');
+  debugLog('DOMAIN-ADD', 'Saving to storage...');
   
   // Add to domains array
   domains.push(cleanDomain);
   domains.sort();
   
-  debugLog('DOMAIN-ADD', `📊 New total: ${domains.length} domains`);
+  debugLog('DOMAIN-ADD', `New total: ${domains.length} domains`);
   
   // Update in storage
   chrome.runtime.sendMessage({ 
@@ -421,16 +401,16 @@ saveDomainBtn.addEventListener('click', () => {
     saveDomainBtn.textContent = 'Add Domain';
     
     if (chrome.runtime.lastError) {
-      debugLog('DOMAIN-ADD', '❌ Chrome runtime error:', chrome.runtime.lastError);
-      showDomainMessage('❌ Failed to add domain. Please try again.', 'error');
+      debugLog('DOMAIN-ADD', 'Chrome runtime error:', chrome.runtime.lastError);
+      showDomainMessage('Failed to add domain. Please try again.', 'error');
       // Rollback
       domains = domains.filter(d => d !== cleanDomain);
       return;
     }
     
     if (response && response.success) {
-      debugLog('DOMAIN-ADD', '✅ Successfully added domain');
-      showDomainMessage(`✅ Successfully added "${cleanDomain}" to blocklist`, 'success');
+      debugLog('DOMAIN-ADD', 'Successfully added domain');
+      showDomainMessage(`Successfully added "${cleanDomain}" to blocklist`, 'success');
       updateCounts();
       domainInput.value = '';
       
@@ -439,21 +419,19 @@ saveDomainBtn.addEventListener('click', () => {
         closeDomainModalFunc();
       }, 1500);
     } else {
-      debugLog('DOMAIN-ADD', '❌ Save failed:', response);
-      showDomainMessage('❌ Failed to add domain. Please try again.', 'error');
+      debugLog('DOMAIN-ADD', 'Save failed:', response);
+      showDomainMessage('Failed to add domain. Please try again.', 'error');
       // Rollback
       domains = domains.filter(d => d !== cleanDomain);
     }
   });
 });
 
-// Show message in domain modal
 function showDomainMessage(message, type) {
   const className = type === 'success' ? 'success-message' : 'error-message';
   domainModalMessage.innerHTML = `<div class="${className}">${message}</div>`;
 }
 
-// Handle Enter key in inputs
 domainInput.addEventListener('keypress', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
@@ -461,7 +439,6 @@ domainInput.addEventListener('keypress', (e) => {
   }
 });
 
-// Handle Escape key to close modal
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (!addDomainModal.classList.contains('hidden')) {
@@ -470,9 +447,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// ============================================================================
 // DELEGATED CLICK HANDLER — replaces inline onclick (XSS-safe)
-// ============================================================================
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('.add-from-search-btn');
   if (!btn) return;
@@ -486,7 +461,6 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// Load saved theme
 if (typeof chrome !== 'undefined' && chrome.storage) {
   chrome.storage.local.get(['theme'], (result) => {
     if (result.theme) {

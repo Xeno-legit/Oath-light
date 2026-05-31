@@ -1,7 +1,7 @@
-/* ═══════════════════════════════════════════════════════════════════
+/*
    Pure Path — App Router & Sidebar Controller
    Orchestrates page routing, sidebar animations, window controls
-   ═══════════════════════════════════════════════════════════════════ */
+   */
 
 window.PurePathApp = (function () {
   'use strict';
@@ -12,12 +12,12 @@ window.PurePathApp = (function () {
   let currentPage = 'overview';
   let isTransitioning = false;
 
-  /* ─── DOM References ───────────────────────────────────────────── */
+  /* DOM References */
   const sidebar = document.getElementById('sidebar');
   const labels = document.querySelectorAll('.sidebar-item-label');
   const navItems = document.querySelectorAll('.sidebar-item');
 
-  /* ─── Window Controls ──────────────────────────────────────────── */
+  /* Window Controls */
   (function initWindowControls() {
     const btnMin = document.getElementById('btn-minimize');
     const btnMax = document.getElementById('btn-maximize');
@@ -36,7 +36,7 @@ window.PurePathApp = (function () {
     }
   })();
 
-  /* ─── Sidebar Expand / Collapse ────────────────────────────────── */
+  /* Sidebar Expand / Collapse */
   (function initSidebar() {
     let hoverTimeout;
 
@@ -55,7 +55,7 @@ window.PurePathApp = (function () {
     });
   })();
 
-  /* ─── Page Rendering ───────────────────────────────────────────── */
+  /* Page Rendering */
   function renderPage(pageId) {
     const container = document.getElementById('page-' + pageId);
     const pageModule = pages[pageId];
@@ -78,7 +78,7 @@ window.PurePathApp = (function () {
     }
   }
 
-  /* ─── Navigation ───────────────────────────────────────────────── */
+  /* Navigation */
   function navigateTo(pageId) {
     if (pageId === currentPage || isTransitioning) return;
     if (!pages[pageId]) return;
@@ -112,7 +112,7 @@ window.PurePathApp = (function () {
     });
   }
 
-  /* ─── Bind Navigation Items ────────────────────────────────────── */
+  /* Bind Navigation Items */
   navItems.forEach(item => {
     item.addEventListener('click', () => {
       const target = item.getAttribute('data-page');
@@ -120,7 +120,7 @@ window.PurePathApp = (function () {
     });
   });
 
-  /* ─── Initial Render ───────────────────────────────────────────── */
+  /* Initial Render */
   (function boot() {
     // Render the overview page immediately
     renderPage('overview');
@@ -136,7 +136,7 @@ window.PurePathApp = (function () {
     });
   })();
 
-  /* ─── Public API ───────────────────────────────────────────────── */
+  /* Public API */
   return {
     navigateTo,
     getCurrentPage: () => currentPage,

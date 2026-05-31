@@ -1,7 +1,7 @@
-/* ═══════════════════════════════════════════════════════════════════
+/*
    Pure Path — Interactive Fluid Background (Three.js + GLSL)
    "Electric Ether" — deep midnight base, violet & blue liquid flow
-   ═══════════════════════════════════════════════════════════════════ */
+   */
 
 (function () {
   'use strict';
@@ -9,7 +9,7 @@
   const canvas = document.getElementById('fluid-canvas');
   if (!canvas || typeof THREE === 'undefined') return;
 
-  /* ─── Fragment Shader ──────────────────────────────────────────── */
+  /* Fragment Shader */
   const fragmentShader = `
     precision highp float;
 
@@ -22,7 +22,7 @@
     uniform vec3  uColorDarkViolet;
     uniform vec3  uColorFrost;
 
-    // ── Simplex 2D noise ──
+    // Simplex 2D noise
     vec3 mod289(vec3 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
     vec2 mod289v2(vec2 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
     vec3 permute(vec3 x) { return mod289((x * 34.0 + 1.0) * x); }
@@ -56,7 +56,7 @@
       return 130.0 * dot(m, g);
     }
 
-    // ── Fractal Brownian Motion ──
+    // Fractal Brownian Motion
     float fbm(vec2 p) {
       float value = 0.0;
       float amplitude = 0.5;
@@ -127,7 +127,7 @@
     }
   `;
 
-  /* ─── Three.js Setup ───────────────────────────────────────────── */
+  /* Three.js Setup */
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -147,7 +147,7 @@
     uColorFrost: { value: new THREE.Color(0.65, 0.72, 0.82) }
   };
 
-  /* ─── HMR / Boot Synchronization ───────────────────────────────── */
+  /* HMR / Boot Synchronization */
   (function syncInitialTheme() {
     const activeThemeId = localStorage.getItem('purepath_active_theme') || 'electric-ether';
     if (activeThemeId === 'electric-ether') return; // Default is already loaded natively
@@ -176,7 +176,7 @@
   const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
   scene.add(plane);
 
-  /* ─── Mouse tracking (smoothed) ────────────────────────────────── */
+  /* Mouse tracking (smoothed) */
   const mouseTarget = { x: 0.5, y: 0.5 };
   const mouseCurrent = { x: 0.5, y: 0.5 };
 
@@ -193,7 +193,7 @@
   }
   window.addEventListener('resize', onResize);
 
-  /* ─── Theme Integration ────────────────────────────────────────── */
+  /* Theme Integration */
   window.addEventListener('themeChanged', (e) => {
     const wColors = e.detail.webgl;
     if (!wColors) return;
@@ -206,7 +206,7 @@
     gsap.to(uniforms.uColorFrost.value, { r: wColors.frostHint[0], g: wColors.frostHint[1], b: wColors.frostHint[2], duration: 1.2, ease: "power2.out" });
   });
 
-  /* ─── Animation Loop ───────────────────────────────────────────── */
+  /* Animation Loop */
   let isFluidEnabled = localStorage.getItem('purepath_fluid_enabled') !== 'false';
   let accumulatedTime = 0;
   let lastFrameTime = performance.now();

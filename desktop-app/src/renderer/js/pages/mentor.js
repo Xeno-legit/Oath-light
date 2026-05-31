@@ -1,7 +1,7 @@
-/* ═══════════════════════════════════════════════════════════════════
+/*
    Pure Path — Mentor Chat Page
    "White Space" AI mentor — clean chat UI with suggestion chips
-   ═══════════════════════════════════════════════════════════════════ */
+   */
 
 window.PurePathPages = window.PurePathPages || {};
 
@@ -42,7 +42,7 @@ window.PurePathPages.mentor = (function () {
     }
   ];
 
-  /* ─── Render ───────────────────────────────────────────────────── */
+  /* Render */
   function render() {
     return `
       <div class="mentor-container flex-col" style="height: 100%;">
@@ -106,7 +106,7 @@ window.PurePathPages.mentor = (function () {
     `;
   }
 
-  /* ─── Init ─────────────────────────────────────────────────────── */
+  /* Init */
   function init() {
     // Animate entrance
     T.slideUp(document.querySelector('.mentor-header'), 0);

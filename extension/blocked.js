@@ -15,7 +15,6 @@ const urlParams = new URLSearchParams(window.location.search);
 const reason = urlParams.get('reason');
 const match = urlParams.get('match');
 
-// Display reason
 const reasonEl = document.getElementById('reason');
 if (reason === 'domain') {
   reasonEl.textContent = `Domain blocked: ${match}`;
@@ -43,7 +42,6 @@ if (reason === 'domain') {
   reasonEl.textContent = 'This page was blocked to help you stay focused.';
 }
 
-// Display random quote
 const quoteEl = document.getElementById('quote');
 quoteEl.textContent = quotes[Math.floor(Math.random() * quotes.length)];
 
@@ -57,10 +55,8 @@ chrome.runtime.sendMessage({ action: 'getStats' }, (response) => {
   if (response && response.stats) {
     const stats = response.stats;
     
-    // Total blocks
     document.getElementById('totalBlocks').textContent = stats.totalBlocks || 0;
     
-    // Days since install
     if (stats.installDate) {
       const installDate = new Date(stats.installDate);
       const now = new Date();
@@ -70,7 +66,6 @@ chrome.runtime.sendMessage({ action: 'getStats' }, (response) => {
   }
 });
 
-// Handle "Go to Safe Page" button
 document.getElementById('goBackBtn').addEventListener('click', () => {
   try {
     chrome.tabs.getCurrent((tab) => {
@@ -85,7 +80,6 @@ document.getElementById('goBackBtn').addEventListener('click', () => {
   }
 });
 
-// Load saved theme
 if(typeof chrome !== 'undefined' && chrome.storage) {
   chrome.storage.local.get(['theme'], (result) => {
     if(result.theme) {
@@ -94,7 +88,6 @@ if(typeof chrome !== 'undefined' && chrome.storage) {
   });
 }
 
-// Fluid Animation Setup using GSAP
 document.addEventListener('DOMContentLoaded', () => {
   const canvas = document.getElementById('fluidCanvas');
   if (!canvas) return;
@@ -131,7 +124,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Slower, calming fluid waves
   waves.forEach(wave => {
     gsap.to(wave, {
       phase: wave.phase + Math.PI * 2,

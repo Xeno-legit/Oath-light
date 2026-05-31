@@ -1,4 +1,3 @@
-// Popup script
 
 // Hash password with PBKDF2 + salt
 async function hashPassword(password, salt) {
@@ -14,7 +13,6 @@ async function hashPassword(password, salt) {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Quotes array
 const quotes = [
   { text: "Focus on being productive instead of busy.", author: "Tim Ferriss" },
   { text: "The secret of getting ahead is getting started.", author: "Mark Twain" },
@@ -26,14 +24,12 @@ const quotes = [
   { text: "You are not your urges. You are the one who decides.", author: "Anonymous" }
 ];
 
-// Display random quote
 function displayRandomQuote() {
   const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
   document.getElementById('quoteText').textContent = `"${randomQuote.text}"`;
   document.getElementById('quoteAuthor').textContent = randomQuote.author;
 }
 
-// Load stats
 chrome.runtime.sendMessage({ action: 'getStats' }, (response) => {
   if (chrome.runtime.lastError) {
     console.error('Error loading stats:', chrome.runtime.lastError);
@@ -52,7 +48,6 @@ chrome.runtime.sendMessage({ action: 'getStats' }, (response) => {
     }
   }
 });
-// Go To App button
 document.getElementById('gotoAppBtn').addEventListener('click', () => {
   chrome.runtime.sendMessage({ action: 'launchDesktopApp' }, (response) => {
     if (chrome.runtime.lastError || !response || !response.success) {
@@ -70,7 +65,6 @@ document.getElementById('gotoAppBtn').addEventListener('click', () => {
   });
 });
 
-// Quick Blocklist logic
 let allDomains = [];
 let defaultDomains = [];
 
@@ -182,5 +176,4 @@ function initQuickBlock() {
 
 initQuickBlock();
 
-// Initialize
 displayRandomQuote();
