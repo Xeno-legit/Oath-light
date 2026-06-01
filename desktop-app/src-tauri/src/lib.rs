@@ -18,8 +18,8 @@ pub struct ExtensionStats {
     pub days_protected: u64,
 }
 
-const BUILT_IN_DOMAINS_JSON: &str = include_str!("../../../blocklists/domains.json");
-const BUILT_IN_KEYWORDS_JSON: &str = include_str!("../../../blocklists/keywords.json");
+const BUILT_IN_DOMAINS_JSON: &str = include_str!("../../../extension/blocklists/domains.json");
+const BUILT_IN_KEYWORDS_JSON: &str = include_str!("../../../extension/blocklists/keywords.json");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtensionBlocklists {
