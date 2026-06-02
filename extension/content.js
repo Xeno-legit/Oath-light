@@ -204,7 +204,16 @@
         li:has(input[value="a"][name*="suitabilit"]),
         #ignore-filter-link, #ignore-warning
       `,
-      hideContent: `.rating-a, .item-A, [class*="rated-a"], a[class*="rated-a"], div:has(> .rating-a)`,
+      hideContent: `
+        .rating-a, .item-A, [class*="rated-a"], a[class*="rated-a"], div:has(> .rating-a),
+        .item-portalsubmission:has(.rating-a),
+        .portalsubmission-cell:has([data-rating="a"]),
+        .pod-body .item-portalsubmission[data-rating="a"],
+        a.item-audiosubmission[data-rating="a"],
+        .browse-body .item-portalsubmission:has(img[data-rating="a"]),
+        div[class*="submission"]:has([class*="mature"]),
+        div.pod-body .item-portalsubmission:has(span.rating-a)
+      `,
       rawCSS: `
         /* Nuke the A rating icon everywhere: search sidebar, browse filters, settings */
         .suitable-a, label[for*="_a"].suitable-a,
@@ -542,6 +551,19 @@
     return results;
   }
 
+  function isElementNuked(el) {
+    try {
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none') return true;
+      if (style.visibility === 'hidden') return true;
+      if (style.opacity === '0') return true;
+      if (style.clip === 'rect(0px, 0px, 0px, 0px)') return true;
+      if (parseInt(style.width) === 0 && parseInt(style.height) === 0) return true;
+      if (el.offsetWidth === 0 && el.offsetHeight === 0) return true;
+    } catch (_) {}
+    return false;
+  }
+
   function getAllShadowRoots(root = document) {
     const roots = [];
     const allEls = root.querySelectorAll('*');
@@ -555,16 +577,12 @@
   }
 
   // CHEEKY CLICK DETECTION ────────────────────────────────────
-  // Places invisible overlay divs on top of hidden NSFW toggle areas
-  // so that clicking where the toggle WOULD be triggers the popup.
-
   function setupCheekyClickDetection(uiSelectors) {
     const selectorList = uiSelectors
       .split(',')
       .map(s => s.trim())
       .filter(s => s.length > 0 && !s.startsWith('/*'));
 
-    // Validate selectors once upfront — drop invalid ones
     const validSelectors = [];
     for (const sel of selectorList) {
       try { document.querySelector(sel); validSelectors.push(sel); } catch (_) {}
@@ -579,25 +597,17 @@
             if (el.dataset.purePathIntercepted) continue;
             el.dataset.purePathIntercepted = 'true';
 
-            // Strategy: listen on the parent for clicks in the area where the
-            // hidden element lives.  Since the element itself is display:none,
-            // clicks can never target it — so instead we intercept ALL clicks
-            // on the parent container while on a settings-like page.
             const parent = el.parentElement;
             if (parent && !parent.dataset.purePathWatch) {
               parent.dataset.purePathWatch = 'true';
               parent.addEventListener('click', (e) => {
                 if (!e.isTrusted) return;
-                // If the hidden element is still display:none, the click
-                // must have hit the parent area — trigger the popup.
-                const style = window.getComputedStyle(el);
-                if (style.display === 'none' || style.visibility === 'hidden') {
+                if (isElementNuked(el)) {
                   e.preventDefault();
                   e.stopPropagation();
                   showCheekyPopup();
                   return;
                 }
-                // Fallback: direct hit on the element
                 if (el.contains(e.target) || e.target === el) {
                   e.preventDefault();
                   e.stopPropagation();
@@ -610,25 +620,36 @@
       }
     }
 
-    // Initial scan
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', scanAndIntercept);
     } else {
       scanAndIntercept();
     }
 
-    // Re-scan periodically for SPA-injected elements
     setInterval(scanAndIntercept, 800);
 
-    // Global settings-page keyword click listener
     document.addEventListener('click', (e) => {
       const currentPath = window.location.pathname.toLowerCase();
       const isSettingsPage = ['settings', 'preferences', 'filter', 'privacy', 'safety', 'moderation']
         .some(s => currentPath.includes(s));
       if (!isSettingsPage) return;
 
-      const clickedText = (e.target.textContent || '').toLowerCase();
-      const filterKeywords = ['nsfw', 'mature', 'adult', 'explicit', 'sensitive', 'r-18', 'r18', '18+', 'content filter', 'family filter'];
+      let clickedText = '';
+      let target = e.target;
+      if (target.shadowRoot) {
+        clickedText += (target.shadowRoot.textContent || '');
+      }
+      clickedText += (target.textContent || '');
+      const labelParent = target.closest('label, [role="button"], button, a, [data-testid]');
+      if (labelParent) {
+        clickedText += ' ' + (labelParent.textContent || '');
+        if (labelParent.shadowRoot) {
+          clickedText += ' ' + (labelParent.shadowRoot.textContent || '');
+        }
+      }
+      clickedText = clickedText.toLowerCase();
+
+      const filterKeywords = ['nsfw', 'mature', 'adult', 'explicit', 'sensitive', 'r-18', 'r18', '18+', 'content filter', 'family filter', 'safe browsing', 'blur'];
       if (filterKeywords.some(kw => clickedText.includes(kw))) {
         showCheekyPopup();
       }
@@ -810,18 +831,57 @@
     }
   }
 
-  // NEWGROUNDS: Force A-rating checkbox to unchecked ────────────
+  // NEWGROUNDS: Force A-rating checkbox to unchecked AND submit ──
   function enforceNewgroundsRatings() {
+    let changed = false;
+
     // Uncheck any "A" rating checkboxes that are checked
     const aRatingInputs = document.querySelectorAll(
-      'input.suitable-a, input[value="a"][name*="suitabilit"], input[name*="rating_a"], input[name*="rating"][value="a"]'
+      'input.suitable-a, input[value="a"][name*="suitabilit"], input[name*="rating_a"], input[name*="rating"][value="a"], input[name*="content_rating"][value="a"], input.suitable_a'
     );
     for (const input of aRatingInputs) {
       if (input.checked) {
         console.log('Pure Path: Forcing Newgrounds A-rating OFF.');
+        // Use click() to trigger Newgrounds' internal handlers
+        input.click();
+        // Also force the property in case click was intercepted
         input.checked = false;
         input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        changed = true;
       }
+    }
+
+    // After unchecking, submit the settings form to persist the change server-side
+    if (changed) {
+      const form = document.querySelector(
+        'form[action*="settings"], form[action*="preferences"], form:has(input.suitable-a), form:has(input[name*="rating"])'
+      );
+      if (form) {
+        const saveBtn = form.querySelector(
+          'input[type="submit"], button[type="submit"], button:has(span), .settings-save, [class*="save"], [class*="submit"]'
+        );
+        if (saveBtn && !saveBtn.dataset.purePathSubmitted) {
+          saveBtn.dataset.purePathSubmitted = 'true';
+          console.log('Pure Path: Submitting Newgrounds settings form to persist A-rating OFF.');
+          setTimeout(() => saveBtn.click(), 100);
+        }
+      }
+    }
+
+    // NUCLEAR: If the page meta tag declares adult/mature rating, block it
+    const metaRating = document.querySelector('meta[name="rating"]');
+    const ratingValue = metaRating ? metaRating.getAttribute('content') : '';
+    if (ratingValue === 'adult' || ratingValue === 'mature') {
+      console.log('Pure Path: Newgrounds page rated adult — blocking.');
+      try {
+        chrome.runtime.sendMessage({
+          action: 'notifyBlock',
+          url: window.location.href,
+          reason: 'newgrounds_adult_page',
+          match: 'Adult-rated content'
+        });
+      } catch (_) {}
     }
   }
 

@@ -18,7 +18,9 @@ pub struct ExtensionStats {
     pub days_protected: u64,
 }
 
-const BUILT_IN_DOMAINS_JSON: &str = include_str!("../../../extension/blocklists/domains.json");
+const BUILT_IN_DOMAINS_P1: &str = include_str!("../../../extension/blocklists/domains_part1.json");
+const BUILT_IN_DOMAINS_P2: &str = include_str!("../../../extension/blocklists/domains_part2.json");
+const BUILT_IN_DOMAINS_P3: &str = include_str!("../../../extension/blocklists/domains_part3.json");
 const BUILT_IN_KEYWORDS_JSON: &str = include_str!("../../../extension/blocklists/keywords.json");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,9 +36,11 @@ pub struct ExtensionBlocklists {
 impl Default for ExtensionBlocklists {
     fn default() -> Self {
         let mut built_in_domains: Vec<String> = Vec::new();
-        if let Ok(v) = serde_json::from_str::<Value>(BUILT_IN_DOMAINS_JSON) {
-            if let Some(arr) = v.get("domains").and_then(|a| a.as_array()) {
-                built_in_domains = arr.iter().filter_map(|x| x.as_str().map(String::from)).collect();
+        for json_str in [BUILT_IN_DOMAINS_P1, BUILT_IN_DOMAINS_P2, BUILT_IN_DOMAINS_P3] {
+            if let Ok(v) = serde_json::from_str::<Value>(json_str) {
+                if let Some(arr) = v.get("domains").and_then(|a| a.as_array()) {
+                    built_in_domains.extend(arr.iter().filter_map(|x| x.as_str().map(String::from)));
+                }
             }
         }
 

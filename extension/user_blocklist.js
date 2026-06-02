@@ -67,14 +67,22 @@ loadCachedCounts();
 
 debugLog('INIT', 'Blocklist Manager initializing...');
 
-// Load blocklists from JSON files directly
+// Load blocklists from JSON files directly (3 parts in parallel)
 async function loadBlocklistsFromFiles() {
   try {
-    debugLog('LOAD', 'Loading blocklists from JSON files...');
-    const domainsResponse = await fetch('blocklists/domains.json');
-    const domainsData = await domainsResponse.json();
+    debugLog('LOAD', 'Loading blocklists from JSON part files...');
+    const [r1, r2, r3] = await Promise.all([
+      fetch('blocklists/domains_part1.json'),
+      fetch('blocklists/domains_part2.json'),
+      fetch('blocklists/domains_part3.json'),
+    ]);
+    const [d1, d2, d3] = await Promise.all([r1.json(), r2.json(), r3.json()]);
 
-    const fileDomains = domainsData.domains || [];
+    const fileDomains = [
+      ...(d1.domains || []),
+      ...(d2.domains || []),
+      ...(d3.domains || []),
+    ];
     defaultDomainsSet = new Set(fileDomains);
     
     // Only overwrite if we don't have background domains yet
@@ -83,7 +91,7 @@ async function loadBlocklistsFromFiles() {
     }
     isDataLoaded = true;
 
-    debugLog('LOAD', `Loaded ${domains.length} domains from files`);
+    debugLog('LOAD', `Loaded ${domains.length} domains from part files`);
 
     // Update counts and save to cache
     updateCounts();

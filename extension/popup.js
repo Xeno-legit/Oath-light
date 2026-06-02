@@ -78,9 +78,17 @@ function initQuickBlock() {
     allDomains = (bgResponse && bgResponse.domains) ? bgResponse.domains : [];
     
     try {
-      const defaultRes = await fetch(chrome.runtime.getURL('blocklists/domains.json'));
-      const defaultData = await defaultRes.json();
-      defaultDomains = defaultData.domains || [];
+      const [r1, r2, r3] = await Promise.all([
+        fetch(chrome.runtime.getURL('blocklists/domains_part1.json')),
+        fetch(chrome.runtime.getURL('blocklists/domains_part2.json')),
+        fetch(chrome.runtime.getURL('blocklists/domains_part3.json')),
+      ]);
+      const [d1, d2, d3] = await Promise.all([r1.json(), r2.json(), r3.json()]);
+      defaultDomains = [
+        ...(d1.domains || []),
+        ...(d2.domains || []),
+        ...(d3.domains || []),
+      ];
     } catch (e) {
       console.error("Failed to load default domains", e);
     }

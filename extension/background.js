@@ -45,11 +45,20 @@ chrome.runtime.onStartup.addListener(async () => {
 });
 
 // Cache default lists into variables to send to Desktop app
+// Loads all 3 part files in parallel for fastest cold-start
 async function loadDefaultListsIntoMemory() {
   try {
-    const dRes = await fetch(chrome.runtime.getURL('blocklists/domains.json'));
-    const dData = await dRes.json();
-    defaultDomains = dData.domains || [];
+    const [r1, r2, r3] = await Promise.all([
+      fetch(chrome.runtime.getURL('blocklists/domains_part1.json')),
+      fetch(chrome.runtime.getURL('blocklists/domains_part2.json')),
+      fetch(chrome.runtime.getURL('blocklists/domains_part3.json')),
+    ]);
+    const [d1, d2, d3] = await Promise.all([r1.json(), r2.json(), r3.json()]);
+    defaultDomains = [
+      ...(d1.domains || []),
+      ...(d2.domains || []),
+      ...(d3.domains || []),
+    ];
   } catch(e) {
     console.error('Error caching default lists:', e);
   }
@@ -85,7 +94,7 @@ async function loadBlocklistsFromStorage() {
     console.log('Pure Path: Loading blocklists from storage...');
     const result = await chrome.storage.local.get(['blocklistDomains']);
 
-    if (result.blocklistDomains && result.blocklistDomains.length > 0) {
+    if (result.blocklistDomains && result.blocklistDomains.length > 0 && result.blocklistDomains.length < 600000) {
       blocklistDomains = result.blocklistDomains;
       // Build the Set for O(1) lookups — more memory efficient for-loop
       blocklistSet = new Set();
@@ -94,6 +103,10 @@ async function loadBlocklistsFromStorage() {
       }
       console.log(`Pure Path: Loaded ${blocklistDomains.length} domains from storage`);
     } else {
+      if (result.blocklistDomains && result.blocklistDomains.length >= 600000) {
+         console.log('Pure Path: Detected old unoptimized blocklist in storage. Forcing re-initialization...');
+         await chrome.storage.local.remove('blocklistDomains');
+      }
       // If not in storage, initialize from JSON
       console.log('️ Pure Path: Blocklists empty or not found in storage, initializing from JSON...');
       await initializeBlocklistsFromJSON();
@@ -594,20 +607,27 @@ function shouldBlockUrl(url) {
          }
       }
 
-      // 4b. Check keywords against the subreddit name only, with proper
+      // 4b. Check keywords against the subreddit name, with proper
       //     word boundary splitting to avoid false positives.
       //     e.g., /r/AssassinsCreed → ["assassins", "creed"] — won't match "ass"
       const subredditMatch = pathname.match(/^\/r\/([^\/]+)/i);
       if (subredditMatch) {
-        const subName = decodeURIComponent(subredditMatch[1]).toLowerCase();
-        // Split camelCase, underscores, hyphens into individual words
-        const subWords = subName.replace(/([a-z])([A-Z])/g, '$1 $2')
-                                .replace(/[_-]+/g, ' ')
-                                .split(/\s+/);
+        const rawSubName = decodeURIComponent(subredditMatch[1]);
+        const subName = rawSubName.toLowerCase();
+        // Split camelCase on ORIGINAL case (before toLowerCase), then split underscores/hyphens
+        const subWords = rawSubName.replace(/([a-z])([A-Z])/g, '$1 $2')
+                                   .replace(/[_-]+/g, ' ')
+                                   .toLowerCase()
+                                   .split(/\s+/);
         const subText = ' ' + subWords.join(' ') + ' '; // pad for boundary matching
 
         for (const keyword of HARD_PORN_KEYWORDS) {
+          // Word-boundary match (from camelCase / separator split)
           if (subText.includes(' ' + keyword + ' ') || subName === keyword) {
+            return { blocked: true, reason: 'reddit_hard_keyword', match: keyword, tier: 'blacklist', hostname };
+          }
+          // Substring match for longer keywords (≥4 chars) — safe from false positives
+          if (keyword.length >= 4 && subName.includes(keyword)) {
             return { blocked: true, reason: 'reddit_hard_keyword', match: keyword, tier: 'blacklist', hostname };
           }
         }
@@ -615,6 +635,20 @@ function shouldBlockUrl(url) {
         for (const keyword of SOFT_PORN_KEYWORDS) {
           if (subText.includes(' ' + keyword + ' ') || subName === keyword) {
             return { blocked: true, reason: 'reddit_soft_keyword', match: keyword, tier: 'blacklist', hostname };
+          }
+          if (keyword.length >= 4 && subName.includes(keyword)) {
+            return { blocked: true, reason: 'reddit_soft_keyword', match: keyword, tier: 'blacklist', hostname };
+          }
+        }
+      }
+
+      // 4c. Check Reddit SEARCH queries for NSFW keywords
+      const searchQuery = urlObj.searchParams.get('q');
+      if (searchQuery) {
+        const queryLower = searchQuery.toLowerCase();
+        for (const keyword of HARD_PORN_KEYWORDS) {
+          if (keyword.length >= 4 && queryLower.includes(keyword)) {
+            return { blocked: true, reason: 'reddit_search_keyword', match: keyword, tier: 'blacklist', hostname };
           }
         }
       }
