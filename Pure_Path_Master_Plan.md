@@ -15,7 +15,7 @@ Until every stage is complete or before it by one stage.
 * Domain and keyword blocking.
 * only 1,104 domains were blocked. (There was most likely a ton of dead sites)
 
-## Phase 2: (In progress)
+## Phase 2: (Almost Complete)
 
 ▶ Phase 2 was about the desktop app. due to false positives with P.1 The entire Blocking logic had to be remastered.
 
@@ -23,8 +23,18 @@ Until every stage is complete or before it by one stage.
 * 500k+ active domains blocked
 * Desktop app skeleton
 * Blocking logic (for Desktop) remaster.
+* Domain-name keyword layer (catches unlisted sites like sex4arabs.com)
+  (Deterministic, NOT score-based. Matches strong stems — sex, porn, xxx, etc. — only against the
+   registrable domain label/eTLD+1, never paths/queries/page content, so no Scunthorpe false positives.
+   Runs only after the exact list misses; guarded by a small collision-exception list — essex, analytics, etc.)
+* Bypass-vector blocking (anti-bypass)
+  (Blocks content-bypass routes: web proxies/unblockers (proxysite, 12ft.io), translate & archive
+   wrappers, raw-IP navigation. Principle "unwrap then re-check" — pull the real target out of the
+   wrapper and run it through the normal pipeline, so legit translation/archiving survives but a
+   blocked site viewed through them is still caught. Private IP ranges exempt. DNS/DoH bypass
+   deferred — not doing DNS yet.)
 
-## Phase 3:
+## Phase 3: (In Progress)
 
 ▶ Phase 3 should focus more on the vibe and establishing proper cross browser integration.
 
@@ -33,6 +43,12 @@ Until every stage is complete or before it by one stage.
 * Fixing cross browser issues.
 * Blocking speed optimization.
 * Useful advices and protocols
+* Graylist V2 — API/network-layer interception (replaces fragile CSS UI-hiding)
+  (Instead of hiding each site's filter UI, intercept the JSON the site fetches and strip the items
+   the SITE ITSELF already labelled NSFW — reddit over_18, X possibly_sensitive, pixiv xRestrict,
+   mastodon sensitive, bluesky labels, booru rating, etc. Ground-truth, not a heuristic; survives UI
+   redesigns because API fields stay stable. Needs a MAIN-world injected script to patch fetch/XHR.
+   Sites with no per-item label — file hosts, chat, video-chat, shorteners — get whole-site block instead.)
 
 ## Phase 4:
 

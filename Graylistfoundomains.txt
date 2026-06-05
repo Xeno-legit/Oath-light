@@ -24,9 +24,7 @@ gab.com                 # Less moderated, allows adult content
 minds.com               # Decentralized social network, allows adult content
 parler.com              # Less moderated platform
 pillowfort.io           # Tumblr alternative, allows NSFW
-cohost.org              # Allows NSFW with content warnings
 speakbits.com           # Reddit alternative, less censorship
-koo.app                 # Indian social platform, some adult content slips through
 
 ================================================================================
 CHAT / MESSAGING PLATFORMS
@@ -63,7 +61,6 @@ postimg.cc              # Some NSFW content
 imagebam.com            # Image hosting, some adult content
 imagevenue.com          # Image hosting, some adult content
 redgifs.com             # GIF hosting, heavily used for NSFW (successor to GFYcat NSFW)
-gfycat.com              # Some NSFW still present
 
 ================================================================================
 ART / CREATIVE PLATFORMS
@@ -157,7 +154,6 @@ OTHER / MISC
 ================================================================================
 ome.tv                  # Video chat, adult content common
 chatroulette.com        # Video chat, adult content common
-omegle.com              # Was shut down but domain may still resolve
 chathub.cam             # Video chat, adult content
 strangercam.com         # Video chat, adult content
 shagle.com              # Video chat, adult content
@@ -206,7 +202,6 @@ REFINED FILTER ANALYSIS: RELIABILITY OF BUILT-IN NSFW FILTERS
 -- Filters exist but are easily bypassed, depend on user tagging, or require manual blacklisting --
 - bitchute.com
 - buymeacoffee.com
-- cohost.org
 - disboard.org
 - discadia.com
 - discord.com
@@ -220,7 +215,6 @@ REFINED FILTER ANALYSIS: RELIABILITY OF BUILT-IN NSFW FILTERS
 - inkbunny.net
 - itaku.ee
 - ko-fi.com
-- koo.app
 - mas.to
 - mastodon.online
 - mastodon.social
@@ -262,7 +256,6 @@ REFINED FILTER ANALYSIS: RELIABILITY OF BUILT-IN NSFW FILTERS
 - f95zone.to
 - files.catbox.moe
 - gelbooru.com
-- gfycat.com
 - imagebam.com
 - imagevenue.com
 - imgur.com
@@ -274,7 +267,6 @@ REFINED FILTER ANALYSIS: RELIABILITY OF BUILT-IN NSFW FILTERS
 - litterbox.catbox.moe
 - loverslab.com
 - ome.tv
-- omegle.com
 - pawoo.net
 - poa.st
 - pomf.cat
