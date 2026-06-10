@@ -177,7 +177,71 @@ Notes:
 
 ---
 
-## 6. Open decisions
+## 6. Multilingual keyword rollout
+
+Source intel: `nsfw_multilingual_keywords.md` (41 languages + Anime, Internet-subculture,
+Adult-gaming, AI/Deepfake sections, ~2,100 lines). Rolled out in **vetted batches**, not all
+at once — most foreign transliterations collide with names/places/common words, so each term
+is classified `strong` / `guarded` / `compound` / **excluded** using that language's own
+WARNING block. Excluded short/ambiguous terms (`am`, `cu`, `se`, `av`, `lund`, family-relation
+words…) are deferred to the curated list + native-script (IDN) matching.
+
+| Batch | Scope | Status |
+|---|---|---|
+| **1** | ES, FR, DE, PT, AR, RU, ZH, TR, JA, HI | ✅ **done** — 58 TP / 53 FP-trap regression all pass |
+| **2** | IT, NL, PL, KO, ID, VI, EL, RO, BN (+ TH deferred to IDN) | ✅ **done** — 50 TP / 56 FP-trap regression all pass |
+| **3** | Scandinavian, CS, HU, TL, FA, UK, FI, HE, TA/TE, MS, PA, UR, SW, AF, SR, BG, SK, ML/KN, MR (GU via existing guards) | ✅ **done** — 70 TP / 56 FP-trap regression all pass |
+| **4** | special sections: Anime/3D, fetish/leak slang, adult-gaming mods (incl. child-protection: robloxcondo/gachaheat), AI/deepfake (civitai/deepnude/undressai…) | ✅ **done** — 64 TP / 31 FP-trap regression all pass |
+| **5** | **native-script IDN** — vendored RFC-3492 punycode decoder + ~70 native stems (Arabic سكس, Chinese 色情, Cyrillic секс, Japanese 変態, Korean 야동, Greek μουνί, Hebrew סקס, Bengali চোদা…) | ✅ **done** — 19 TP / 10 FP-trap regression all pass |
+| **6** | **adversarial + wordlist hardening** — committed FP corpus `test-domains.cjs` (288 cases) + `audit-wordlist.cjs` (brute-forces a wordlist through the engine). Made `cock`/`dick` compound-only, dropped ~25 net-negative foreign stems, demoted several to guarded, added a homoglyph fold + real-website trap words. | ✅ **done** — 288/288 pass; of top-20k common English words only 53 block, **all genuine adult terms (0 FPs)** |
+
+Each new term is collision-checked against the FP-trap regression before landing. Guarded roots
+so far: `sex anal cock dick rape cunt milf` (EN) + `seks puta pute randi chut chod salope`
+(B1) + `sesso figa puttane hoer dupa sperma curva malakia chikan` (B2)
++ `porr kunda picsa dengu poes picka ebane ebati tissi` (B3)
++ `thot findom coomer` (B4)
++ `luder rumpa titten kulli` (B6 — **demoted from `strong`** because they collided with
+real words: ex/in/con-**cluder**, "**t-rump-a**rmy", **Tittensor**, **skull**-island).
+
+### Batch 6 — adversarial + wordlist hardening (matches the code; see `test-domains.cjs`, `audit-wordlist.cjs`)
+The strong tier is substring-matched with **no** whitelist guard, so any short/common term placed
+there is an unfixable false positive. Two methods drove this batch: a hand-built adversarial corpus
+(`test-domains.cjs`), and a brute-force of a wordlist through the real engine (`audit-wordlist.cjs`).
+**Methodology note:** the wordlist audit targets *real-website vocabulary* (top-20k common English),
+not the full dictionary — a blocked `turbocharger` matters; a blocked archaic relic (`analgesidae`,
+`porringer`) does not and is intentionally left alone.
+
+- **`cock` & `dick` made COMPOUND-ONLY** (removed from guarded; they live only in `KEYWORD_COMPOUNDS`
+  now, like `cum`/`ass`/`tit`/`pussy`). As bare roots they collided with ~190 real words —
+  `blackcock`/`woodcock`/`billycock`/`bibcock`/`peacock`, `medick`, `dickcissel`, `Moby-Dick`,
+  `Dickens`. Added porn compounds to compensate (`hugecock cockslut dickslut dicksucking`…).
+- **Dropped from `strong` entirely** (term value < English-collision cost — deferred to curated + IDN):
+  `puku itil foder borsten sletten geci fudi pudi gasti naai` (adversarial) **+** `hure` (→ **brochure**),
+  `tette` (→ quartette/octette), `peler` (→ gospeler), `siski` (→ siskin), `chinko` (→ **pachinko**),
+  `mamme`, `airmani`, `zayin`, `zonot`, `ipella`, `jebat` (→ Hang Jebat) (wordlist audit).
+- **Demoted `strong` → `guarded`** with trap words: `luder rumpa titten kulli` (adversarial) +
+  `pillu` (→ lapillus), `gooning` (→ dragooning), `zoophil` (→ zoophilous), `bocha` (→ **turbocharger**).
+- **`thot` dropped from `guarded`** — collided with `orthotic`/`lithotomy`/`lithotripsy` (slang, low value).
+- **New FP-trap words** in the guarded whitelist (only ever *allow*, never block more): rape→`trapez
+  serape crape traper parape`; sex→`sexsmith sexey desex bissext sextil`; anal→`kanal manali panal
+  bacchanal analci analect analept`; randi→`mirandi prandi operandi jaborandi`; curva→`incurva curvat
+  recurva`; sesso→`sessor` (**assessor**); bocha→`bochar` (**turbocharger**); tissi→`tissim`
+  (**fortissimo**); chod→`nchod ychod` (**bronchodilator**/psychodrama); puta→`putamen laputa`;
+  onani→`nonani`; kunda→`kundera mukunda kundan`; + ecchi/poes/chut/picka/dupa/etc.
+- **Homoglyph / confusable fold** (`CONFUSABLE_MAP` + `foldConfusables`): Cyrillic/Greek/Coptic/
+  fullwidth lookalikes fold to Latin so `pоrn.com` (Cyrillic о) → `porn`. Folded form is checked
+  against **strong stems + compounds only, never the guarded roots** — so a legit native word that
+  folds into a short root (Russian `соска` → `cocka`) cannot become a false positive.
+- **Result:** of the top-20k common English words, **53 block — all genuine adult terms, 0 false
+  positives**. `analysis`/`analytics`/`turbocharger`/`assessor`/`brochure` all pass.
+- **Known residual gaps (documented, not fixed):** separator/truncation evasions
+  (`p-o-r-n`, `pron-hub`, `chaturb8`, `x-h4mster`); the `porn`-core collateral on Pornic/Pornichet
+  (French towns) and rare bird terms `agapornis`/`epornitic` (can't guard the core stem); and the
+  archaic-dictionary long tail (`analgesidae`, `aporrhais` — not real sites, intentionally ignored).
+
+---
+
+## 7. Open decisions
 - **File hosts — RESOLVED:** rule = "block only if *mainly* NSFW." None of the remaining
   hosts qualify (redgifs already moved to blacklist), so they **slide**. Only `imagebam` /
   `imagevenue` are borderline (heavy adult-gallery history) — block those if going strict.

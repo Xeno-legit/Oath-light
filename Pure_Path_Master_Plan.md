@@ -15,14 +15,14 @@ Until every stage is complete or before it by one stage.
 * Domain and keyword blocking.
 * only 1,104 domains were blocked. (There was most likely a ton of dead sites)
 
-## Phase 2: (Almost Complete)
+## Phase 2: (Complete)
 
 ▶ Phase 2 was about the desktop app. due to false positives with P.1 The entire Blocking logic had to be remastered.
 
 * Removed keyword Blocking except on some sites (like Reddit)
 * 500k+ active domains blocked
 * Desktop app skeleton
-* Blocking logic (for Desktop) remaster.
+* Domain blocking logic (for Desktop) remaster.
 * Domain-name keyword layer (catches unlisted sites like sex4arabs.com)
   (Deterministic, NOT score-based. Matches strong stems — sex, porn, xxx, etc. — only against the
    registrable domain label/eTLD+1, never paths/queries/page content, so no Scunthorpe false positives.
