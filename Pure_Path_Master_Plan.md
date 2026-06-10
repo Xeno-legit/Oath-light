@@ -38,7 +38,7 @@ Until every stage is complete or before it by one stage.
 
 ▶ Phase 3 should focus more on the vibe and establishing proper cross browser integration.
 
-* Theme unison (done)
+* Theme unison (almost done)
 * Desktop app UI, UX remake (done)
 * Fixing cross browser issues.
 * Blocking speed optimization.
@@ -67,6 +67,7 @@ Until every stage is complete or before it by one stage.
 * Phone support
 * built-in ai scanner
 * Access to permissions to prevent app deletion at weak moments
+* Pre-Alpha launch test. (Testing everything again at full scale, pushing the app to its absolute limits.)
 * Alpha launch.
 
 ## Phase 6:

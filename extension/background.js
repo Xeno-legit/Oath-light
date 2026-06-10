@@ -1,5 +1,4 @@
 let isExtensionEnabled = true;
-let passwordHash = null;
 let blocklistDomains = [];
 let blocklistSet = new Set(); // O(1) domain lookup
 
@@ -16,10 +15,16 @@ function getDefaultSet() {
 
 // On a cold/revived service worker the in-memory list can be empty; reload it
 // from storage before any mutation so we never overwrite the saved blocklist.
+// A single shared promise dedupes the cold-start bootstrap and the first
+// navigation racing to load the same 385k list.
+let blocklistLoadPromise = null;
 async function ensureBlocklistLoaded() {
-  if (!blocklistDomains || !blocklistDomains.length) {
-    await loadBlocklistsFromStorage();
+  if (blocklistSet && blocklistSet.size > 0) return;
+  if (!blocklistLoadPromise) {
+    blocklistLoadPromise = loadBlocklistsFromStorage()
+      .finally(() => { blocklistLoadPromise = null; });
   }
+  await blocklistLoadPromise;
 }
 
 // User-added domains are tracked in their own storage key (the source of truth
@@ -52,14 +57,6 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   if (!result.stats) {
     await chrome.storage.local.set({ stats: { totalBlocks: 0, installDate: new Date().toISOString() } });
   }
-
-  // Initialize password hash if not set (blocking works without setup page)
-  const { passwordHash: storedHash } = await chrome.storage.local.get(['passwordHash']);
-  if (!storedHash) {
-    // Auto-initialize with a default hash so blocking is always active
-    const defaultHash = 'auto_initialized';
-    await chrome.storage.local.set({ passwordHash: defaultHash });
-  }
 });
 
 chrome.runtime.onStartup.addListener(async () => {
@@ -67,6 +64,14 @@ chrome.runtime.onStartup.addListener(async () => {
   await loadDefaultListsIntoMemory();
   await loadBlocklistsFromStorage();
 });
+
+// Cold-start: an idle-revived MV3 service worker re-evaluates this script but
+// fires NEITHER onInstalled NOR onStartup — so without this the blacklist Set
+// would sit empty (only the keyword layer firing) until the next browser
+// restart. Load eagerly on every worker spawn; ensureBlocklistLoaded dedupes
+// against the first navigation that also triggers a load.
+ensureBlocklistLoaded();
+loadDefaultListsIntoMemory();
 
 // Cache default lists into variables to send to Desktop app
 // Loads all 3 part files in parallel for fastest cold-start
@@ -1444,8 +1449,10 @@ async function recordBlockAndRedirect(tabId, url, reason, match, skipTabUpdate =
 }
 
 async function handleBlock(tabId, url, skipTabUpdate = false) {
-  const { passwordHash: storedHash } = await chrome.storage.local.get(['passwordHash']);
-  if (!storedHash) return; // Not set up yet
+  // Make sure the blacklist is loaded (cold-revived worker). Returns instantly
+  // once warm, so this adds no per-navigation cost — and removes the previous
+  // per-navigation chrome.storage round-trip that gated every check.
+  await ensureBlocklistLoaded();
 
   const result = shouldBlockUrl(url);
 
@@ -1514,35 +1521,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // Read stats from storage (not in-memory) to avoid MV3 service worker race
     chrome.storage.local.get(['stats'], (result) => {
       sendResponse({ stats: result.stats || { totalBlocks: 0 } });
-    });
-    return true;
-  }
-
-  if (request.action === 'setPassword') {
-    // Store hash and salt together for PBKDF2
-    const updates = { passwordHash: request.hash };
-    if (request.salt) updates.passwordSalt = request.salt;
-    chrome.storage.local.set(updates, () => {
-      if (chrome.runtime.lastError) {
-        sendResponse({ success: false, error: chrome.runtime.lastError.message });
-      } else {
-        sendResponse({ success: true });
-      }
-    });
-    return true;
-  }
-
-  if (request.action === 'verifyPassword') {
-    // Compare provided hash with stored hash
-    chrome.storage.local.get(['passwordHash', 'passwordSalt'], (result) => {
-      if (chrome.runtime.lastError) {
-        sendResponse({ valid: false, error: chrome.runtime.lastError.message });
-      } else {
-        sendResponse({
-          valid: result.passwordHash === request.hash,
-          salt: result.passwordSalt || null
-        });
-      }
     });
     return true;
   }
