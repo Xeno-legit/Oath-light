@@ -73,7 +73,9 @@ $RECYCLE.BIN/
 NOTES.md
 TODO.md
 PRIVATE.md
-
+.playwright-mcp/
+scratch/
+Error/
 # Guides and stuff that I dont want on github
 
 /Guides/

@@ -1,7 +1,7 @@
-/* ═══════════════════════════════════════════════════════════════════
+/*
    Pure Path — Interactive Fluid Background (Three.js + GLSL)
    "Electric Ether" — deep midnight base, violet & blue liquid flow
-   ═══════════════════════════════════════════════════════════════════ */
+   */
 
 (function () {
   'use strict';
@@ -9,15 +9,20 @@
   const canvas = document.getElementById('fluid-canvas');
   if (!canvas || typeof THREE === 'undefined') return;
 
-  /* ─── Fragment Shader ──────────────────────────────────────────── */
+  /* Fragment Shader */
   const fragmentShader = `
     precision highp float;
 
     uniform float uTime;
     uniform vec2  uMouse;
     uniform vec2  uResolution;
+    uniform vec3  uColorBg;
+    uniform vec3  uColorViolet;
+    uniform vec3  uColorBlue;
+    uniform vec3  uColorDarkViolet;
+    uniform vec3  uColorFrost;
 
-    // ── Simplex 2D noise ──
+    // Simplex 2D noise
     vec3 mod289(vec3 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
     vec2 mod289v2(vec2 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
     vec3 permute(vec3 x) { return mod289((x * 34.0 + 1.0) * x); }
@@ -51,7 +56,7 @@
       return 130.0 * dot(m, g);
     }
 
-    // ── Fractal Brownian Motion ──
+    // Fractal Brownian Motion
     float fbm(vec2 p) {
       float value = 0.0;
       float amplitude = 0.5;
@@ -89,12 +94,12 @@
 
       float f = fbm(p + 3.5 * r);
 
-      // Color palette — "Electric Ether"
-      vec3 deepBg    = vec3(0.039, 0.055, 0.090);  // #0A0E17
-      vec3 violet    = vec3(0.545, 0.361, 0.965);   // #8B5CF6
-      vec3 blue      = vec3(0.231, 0.510, 0.965);   // #3B82F6
-      vec3 darkViolet= vec3(0.25, 0.15, 0.45);
-      vec3 frostHint = vec3(0.65, 0.72, 0.82);
+      // Color palette from uniforms
+      vec3 deepBg    = uColorBg;
+      vec3 violet    = uColorViolet;
+      vec3 blue      = uColorBlue;
+      vec3 darkViolet= uColorDarkViolet;
+      vec3 frostHint = uColorFrost;
 
       // Layer mixing
       vec3 color = deepBg;
@@ -122,7 +127,7 @@
     }
   `;
 
-  /* ─── Three.js Setup ───────────────────────────────────────────── */
+  /* Three.js Setup */
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -135,7 +140,32 @@
     uTime: { value: 0.0 },
     uMouse: { value: new THREE.Vector2(0.5, 0.5) },
     uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+    uColorBg: { value: new THREE.Color(0.039, 0.055, 0.090) },
+    uColorViolet: { value: new THREE.Color(0.545, 0.361, 0.965) },
+    uColorBlue: { value: new THREE.Color(0.231, 0.510, 0.965) },
+    uColorDarkViolet: { value: new THREE.Color(0.25, 0.15, 0.45) },
+    uColorFrost: { value: new THREE.Color(0.65, 0.72, 0.82) }
   };
+
+  /* HMR / Boot Synchronization */
+  (function syncInitialTheme() {
+    const activeThemeId = localStorage.getItem('purepath_active_theme') || 'electric-ether';
+    if (activeThemeId === 'electric-ether') return; // Default is already loaded natively
+
+    fetch(`themes/${activeThemeId}.json`)
+      .then(r => r.json())
+      .then(theme => {
+        const w = theme.webgl;
+        if (w) {
+          // Immediately set the uniform properties without animation smoothing
+          uniforms.uColorBg.value.setRGB(w.deepBg[0], w.deepBg[1], w.deepBg[2]);
+          uniforms.uColorViolet.value.setRGB(w.violet[0], w.violet[1], w.violet[2]);
+          uniforms.uColorBlue.value.setRGB(w.blue[0], w.blue[1], w.blue[2]);
+          uniforms.uColorDarkViolet.value.setRGB(w.darkViolet[0], w.darkViolet[1], w.darkViolet[2]);
+          uniforms.uColorFrost.value.setRGB(w.frostHint[0], w.frostHint[1], w.frostHint[2]);
+        }
+      }).catch(e => console.error('[fluid-bg] HMR Sync failed:', e));
+  })();
 
   const material = new THREE.ShaderMaterial({
     vertexShader,
@@ -146,7 +176,7 @@
   const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
   scene.add(plane);
 
-  /* ─── Mouse tracking (smoothed) ────────────────────────────────── */
+  /* Mouse tracking (smoothed) */
   const mouseTarget = { x: 0.5, y: 0.5 };
   const mouseCurrent = { x: 0.5, y: 0.5 };
 
@@ -155,7 +185,6 @@
     mouseTarget.y = 1.0 - (e.clientY / window.innerHeight);
   });
 
-  /* ─── Resize ───────────────────────────────────────────────────── */
   function onResize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -164,14 +193,41 @@
   }
   window.addEventListener('resize', onResize);
 
-  /* ─── Animation Loop ───────────────────────────────────────────── */
-  let startTime = performance.now();
+  /* Theme Integration */
+  window.addEventListener('themeChanged', (e) => {
+    const wColors = e.detail.webgl;
+    if (!wColors) return;
+
+    // Smoothly transition colors using GSAP
+    gsap.to(uniforms.uColorBg.value, { r: wColors.deepBg[0], g: wColors.deepBg[1], b: wColors.deepBg[2], duration: 1.2, ease: "power2.out" });
+    gsap.to(uniforms.uColorViolet.value, { r: wColors.violet[0], g: wColors.violet[1], b: wColors.violet[2], duration: 1.2, ease: "power2.out" });
+    gsap.to(uniforms.uColorBlue.value, { r: wColors.blue[0], g: wColors.blue[1], b: wColors.blue[2], duration: 1.2, ease: "power2.out" });
+    gsap.to(uniforms.uColorDarkViolet.value, { r: wColors.darkViolet[0], g: wColors.darkViolet[1], b: wColors.darkViolet[2], duration: 1.2, ease: "power2.out" });
+    gsap.to(uniforms.uColorFrost.value, { r: wColors.frostHint[0], g: wColors.frostHint[1], b: wColors.frostHint[2], duration: 1.2, ease: "power2.out" });
+  });
+
+  /* Animation Loop */
+  let isFluidEnabled = localStorage.getItem('purepath_fluid_enabled') !== 'false';
+  let accumulatedTime = 0;
+  let lastFrameTime = performance.now();
+
+  window.addEventListener('fluidAnimationToggled', (e) => {
+    isFluidEnabled = e.detail.enabled;
+    localStorage.setItem('purepath_fluid_enabled', isFluidEnabled.toString());
+  });
 
   function animate() {
     requestAnimationFrame(animate);
 
-    const elapsed = (performance.now() - startTime) / 1000.0;
-    uniforms.uTime.value = elapsed;
+    const now = performance.now();
+    const delta = (now - lastFrameTime) / 1000.0;
+    lastFrameTime = now;
+
+    if (isFluidEnabled) {
+      accumulatedTime += delta;
+    }
+    
+    uniforms.uTime.value = accumulatedTime;
 
     // Smooth mouse follow (lerp)
     mouseCurrent.x += (mouseTarget.x - mouseCurrent.x) * 0.04;

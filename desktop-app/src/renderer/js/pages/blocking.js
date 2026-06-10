@@ -1,7 +1,8 @@
-/* ═══════════════════════════════════════════════════════════════════
+/*
    Pure Path — Blocking Manager Page
    Domains & keywords management with search, add, delete
-   ═══════════════════════════════════════════════════════════════════ */
+   Connected to extension via Native Messaging (bidirectional sync)
+   */
 
 window.PurePathPages = window.PurePathPages || {};
 
@@ -10,11 +11,29 @@ window.PurePathPages.blocking = (function () {
 
   const T = window.PurePathTransitions;
 
-  /* ─── State ────────────────────────────────────────────────── */
+  /* State */
   let domains = [];
   let keywords = [];
+  let builtInDomains = new Set();
+  let builtInKeywords = new Set();
+  let unlistenBlocklist = null;
 
-  /* ─── Helpers ──────────────────────────────────────────────────── */
+  /* Tauri Interop */
+  function invoke(cmd, args) {
+    if (window.__TAURI__ && window.__TAURI__.core) {
+      return window.__TAURI__.core.invoke(cmd, args);
+    }
+    return Promise.resolve(null);
+  }
+
+  function listen(event, handler) {
+    if (window.__TAURI__ && window.__TAURI__.event) {
+      return window.__TAURI__.event.listen(event, handler);
+    }
+    return Promise.resolve(() => {});
+  }
+
+  /* Helpers */
   function shieldIcon() {
     return '<svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>';
   }
@@ -28,49 +47,64 @@ window.PurePathPages.blocking = (function () {
   }
 
   function renderDomainList(filter) {
-    const filtered = filter
-      ? domains.filter(d => d.toLowerCase().includes(filter.toLowerCase()))
-      : domains;
+    const isSearching = !!(filter && filter.trim() !== '');
+    const filtered = domains.filter(d => {
+      const isBuiltIn = builtInDomains.has(d.toLowerCase());
+      if (!isSearching && isBuiltIn) return false;
+      if (isSearching && !d.toLowerCase().includes(filter.toLowerCase())) return false;
+      return true;
+    });
 
     if (filtered.length === 0) {
       return `<div class="empty-state">
         <div class="empty-state-icon">🔍</div>
-        <div class="empty-state-text">${filter ? 'No domains match your search' : 'No domains blocked yet'}</div>
+        <div class="empty-state-text">${filter ? 'No domains match your search' : 'No custom domains added yet'}</div>
       </div>`;
     }
 
-    return filtered.map(d => `
+    return filtered.map(d => {
+      const isBuiltIn = builtInDomains.has(d.toLowerCase());
+      return `
       <div class="block-item" data-domain="${d}">
         <div class="block-item-left">
           <span class="block-item-shield">${shieldIcon()}</span>
           <span class="block-item-text">${d}</span>
         </div>
-        <button class="block-item-delete" data-delete-domain="${d}" title="Remove">${xIcon()}</button>
+        ${!isBuiltIn 
+          ? `<button class="block-item-delete" data-delete-domain="${d}" title="Remove">${xIcon()}</button>`
+          : `<span class="text-muted" style="font-size: 11px; margin-right: 12px; letter-spacing: 0.5px; text-transform: uppercase;">Built-in</span>`
+        }
       </div>
-    `).join('');
+    `}).join('');
   }
 
   function renderKeywordTags(filter) {
-    const filtered = filter
-      ? keywords.filter(k => k.toLowerCase().includes(filter.toLowerCase()))
-      : keywords;
+    const isSearching = !!(filter && filter.trim() !== '');
+    const filtered = keywords.filter(k => {
+      const isBuiltIn = builtInKeywords.has(k.toLowerCase());
+      if (!isSearching && isBuiltIn) return false;
+      if (isSearching && !k.toLowerCase().includes(filter.toLowerCase())) return false;
+      return true;
+    });
 
     if (filtered.length === 0) {
       return `<div class="empty-state">
         <div class="empty-state-icon">🏷️</div>
-        <div class="empty-state-text">${filter ? 'No keywords match your search' : 'No keywords blocked yet'}</div>
+        <div class="empty-state-text">${filter ? 'No keywords match your search' : 'No custom keywords added yet'}</div>
       </div>`;
     }
 
-    return filtered.map(k => `
-      <span class="keyword-tag" data-keyword="${k}">
+    return filtered.map(k => {
+      const isBuiltIn = builtInKeywords.has(k.toLowerCase());
+      return `
+      <span class="keyword-tag" data-keyword="${k}" ${isBuiltIn ? 'style="opacity: 0.75; cursor: default;"' : ''}>
         ${k}
-        <button class="keyword-tag-delete" data-delete-keyword="${k}" title="Remove">${xIcon()}</button>
+        ${!isBuiltIn ? `<button class="keyword-tag-delete" data-delete-keyword="${k}" title="Remove">${xIcon()}</button>` : ''}
       </span>
-    `).join('');
+    `}).join('');
   }
 
-  /* ─── Modal HTML ───────────────────────────────────────────────── */
+  /* Modal HTML */
   function addModal(type) {
     const isDomain = type === 'domain';
     return `
@@ -95,7 +129,7 @@ window.PurePathPages.blocking = (function () {
     `;
   }
 
-  /* ─── Render ───────────────────────────────────────────────────── */
+  /* Render */
   function render() {
     return `
       <div class="mb-24">
@@ -168,7 +202,7 @@ window.PurePathPages.blocking = (function () {
     `;
   }
 
-  /* ─── Refresh Lists ────────────────────────────────────────────── */
+  /* Refresh Lists */
   function refreshDomains(filter) {
     const el = document.getElementById('domain-list');
     if (el) el.innerHTML = renderDomainList(filter);
@@ -194,7 +228,26 @@ window.PurePathPages.blocking = (function () {
     if (kpc) kpc.textContent = `${keywords.length} ACTIVE RULES`;
   }
 
-  /* ─── Delete Handlers ──────────────────────────────────────────── */
+  /* Push changes to extension via Tauri */
+  async function pushDomainsToExtension() {
+    try {
+      await invoke('update_blocklist_domains', { domains: domains });
+      console.log(' Domains pushed to extension');
+    } catch (err) {
+      console.log('️ Failed to push domains:', err);
+    }
+  }
+
+  async function pushKeywordsToExtension() {
+    try {
+      await invoke('update_blocklist_keywords', { keywords: keywords });
+      console.log(' Keywords pushed to extension');
+    } catch (err) {
+      console.log('️ Failed to push keywords:', err);
+    }
+  }
+
+  /* Delete Handlers */
   function bindDeleteHandlers() {
     document.querySelectorAll('[data-delete-domain]').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -206,10 +259,14 @@ window.PurePathPages.blocking = (function () {
           gsap.to(item, {
             opacity: 0, x: -20, height: 0, padding: 0, margin: 0,
             duration: 0.3, ease: 'power2.in',
-            onComplete: () => refreshDomains(document.getElementById('domain-search')?.value),
+            onComplete: () => {
+              refreshDomains(document.getElementById('domain-search')?.value);
+              pushDomainsToExtension();
+            },
           });
         } else {
           refreshDomains();
+          pushDomainsToExtension();
         }
       });
     });
@@ -224,16 +281,20 @@ window.PurePathPages.blocking = (function () {
           gsap.to(tag, {
             opacity: 0, scale: 0.7,
             duration: 0.25, ease: 'power2.in',
-            onComplete: () => refreshKeywords(document.getElementById('keyword-search')?.value),
+            onComplete: () => {
+              refreshKeywords(document.getElementById('keyword-search')?.value);
+              pushKeywordsToExtension();
+            },
           });
         } else {
           refreshKeywords();
+          pushKeywordsToExtension();
         }
       });
     });
   }
 
-  /* ─── Modal Logic ──────────────────────────────────────────────── */
+  /* Modal Logic */
   function openModal(type) {
     const root = document.getElementById('modal-root');
     if (!root) return;
@@ -254,18 +315,26 @@ window.PurePathPages.blocking = (function () {
     input.focus();
 
     const save = () => {
-      const val = input.value.trim().toLowerCase();
+      let val = input.value.trim().toLowerCase();
       if (!val) return;
 
       if (type === 'domain') {
+        val = val.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+        // Basic domain validation
+        if (!val.includes('.') || val.includes(' ')) {
+          alert('Please enter a valid domain (e.g., example.com)');
+          return;
+        }
         if (!domains.includes(val)) {
           domains.push(val);
           refreshDomains();
+          pushDomainsToExtension();
         }
       } else {
         if (!keywords.includes(val)) {
           keywords.push(val);
           refreshKeywords();
+          pushKeywordsToExtension();
         }
       }
       closeModal();
@@ -275,7 +344,41 @@ window.PurePathPages.blocking = (function () {
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
   }
 
-  /* ─── Init ─────────────────────────────────────────────────────── */
+  /* Fetch blocklists from Tauri backend */
+  async function fetchBlocklists() {
+    try {
+      const bl = await invoke('get_extension_blocklists');
+      if (bl) {
+        if (bl.domains && bl.domains.length > 0) domains = bl.domains;
+        if (bl.keywords && bl.keywords.length > 0) keywords = bl.keywords;
+        if (bl.built_in_domains) builtInDomains = new Set(bl.built_in_domains.map(x=>x.toLowerCase()));
+        if (bl.built_in_keywords) builtInKeywords = new Set(bl.built_in_keywords.map(x=>x.toLowerCase()));
+        
+        refreshDomains(document.getElementById('domain-search')?.value);
+        refreshKeywords(document.getElementById('keyword-search')?.value);
+      }
+    } catch (err) {
+      console.log('Blocking: Could not fetch blocklists:', err);
+    }
+  }
+
+  /* Subscribe to real-time blocklist events */
+  async function subscribeToEvents() {
+    unlistenBlocklist = await listen('extension-blocklist', (event) => {
+      const bl = event.payload;
+      if (bl) {
+        if (bl.domains) domains = bl.domains;
+        if (bl.keywords) keywords = bl.keywords;
+        if (bl.built_in_domains) builtInDomains = new Set(bl.built_in_domains.map(x=>x.toLowerCase()));
+        if (bl.built_in_keywords) builtInKeywords = new Set(bl.built_in_keywords.map(x=>x.toLowerCase()));
+
+        refreshDomains(document.getElementById('domain-search')?.value);
+        refreshKeywords(document.getElementById('keyword-search')?.value);
+      }
+    });
+  }
+
+  /* Init */
   function init() {
     // Animate counters
     T.animateCounter(document.getElementById('block-domain-count'), domains.length, 1.0);
@@ -301,9 +404,15 @@ window.PurePathPages.blocking = (function () {
 
     // Delete handlers
     bindDeleteHandlers();
+
+    // Fetch live data from extension
+    fetchBlocklists();
+    subscribeToEvents();
   }
 
-  function destroy() {}
+  function destroy() {
+    if (unlistenBlocklist) { unlistenBlocklist(); unlistenBlocklist = null; }
+  }
 
   return { render, init, destroy };
 })();

@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="breeze">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blocklist Manager - Pure Path</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-color: #f8fafc;
+      --card-bg: rgba(255, 255, 255, 0.75);
+      --card-border: rgba(255, 255, 255, 0.5);
+      --text-main: #1e293b;
+      --text-muted: #64748b;
+      --primary: #818cf8;
+      --primary-hover: #6366f1;
+      --gradient-1: #818cf8;
+      --gradient-2: #38bdf8;
+      --orb-1: rgba(129, 140, 248, 0.3);
+      --orb-2: rgba(56, 189, 248, 0.2);
+      --glass-shadow: 0 16px 40px 0 rgba(31, 38, 135, 0.05);
+      --input-bg: rgba(255, 255, 255, 0.9);
+      --safe-color: #10b981;
+    }
+
+    [data-theme="lavender"] {
+      --bg-color: #faf5ff;
+      --card-bg: rgba(255, 255, 255, 0.8);
+      --text-main: #4a044e;
+      --text-muted: #86198f;
+      --primary: #c084fc;
+      --primary-hover: #a855f7;
+      --gradient-1: #c084fc;
+      --gradient-2: #f472b6;
+      --orb-1: rgba(192, 132, 252, 0.3);
+      --orb-2: rgba(244, 114, 182, 0.2);
+      --glass-shadow: 0 16px 40px 0 rgba(134, 25, 143, 0.05);
+    }
+
+    [data-theme="forest"] {
+      --bg-color: #f0fdf4;
+      --card-bg: rgba(255, 255, 255, 0.8);
+      --text-main: #064e3b;
+      --text-muted: #047857;
+      --primary: #34d399;
+      --primary-hover: #10b981;
+      --gradient-1: #34d399;
+      --gradient-2: #2dd4bf;
+      --orb-1: rgba(52, 211, 153, 0.3);
+      --orb-2: rgba(45, 212, 191, 0.2);
+      --glass-shadow: 0 16px 40px 0 rgba(4, 120, 87, 0.05);
+    }
+
+    [data-theme="midnight"] {
+      --bg-color: #0f172a;
+      --card-bg: rgba(30, 41, 59, 0.8);
+      --card-border: rgba(51, 65, 85, 0.5);
+      --text-main: #f8fafc;
+      --text-muted: #cbd5e1;
+      --primary: #3b82f6;
+      --primary-hover: #60a5fa;
+      --gradient-1: #3b82f6;
+      --gradient-2: #6366f1;
+      --orb-1: rgba(59, 130, 246, 0.2);
+      --orb-2: rgba(99, 102, 241, 0.15);
+      --glass-shadow: 0 16px 40px 0 rgba(0, 0, 0, 0.3);
+      --input-bg: rgba(15, 23, 42, 0.9);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      position: relative;
+      transition: background-color 0.4s ease, color 0.4s ease;
+    }
+
+    /* Ambient Background */
+    .ambient-bg {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+    }
+
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(100px);
+      animation: float 25s infinite ease-in-out alternate;
+      opacity: 0.8;
+    }
+
+    .orb-1 {
+      width: 600px;
+      height: 600px;
+      background: var(--orb-1);
+      top: -200px;
+      right: -200px;
+    }
+
+    .orb-2 {
+      width: 500px;
+      height: 500px;
+      background: var(--orb-2);
+      bottom: -100px;
+      left: -200px;
+      animation-delay: -12s;
+    }
+
+    @keyframes float {
+      0% {
+        transform: translate(0, 0) scale(1);
+      }
+
+      100% {
+        transform: translate(80px, 100px) scale(1.1);
+      }
+    }
+
+    /* Navbar */
+    .navbar {
+      background: var(--card-bg);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 16px 32px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .navbar-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .navbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .navbar-logo {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: #222225;
+      padding: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    .navbar-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      border-radius: 4px;
+    }
+
+    .navbar-title {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .navbar-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: rgba(16, 185, 129, 0.1);
+      border-radius: 12px;
+      border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+
+    .navbar-status-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--safe-color);
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    .navbar-status-text {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--safe-color);
+      letter-spacing: 0.05em;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+
+      50% {
+        transform: scale(1.5);
+        opacity: 0.5;
+      }
+    }
+
+    /* Main Content */
+    .main-content {
+      flex: 1;
+      padding: 40px 32px;
+      position: relative;
+      z-index: 10;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .page-header {
+      margin-bottom: 40px;
+      animation: slideUp 0.6s ease-out;
+    }
+
+    .page-title {
+      font-size: 36px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: -0.02em;
+    }
+
+    .page-subtitle {
+      font-size: 16px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .page-subtitle .highlight {
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      margin-bottom: 40px;
+      animation: slideUp 0.6s ease-out 0.1s both;
+    }
+
+    .glass-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(24px);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      padding: 32px;
+      box-shadow: var(--glass-shadow);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .glass-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 20px 40px 0 rgba(31, 38, 135, 0.1);
+    }
+
+    .stat-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin-bottom: 20px;
+      background: rgba(var(--primary), 0.1);
+      color: var(--primary);
+    }
+
+    .stat-number {
+      font-size: 36px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .stat-label {
+      font-size: 14px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    /* Blocklist Sections */
+    .blocklist-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 32px;
+      animation: slideUp 0.6s ease-out 0.2s both;
+    }
+
+    .blocklist-section {
+      background: var(--card-bg);
+      backdrop-filter: blur(24px);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      padding: 32px;
+      box-shadow: var(--glass-shadow);
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+
+    .section-title-group {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .section-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      background: rgba(var(--primary), 0.1);
+      color: var(--primary);
+    }
+
+    .section-title-text h3 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .section-title-text p {
+      font-size: 12px;
+      color: var(--primary);
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+
+    .add-button {
+      width: 44px;
+      height: 44px;
+      background: linear-gradient(135deg, var(--gradient-1), var(--gradient-2));
+      border: none;
+      border-radius: 14px;
+      color: white;
+      font-size: 24px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: 0 4px 12px rgba(129, 140, 248, 0.3);
+    }
+
+    .add-button:hover {
+      transform: scale(1.05) translateY(-2px);
+      box-shadow: 0 8px 24px rgba(129, 140, 248, 0.4);
+    }
+
+    /* Search Bar */
+    .search-container {
+      position: relative;
+      margin-bottom: 24px;
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 20px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      font-size: 18px;
+    }
+
+    .search-input {
+      width: 100%;
+      padding: 16px 20px 16px 52px;
+      border: 2px solid var(--card-border);
+      border-radius: 16px;
+      font-size: 15px;
+      color: var(--text-main);
+      font-family: inherit;
+      background: var(--input-bg);
+      transition: all 0.3s;
+    }
+
+    .search-input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.15);
+    }
+
+    .search-result {
+      padding: 16px;
+      background: var(--input-bg);
+      border-radius: 12px;
+      margin-top: 16px;
+      border: 1px solid var(--card-border);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    /* Modals */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    .modal {
+      background: var(--card-bg);
+      backdrop-filter: blur(32px);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      padding: 40px;
+      max-width: 500px;
+      width: 90%;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2);
+      animation: modalSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+
+      to {
+        opacity: 1;
+      }
+    }
+
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes modalSlideIn {
+      from {
+        opacity: 0;
+        transform: translateY(40px) scale(0.95);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+
+    .modal-title {
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .modal-close {
+      width: 36px;
+      height: 36px;
+      background: rgba(var(--primary), 0.1);
+      border: none;
+      border-radius: 10px;
+      color: var(--text-main);
+      font-size: 20px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .modal-close:hover {
+      background: rgba(var(--primary), 0.2);
+      transform: rotate(90deg);
+    }
+
+    .form-group {
+      margin-bottom: 24px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 14px 16px;
+      border: 2px solid var(--card-border);
+      border-radius: 12px;
+      font-size: 15px;
+      background: var(--input-bg);
+      color: var(--text-main);
+      font-family: inherit;
+      transition: all 0.3s;
+    }
+
+    .form-input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.15);
+    }
+
+    .form-help {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 8px;
+    }
+
+    .modal-footer {
+      display: flex;
+      gap: 16px;
+      justify-content: flex-end;
+    }
+
+    .btn {
+      padding: 14px 24px;
+      border: none;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      font-family: inherit;
+    }
+
+    .btn-cancel {
+      background: transparent;
+      color: var(--text-muted);
+      border: 2px solid var(--card-border);
+    }
+
+    .btn-cancel:hover {
+      background: rgba(0, 0, 0, 0.05);
+      color: var(--text-main);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--gradient-1), var(--gradient-2));
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(129, 140, 248, 0.3);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(129, 140, 248, 0.4);
+    }
+
+    /* Footer */
+    .footer {
+      background: var(--card-bg);
+      backdrop-filter: blur(24px);
+      border-top: 1px solid var(--card-border);
+      padding: 32px;
+      position: relative;
+      z-index: 10;
+    }
+
+    .footer-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .footer-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .footer-logo {
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      background: #222225;
+      padding: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    .footer-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      border-radius: 4px;
+    }
+
+    .footer-text {
+      font-size: 14px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="ambient-bg">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+  </div>
+
+  <nav class="navbar">
+    <div class="navbar-content">
+      <div class="navbar-brand">
+        <div class="navbar-logo">
+          <img src="icons/icon48.png" alt="Pure Path">
+        </div>
+        <div class="navbar-title">Pure Path</div>
+      </div>
+      <div class="navbar-status">
+        <div class="navbar-status-dot"></div>
+        <span class="navbar-status-text">Protection Active</span>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="container">
+      <div class="page-header">
+        <h1 class="page-title">Blocklist Manager</h1>
+        <p class="page-subtitle">Manage your boundaries. All rules are currently <span class="highlight">active</span>
+          and protecting you.</p>
+      </div>
+
+      <div class="stats-grid">
+        <div class="glass-card stat-card">
+          <div class="stat-icon">🌐</div>
+          <div class="stat-number" id="domainCount">0</div>
+          <div class="stat-label">Blocked Domains</div>
+        </div>
+        <div class="glass-card stat-card">
+          <div class="stat-icon">🛡️</div>
+          <div class="stat-number" id="threatsCount">0</div>
+          <div class="stat-label">Threats Prevented</div>
+        </div>
+      </div>
+
+      <div class="blocklist-grid">
+        <!-- Domains -->
+        <div class="blocklist-section">
+          <div class="section-header">
+            <div class="section-title-group">
+              <div class="section-icon">🌐</div>
+              <div class="section-title-text">
+                <h3>Blocked Domains</h3>
+                <p id="domainStatus">ACTIVE RULES</p>
+              </div>
+            </div>
+            <button class="add-button" id="addDomainBtn" title="Add Domain">+</button>
+          </div>
+          <div class="search-container">
+            <span class="search-icon">🔍</span>
+            <input type="text" class="search-input" id="domainSearch" placeholder="Search domains...">
+          </div>
+          <div id="domainResult" class="hidden"></div>
+          
+          <div class="user-domains-section" style="margin-top: 24px;">
+            <h4 style="font-size: 16px; margin-bottom: 12px; color: var(--text-muted);">Your Custom Domains</h4>
+            <div id="userDomainsList" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+              <!-- User domains will be rendered here -->
+              <div style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 14px; background: rgba(0,0,0,0.02); border-radius: 12px;">Loading your custom domains...</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-content">
+      <div class="footer-brand">
+        <div class="footer-logo"><img src="icons/icon48.png" alt="Logo"></div>
+        <span class="footer-text">© 2026 Pure Path. All rights reserved.</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Add Domain Modal -->
+  <div id="addDomainModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title">Block a Domain</h3>
+        <button class="modal-close" id="closeDomainModal">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="domainModalMessage"></div>
+        <div class="form-group">
+          <label class="form-label" for="domainInput">Domain Name</label>
+          <input type="text" id="domainInput" class="form-input" placeholder="example.com" autocomplete="off">
+          <p class="form-help">Enter the domain without "www." or "http://"</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-cancel" id="cancelDomainBtn">Cancel</button>
+        <button class="btn btn-primary" id="saveDomainBtn">Add Domain</button>
+      </div>
+    </div>
+  </div>
+
+
+
+  <script src="user_blocklist.js"></script>
+</body>
+
+</html>

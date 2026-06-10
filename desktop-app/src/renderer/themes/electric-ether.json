@@ -1,0 +1,31 @@
+{
+  "id": "electric-ether",
+  "name": "Electric Ether",
+  "type": "dark",
+  "css": {
+    "--bg-deep": "#0A0E17",
+    "--bg-surface": "#0F1422",
+    "--bg-elevated": "#151B2B",
+    "--violet": "#8B5CF6",
+    "--violet-light": "#A78BFA",
+    "--violet-dark": "#7C3AED",
+    "--violet-glow": "rgba(139, 92, 246, 0.35)",
+    "--violet-subtle": "rgba(139, 92, 246, 0.08)",
+    "--blue": "#3B82F6",
+    "--blue-glow": "rgba(59, 130, 246, 0.3)",
+    "--frost": "#F1F5F9",
+    "--frost-muted": "#94A3B8",
+    "--frost-dim": "#64748B",
+    "--glass-bg": "rgba(15, 20, 34, 0.55)",
+    "--glass-bg-solid": "rgba(15, 20, 34, 0.85)",
+    "--glass-border": "rgba(139, 92, 246, 0.12)",
+    "--glass-border-hover": "rgba(139, 92, 246, 0.28)"
+  },
+  "webgl": {
+    "deepBg": [0.039, 0.055, 0.090],
+    "violet": [0.545, 0.361, 0.965],
+    "blue": [0.231, 0.510, 0.965],
+    "darkViolet": [0.25, 0.15, 0.45],
+    "frostHint": [0.65, 0.72, 0.82]
+  }
+}

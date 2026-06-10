@@ -1,0 +1,31 @@
+{
+  "id": "frost-light",
+  "name": "Frost Light",
+  "type": "light",
+  "css": {
+    "--bg-deep": "#F1F5F9",
+    "--bg-surface": "#F8FAFC",
+    "--bg-elevated": "#FFFFFF",
+    "--violet": "#8B5CF6",
+    "--violet-light": "#7C3AED",
+    "--violet-dark": "#6D28D9",
+    "--violet-glow": "rgba(139, 92, 246, 0.25)",
+    "--violet-subtle": "rgba(139, 92, 246, 0.1)",
+    "--blue": "#3B82F6",
+    "--blue-glow": "rgba(59, 130, 246, 0.25)",
+    "--frost": "#0F172A",
+    "--frost-muted": "#334155",
+    "--frost-dim": "#475569",
+    "--glass-bg": "rgba(255, 255, 255, 0.65)",
+    "--glass-bg-solid": "rgba(255, 255, 255, 0.95)",
+    "--glass-border": "rgba(0, 0, 0, 0.08)",
+    "--glass-border-hover": "rgba(0, 0, 0, 0.15)"
+  },
+  "webgl": {
+    "deepBg": [0.945, 0.961, 0.976],
+    "violet": [0.545, 0.361, 0.965],
+    "blue": [0.231, 0.510, 0.965],
+    "darkViolet": [0.8, 0.7, 0.9],
+    "frostHint": [0.2, 0.25, 0.35]
+  }
+}
