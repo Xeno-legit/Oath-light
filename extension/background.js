@@ -5,6 +5,30 @@ let blocklistSet = new Set(); // O(1) domain lookup
 
 let defaultDomains = [];
 
+// Cached Set of the built-in domains, for fast "is this a default?" checks.
+let defaultSetCache = null;
+function getDefaultSet() {
+  if (!defaultSetCache || defaultSetCache.size !== defaultDomains.length) {
+    defaultSetCache = new Set(defaultDomains);
+  }
+  return defaultSetCache;
+}
+
+// On a cold/revived service worker the in-memory list can be empty; reload it
+// from storage before any mutation so we never overwrite the saved blocklist.
+async function ensureBlocklistLoaded() {
+  if (!blocklistDomains || !blocklistDomains.length) {
+    await loadBlocklistsFromStorage();
+  }
+}
+
+// User-added domains are tracked in their own storage key (the source of truth
+// for "my blocklist"), independent of the large merged blocklistDomains list.
+async function getCustomList() {
+  const { customDomains } = await chrome.storage.local.get(['customDomains']);
+  return Array.isArray(customDomains) ? customDomains : [];
+}
+
 // Deduplication maps: prevents multi-firing stats while allowing re-blocks
 const tabLastChecked = new Map();
 const tabLastCheckedTime = new Map();
@@ -1551,6 +1575,72 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
       }
     });
+    return true;
+  }
+
+  if (request.action === 'getCustomDomains') {
+    // The user's own list (small) + the built-in count for display.
+    (async () => {
+      if (!defaultDomains || !defaultDomains.length) await loadDefaultListsIntoMemory();
+      sendResponse({ custom: await getCustomList(), builtIn: getDefaultSet().size });
+    })();
+    return true;
+  }
+
+  if (request.action === 'checkDomainBlocked') {
+    // Yes/no check against the built-in blacklist (exact or parent-domain match).
+    (async () => {
+      if (!defaultDomains || !defaultDomains.length) await loadDefaultListsIntoMemory();
+      const d = (request.domain || '').trim().toLowerCase()
+        .replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+      const dset = getDefaultSet();
+      let blocked = dset.has(d);
+      if (!blocked && d.includes('.')) {
+        // also match if a parent registrable domain is blocked (sub.x.com -> x.com)
+        const parts = d.split('.');
+        for (let i = 1; i < parts.length - 1 && !blocked; i++) {
+          if (dset.has(parts.slice(i).join('.'))) blocked = true;
+        }
+      }
+      sendResponse({ domain: d, blocked });
+    })();
+    return true;
+  }
+
+  if (request.action === 'addCustomDomain') {
+    (async () => {
+      const domain = (request.domain || '').trim().toLowerCase()
+        .replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+      if (!domain) { sendResponse({ success: false, reason: 'empty' }); return; }
+      if (!defaultDomains || !defaultDomains.length) await loadDefaultListsIntoMemory();
+      if (getDefaultSet().has(domain)) { sendResponse({ success: false, reason: 'default' }); return; }
+      const custom = await getCustomList();
+      if (custom.includes(domain)) { sendResponse({ success: false, reason: 'exists' }); return; }
+      await ensureBlocklistLoaded();
+      const nextCustom = [...custom, domain];
+      if (!blocklistSet.has(domain)) { blocklistDomains = [...blocklistDomains, domain]; blocklistSet.add(domain); }
+      chrome.storage.local.set({ customDomains: nextCustom, blocklistDomains }, () => {
+        if (chrome.runtime.lastError) { sendResponse({ success: false, reason: 'storage' }); return; }
+        if (typeof NativeMessagingBridge !== 'undefined') NativeMessagingBridge.sendBlocklistUpdate();
+        sendResponse({ success: true });
+      });
+    })();
+    return true;
+  }
+
+  if (request.action === 'removeCustomDomain') {
+    (async () => {
+      const domain = (request.domain || '').trim().toLowerCase();
+      await ensureBlocklistLoaded();
+      const nextCustom = (await getCustomList()).filter((d) => d !== domain);
+      blocklistDomains = blocklistDomains.filter((d) => d !== domain);
+      blocklistSet.delete(domain);
+      chrome.storage.local.set({ customDomains: nextCustom, blocklistDomains }, () => {
+        if (chrome.runtime.lastError) { sendResponse({ success: false }); return; }
+        if (typeof NativeMessagingBridge !== 'undefined') NativeMessagingBridge.sendBlocklistUpdate();
+        sendResponse({ success: true });
+      });
+    })();
     return true;
   }
 

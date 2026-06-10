@@ -38,8 +38,8 @@ Until every stage is complete or before it by one stage.
 
 ▶ Phase 3 should focus more on the vibe and establishing proper cross browser integration.
 
-* Theme unison
-* Desktop app UI, UX remake
+* Theme unison (done)
+* Desktop app UI, UX remake (done)
 * Fixing cross browser issues.
 * Blocking speed optimization.
 * Useful advices and protocols

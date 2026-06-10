@@ -1,0 +1,65 @@
+/* Blocklist manager — wraps the reused desktop blocklist styling in a
+   sticky navbar (head) + footer, like the old page. Loaded after desktop.css. */
+
+html { height: auto; }
+body {
+  min-height: 100vh;
+  overflow-y: auto;            /* override desktop styles' overflow:hidden */
+  display: flex;
+  flex-direction: column;
+  background: var(--desktop);  /* atmospheric gradient from the theme tokens */
+}
+
+/* ambient background orbs */
+.bg-layer { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+.bg-layer .orb { position: absolute; border-radius: 50%; filter: blur(85px); opacity: .5; }
+.bg-layer .orb.a { width: 560px; height: 560px; top: -180px; right: -120px; background: radial-gradient(circle, var(--orb-a), transparent 70%); }
+.bg-layer .orb.b { width: 480px; height: 480px; bottom: -160px; left: -140px; background: radial-gradient(circle, var(--orb-c), transparent 70%); }
+[data-theme="light"] .bg-layer .orb { opacity: .4; mix-blend-mode: multiply; }
+
+/* navbar (head) */
+.navbar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 28px;
+  background: color-mix(in oklab, var(--bg-0) 72%, transparent);
+  border-bottom: 1px solid var(--glass-brd);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+}
+.navbar .brand { display: flex; align-items: center; gap: 12px; }
+.navbar .brand img { width: 30px; height: 30px; display: block; }
+.navbar .brand b { font-size: 17px; font-weight: 800; letter-spacing: -.02em; }
+.nav-status {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12.5px; font-weight: 700; color: var(--accent-2);
+  padding: 7px 13px; border-radius: 999px;
+  background: color-mix(in oklab, var(--accent-2) 12%, transparent);
+  border: 1px solid color-mix(in oklab, var(--accent-2) 24%, transparent);
+}
+.nav-status.is-off { color: var(--muted); background: var(--glass); border-color: var(--glass-brd); }
+.nav-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2);
+  box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent-2) 60%, transparent); animation: nspulse 2.4s ease-in-out infinite; }
+.nav-status.is-off .dot { background: var(--muted); animation: none; }
+@keyframes nspulse { 0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent-2) 55%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+/* main wrapper */
+main.wrap { position: relative; z-index: 1; flex: 1; width: 100%; }
+
+/* footer (foot) */
+.footer {
+  position: relative; z-index: 1;
+  border-top: 1px solid var(--glass-brd);
+  background: color-mix(in oklab, var(--bg-0) 72%, transparent);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  padding: 22px 28px;
+  display: flex; align-items: center; gap: 12px; justify-content: center;
+}
+.footer img { width: 24px; height: 24px; display: block; opacity: .9; }
+.footer span { font-size: 13px; color: var(--muted); font-weight: 600; }
+
+/* inline icon stroke (svgs inside .ico tiles, search bars, buttons) */
+svg.svgi { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/* tab panels */
+.tabpanel { display: none; }
+.tabpanel.active { display: block; }
