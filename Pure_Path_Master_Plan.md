@@ -38,10 +38,10 @@ Until every stage is complete or before it by one stage.
 
 ▶ Phase 3 should focus more on the vibe and establishing proper cross browser integration.
 
-* Theme unison (almost done)
-* Desktop app UI, UX remake (done)
+* Theme unison (Done)
+* Desktop app UI, UX remake (Done)
 * Fixing cross browser issues.
-* Blocking speed optimization.
+* Blocking speed optimization. (Almost Done)
 * Useful advices and protocols
 * Graylist V2 — API/network-layer interception (replaces fragile CSS UI-hiding)
   (Instead of hiding each site's filter UI, intercept the JSON the site fetches and strip the items

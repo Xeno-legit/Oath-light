@@ -9,13 +9,13 @@ const STYLE_OPTS = [
 ];
 
 const BG_OPTS = [
-{ id: 'both',   name: 'Full atmosphere', desc: 'Orbs, particles & flowing waves' },
-{ id: 'orbs',   name: 'Drifting orbs',   desc: 'Soft glowing orbs & particles' },
-{ id: 'waves',  name: 'Flowing waves',   desc: 'Gentle layered waves only' },
-{ id: 'stars',  name: 'Starfield',       desc: 'Twinkling stars across the canvas' },
-{ id: 'ripple', name: 'Ripple',          desc: 'Slow concentric rings from center' },
-{ id: 'smoke',  name: 'Smoke',           desc: 'Large soft clouds drifting upward' },
-{ id: 'off',    name: 'Minimal',         desc: 'Still background, no motion' },
+{ id: 'both',   name: 'Full atmosphere', desc: 'Orbs, particles & flowing waves', icon: IconAtmosphere },
+{ id: 'orbs',   name: 'Drifting orbs',   desc: 'Soft glowing orbs & particles',  icon: IconOrbs },
+{ id: 'waves',  name: 'Flowing waves',   desc: 'Gentle layered waves only',      icon: IconWave },
+{ id: 'stars',  name: 'Starfield',       desc: 'Twinkling stars across the canvas', icon: IconStars },
+{ id: 'ripple', name: 'Ripple',          desc: 'Slow concentric rings from center', icon: IconRipple },
+{ id: 'smoke',  name: 'Smoke',           desc: 'Large soft clouds drifting upward', icon: IconSmoke },
+{ id: 'off',    name: 'Minimal',         desc: 'Still background, no motion',    icon: IconMinimal },
 ];
 
 
@@ -69,7 +69,7 @@ function ThemesPage({ s, PP }) {
         {BG_OPTS.map((o) =>
         <button key={o.id} className={'card hover bg-card' + (d.bg === o.id ? ' sel' : '')} onClick={() => apply({ bg: o.id })}>
             <div className="row" style={{ gap: 12 }}>
-              <div className="bg-card-ico"><IconWave size={20} /></div>
+              <div className="bg-card-ico"><o.icon size={20} /></div>
               <div style={{ textAlign: 'left' }}>
                 <b style={{ fontSize: 14.5, fontWeight: 800 }}>{o.name}</b>
                 <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>{o.desc}</div>
