@@ -84,15 +84,8 @@ function initBlacklist() {
   });
 }
 
-/* ---------- graylist search (static, mirrors the desktop app) ---------- */
-const GRAYLIST = [
-  { url: 'reddit.com', desc: 'NSFW subreddits & galleries filtered' },
-  { url: 'x.com', desc: 'Sensitive media hidden, adult accounts blocked' },
-  { url: 'tumblr.com', desc: 'Explicit blogs and tags filtered' },
-  { url: 'youtube.com', desc: 'Restricted Mode enforced' },
-  { url: 'imgur.com', desc: 'Mature albums blocked' },
-  { url: 'discord.com', desc: 'Age-restricted servers blocked' },
-];
+/* ---------- graylist (canonical list from graylist-sites.js) ---------- */
+const GRAYLIST = (typeof window !== 'undefined' && Array.isArray(window.GRAYLIST_SITES)) ? window.GRAYLIST_SITES : [];
 function initGraylist() {
   $('graylistCount').textContent = GRAYLIST.length + ' sites';
   const input = $('grayInput'), out = $('grayResult');
@@ -104,6 +97,46 @@ function initGraylist() {
     out.appendChild(hit
       ? resultRow('is-gray', ICON.wave, hit.url, hit.desc, 'Filtered')
       : resultRow('is-clear', ICON.check, d, 'Not on the graylist — block it under Custom sites if needed', 'Not filtered'));
+  });
+}
+
+/* ---------- graylist catalog (collapsible dropdown) ---------- */
+function renderGrayCatalog() {
+  const list = $('grayCatalogList');
+  if (!list) return;
+  const countEl = $('grayCatalogCount');
+  if (countEl) countEl.textContent = String(GRAYLIST.length);
+  list.textContent = '';
+  for (const g of GRAYLIST) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:10px 12px; background:color-mix(in oklab,var(--muted) 7%,transparent); border:1px solid color-mix(in oklab,var(--muted) 14%,transparent); border-radius:10px';
+    const txt = document.createElement('div'); txt.style.cssText = 'flex:1; min-width:0';
+    const b = document.createElement('b'); b.style.fontSize = '13px'; b.textContent = g.url;
+    const sp = document.createElement('span');
+    sp.style.cssText = 'display:block; font-size:11.5px; color:var(--muted); margin-top:1px; line-height:1.4';
+    sp.textContent = g.desc;
+    txt.append(b, sp);
+    const chip = document.createElement('span'); chip.className = 'chip';
+    chip.style.cssText = 'flex:0 0 auto; color:' + (g.kind === 'discord' ? '#7c84f6' : g.kind === 'dom' ? '#c9962f' : 'var(--accent-2)');
+    chip.textContent = g.kind === 'discord' ? 'Channel block' : g.kind === 'dom' ? 'Page filter' : 'Feed filter';
+    row.append(txt, chip);
+    list.appendChild(row);
+  }
+}
+function initGrayCatalog() {
+  const btn = $('grayCatalogToggle'), list = $('grayCatalogList'), chev = $('grayCatalogChevron');
+  if (!btn || !list) return;
+  renderGrayCatalog();
+  btn.addEventListener('click', () => {
+    const willOpen = list.hasAttribute('hidden');
+    if (willOpen) {
+      list.removeAttribute('hidden');
+      list.style.display = 'flex';
+    } else {
+      list.setAttribute('hidden', '');
+      list.style.display = 'none';
+    }
+    if (chev) chev.style.transform = willOpen ? 'rotate(90deg)' : 'none';
   });
 }
 
@@ -191,6 +224,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initTabs();
   initBlacklist();
   initGraylist();
+  initGrayCatalog();
   $('customAdd').addEventListener('click', addCustom);
   $('customInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') addCustom(); });
   loadCustom();

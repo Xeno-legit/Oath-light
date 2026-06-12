@@ -88,6 +88,15 @@
               <div id="grayResult">
                 <div class="search-hint">Type any website to see if its explicit content is filtered. To block a site entirely, add it under <b>Custom sites</b>.</div>
               </div>
+
+              <!-- collapsible catalog of every filtered site (graylist only) -->
+              <button id="grayCatalogToggle" type="button"
+                style="margin-top:14px; width:100%; display:flex; align-items:center; gap:10px; padding:11px 13px; background:color-mix(in oklab,var(--muted) 7%,transparent); border:1px solid color-mix(in oklab,var(--muted) 16%,transparent); border-radius:10px; cursor:pointer; font:inherit; color:inherit">
+                <svg class="svgi" viewBox="0 0 24 24" width="16" height="16" style="color:var(--accent-2); flex:0 0 auto"><path d="M8 6h12M8 12h12M8 18h12"/></svg>
+                <span style="flex:1; text-align:left; font-weight:700; font-size:13px">All <span id="grayCatalogCount">…</span> filtered sites</span>
+                <svg id="grayCatalogChevron" class="svgi" viewBox="0 0 24 24" width="16" height="16" style="color:var(--muted); flex:0 0 auto; transition:transform .2s ease"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+              <div id="grayCatalogList" hidden style="flex-direction:column; gap:7px; max-height:320px; overflow-y:auto; margin-top:8px"></div>
             </div>
           </div>
 
@@ -135,6 +144,8 @@
     <span>© 2026 Pure Path. All rights reserved.</span>
   </footer>
 
+  <script src="theme-sync.js"></script>
+  <script src="graylist-sites.js"></script>
   <script src="user_blocklist.js"></script>
 </body>
 

@@ -193,19 +193,22 @@ quoteEl.textContent = quotes[Math.floor(Math.random() * quotes.length)];
 /* ============================================================
    STATS
    ============================================================ */
-chrome.runtime.sendMessage({ action: 'getStats' }, (response) => {
-  if (chrome.runtime.lastError) {
-    console.error('Error loading stats:', chrome.runtime.lastError);
-    return;
-  }
-  if (response && response.stats) {
-    const stats = response.stats;
-    document.getElementById('totalBlocks').textContent = (stats.totalBlocks || 0).toLocaleString();
-    if (stats.installDate) {
-      const days = Math.floor((Date.now() - new Date(stats.installDate).getTime()) / 86400000);
-      document.getElementById('daysClean').textContent = Math.max(0, days);
-    }
-  }
+// Prefer the desktop app's canonical day streak + global block total (summed
+// across every browser/profile); fall back to this profile's own stats.
+chrome.storage.local.get(['ppAppData'], (store) => {
+  const app = (store && store.ppAppData) || {};
+  chrome.runtime.sendMessage({ action: 'getStats' }, (response) => {
+    const stats = (response && response.stats) || {};
+    const blocks = typeof app.globalBlocks === 'number' ? app.globalBlocks : (stats.totalBlocks || 0);
+    const tb = document.getElementById('totalBlocks');
+    if (tb) tb.textContent = blocks.toLocaleString();
+
+    let days = null;
+    if (typeof app.streak === 'number') days = app.streak;
+    else if (stats.installDate) days = Math.floor((Date.now() - new Date(stats.installDate).getTime()) / 86400000);
+    const dc = document.getElementById('daysClean');
+    if (dc && days !== null) dc.textContent = Math.max(0, days);
+  });
 });
 
 /* ============================================================

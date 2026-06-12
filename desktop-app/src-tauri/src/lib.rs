@@ -1,10 +1,29 @@
+mod browsers;
+mod profiles;
+
+use browsers::{BrowserDef, Engine, EnforceOutcome, BROWSERS};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
+
+// ============================================================================
+// Tuning
+// ============================================================================
+
+/// How often the monitor reconciles running browsers against live connections.
+const MONITOR_TICK: Duration = Duration::from_secs(3);
+/// A heartbeat older than this marks a connection as not "live right now"
+/// (used only as a fallback signal — install status comes from profiles.rs).
+const HEARTBEAT_STALE_MS: u64 = 40_000;
+
+/// Monotonic id per accepted native-host connection (one per browser profile).
+static CONN_SEQ: AtomicU64 = AtomicU64::new(1);
 
 // ============================================================================
 // Application State
@@ -62,30 +81,69 @@ impl Default for ExtensionBlocklists {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConnectionStatus {
-    pub connected: bool,
-    pub last_heartbeat: u64, // Unix timestamp ms
-    pub extension_version: String,
+/// One live native-host connection = one browser profile's extension.
+struct ConnState {
+    browser: String,    // browser key from host_hello ("chrome", …) or "unknown"
+    profile_id: String, // stable per-profile id supplied by the extension
+    last_heartbeat: u64,
+    extension_version: String,
+    writer: Option<TcpStream>,
 }
 
-impl Default for ConnectionStatus {
-    fn default() -> Self {
-        Self {
-            connected: false,
-            last_heartbeat: 0,
-            extension_version: String::new(),
-        }
-    }
+/// One connected profile within a browser (for the frontend).
+#[derive(Debug, Clone, Serialize)]
+pub struct ProfileStatus {
+    pub id: String,
+    pub label: String,
+    pub connected: bool,
+    pub last_heartbeat: u64,
+    pub version: String,
+}
+
+/// Snapshot of one browser for the frontend.
+#[derive(Debug, Clone, Serialize)]
+pub struct BrowserStatus {
+    pub key: String,
+    pub name: String,
+    pub engine: String,
+    pub installed: bool,
+    pub running: bool,
+    pub connected: bool,
+    pub extension_version: String,
+    pub last_heartbeat: u64,
+    /// not_installed | idle | connecting | running_connected | extension_missing
+    pub state: String,
+    /// off | dormant | enforced | failed | unsupported
+    pub enforcement: String,
+    /// Every profile of this browser currently connected.
+    pub profiles: Vec<ProfileStatus>,
+}
+
+/// A browser not in the built-in table, learned from a native-host connection.
+#[derive(Debug, Clone)]
+struct CustomBrowser {
+    name: String,
+    process: String, // lowercased image name, e.g. "zen.exe"
 }
 
 #[derive(Default)]
 pub struct AppState {
     pub stats: ExtensionStats,
     pub blocklists: ExtensionBlocklists,
-    pub connection: ConnectionStatus,
-    /// Active TCP stream to the native host (for sending messages back)
-    tcp_writer: Option<TcpStream>,
+    /// keyed by per-connection id (one entry per browser profile).
+    connections: HashMap<u64, ConnState>,
+    /// Browsers outside the built-in table, learned when their extension connects.
+    custom_browsers: HashMap<String, CustomBrowser>,
+    /// Latest total_blocks per source (profile), so the displayed count is the
+    /// sum across every extension/profile and survives one going idle.
+    block_counts: HashMap<String, u64>,
+    /// Whether the desktop app should keep the extension installed (the
+    /// "uninstall guard" / monitoring remediation switch). On by default.
+    guard_enabled: bool,
+    /// Last theme/palette pushed from the UI, re-sent to extensions on connect.
+    ext_theme: Option<Value>,
+    /// Clean-streak day count from the app, mirrored down to the extensions.
+    app_streak: u64,
 }
 
 // ============================================================================
@@ -108,19 +166,13 @@ fn read_tcp_message(reader: &mut BufReader<TcpStream>) -> std::io::Result<Value>
     reader.read_exact(&mut msg_buf)?;
 
     serde_json::from_slice(&msg_buf).map_err(|e| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("Invalid JSON: {}", e),
-        )
+        std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Invalid JSON: {}", e))
     })
 }
 
 fn write_tcp_message(writer: &mut TcpStream, msg: &Value) -> std::io::Result<()> {
     let json_bytes = serde_json::to_vec(msg).map_err(|e| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("JSON serialize error: {}", e),
-        )
+        std::io::Error::new(std::io::ErrorKind::InvalidData, format!("JSON serialize error: {}", e))
     })?;
     let len = json_bytes.len() as u32;
     writer.write_all(&len.to_le_bytes())?;
@@ -136,121 +188,140 @@ fn now_unix_ms() -> u64 {
         .as_millis() as u64
 }
 
+/// Read a `profileId` field from an extension message (handshake/heartbeat).
+fn msg_profile_id(msg: &Value) -> Option<String> {
+    msg.get("profileId")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+}
+
 // ============================================================================
-// Message Handler — processes messages from the extension via native host
+// Message handling — messages arriving from a browser's extension
 // ============================================================================
 
 fn handle_extension_message(
     app: &AppHandle,
     state: &Arc<Mutex<AppState>>,
+    conn_id: u64,
     msg: &Value,
 ) {
     let msg_type = msg.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
-    log::info!("Received message type: {}", msg_type);
+    // Every extension message refreshes this connection's liveness + identity.
+    {
+        let mut s = state.lock().unwrap();
+        if let Some(conn) = s.connections.get_mut(&conn_id) {
+            conn.last_heartbeat = now_unix_ms();
+            if let Some(pid) = msg_profile_id(msg) {
+                conn.profile_id = pid;
+            }
+            if let Some(v) = msg.get("extensionVersion").and_then(|v| v.as_str()) {
+                if !v.is_empty() {
+                    conn.extension_version = v.to_string();
+                }
+            }
+        }
+    }
 
     match msg_type {
-        "handshake" => {
-            let mut s = state.lock().unwrap();
-            s.connection.connected = true;
-            s.connection.last_heartbeat = now_unix_ms();
-            if let Some(v) = msg.get("extensionVersion").and_then(|v| v.as_str()) {
-                s.connection.extension_version = v.to_string();
-            }
-            let status = s.connection.clone();
-            drop(s);
-
-            let _ = app.emit("extension-status", &status);
-            log::info!("Extension connected: v{}", status.extension_version);
-        }
+        "handshake" | "heartbeat" => { /* liveness already refreshed above */ }
 
         "stats_sync" | "stats_update" => {
-            let mut s = state.lock().unwrap();
-            if let Some(v) = msg.get("totalBlocks").and_then(|v| v.as_u64()) {
-                s.stats.total_blocks = v;
+            {
+                let mut s = state.lock().unwrap();
+                // Key this source's block count by its profile id (fall back to
+                // the connection) so totals sum across profiles/browsers and a
+                // reconnect updates in place rather than double-counting.
+                let key = s
+                    .connections
+                    .get(&conn_id)
+                    .map(|c| if c.profile_id.is_empty() { format!("conn-{}", conn_id) } else { c.profile_id.clone() })
+                    .unwrap_or_else(|| format!("conn-{}", conn_id));
+                if let Some(v) = msg.get("totalBlocks").and_then(|v| v.as_u64()) {
+                    s.block_counts.insert(key, v);
+                }
+                // Aggregate = sum of every source's latest total.
+                s.stats.total_blocks = s.block_counts.values().sum();
+                if let Some(v) = msg.get("installDate").and_then(|v| v.as_str()) {
+                    if s.stats.install_date.is_empty() {
+                        s.stats.install_date = v.to_string();
+                    }
+                }
+                if let Some(v) = msg.get("lastBlockDate").and_then(|v| v.as_str()) {
+                    s.stats.last_block_date = v.to_string();
+                }
+                if let Some(v) = msg.get("daysProtected").and_then(|v| v.as_u64()) {
+                    s.stats.days_protected = v;
+                }
+                let stats = s.stats.clone();
+                drop(s);
+                let _ = app.emit("extension-stats", &stats);
             }
-            if let Some(v) = msg.get("installDate").and_then(|v| v.as_str()) {
-                s.stats.install_date = v.to_string();
-            }
-            if let Some(v) = msg.get("lastBlockDate").and_then(|v| v.as_str()) {
-                s.stats.last_block_date = v.to_string();
-            }
-            if let Some(v) = msg.get("daysProtected").and_then(|v| v.as_u64()) {
-                s.stats.days_protected = v;
-            }
-            s.connection.last_heartbeat = now_unix_ms();
-            let stats = s.stats.clone();
-            drop(s);
-
-            let _ = app.emit("extension-stats", &stats);
+            // Reflect the new global total back down to the extensions' pages.
+            broadcast_app_data(state);
         }
 
         "blocklist_sync" => {
             let mut s = state.lock().unwrap();
             if let Some(domains) = msg.get("domains").and_then(|v| v.as_array()) {
-                s.blocklists.domains = domains
-                    .iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect();
+                s.blocklists.domains =
+                    domains.iter().filter_map(|v| v.as_str().map(String::from)).collect();
                 s.blocklists.domain_count = s.blocklists.domains.len();
             }
             if let Some(keywords) = msg.get("keywords").and_then(|v| v.as_array()) {
-                s.blocklists.keywords = keywords
-                    .iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect();
+                s.blocklists.keywords =
+                    keywords.iter().filter_map(|v| v.as_str().map(String::from)).collect();
                 s.blocklists.keyword_count = s.blocklists.keywords.len();
             }
-            if let Some(built_in_domains) = msg.get("builtInDomains").and_then(|v| v.as_array()) {
-                s.blocklists.built_in_domains = built_in_domains
-                    .iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect();
+            if let Some(b) = msg.get("builtInDomains").and_then(|v| v.as_array()) {
+                s.blocklists.built_in_domains =
+                    b.iter().filter_map(|v| v.as_str().map(String::from)).collect();
             }
-            if let Some(built_in_keywords) = msg.get("builtInKeywords").and_then(|v| v.as_array()) {
-                s.blocklists.built_in_keywords = built_in_keywords
-                    .iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect();
+            if let Some(b) = msg.get("builtInKeywords").and_then(|v| v.as_array()) {
+                s.blocklists.built_in_keywords =
+                    b.iter().filter_map(|v| v.as_str().map(String::from)).collect();
             }
-            s.connection.last_heartbeat = now_unix_ms();
             let bl = s.blocklists.clone();
             drop(s);
-
             let _ = app.emit("extension-blocklist", &bl);
         }
 
-        "heartbeat" => {
-            let mut s = state.lock().unwrap();
-            s.connection.connected = true;
-            s.connection.last_heartbeat = now_unix_ms();
-            let status = s.connection.clone();
-            drop(s);
-
-            let _ = app.emit("extension-status", &status);
-        }
-
-        _ => {
-            log::warn!("Unknown message type: {}", msg_type);
-        }
+        _ => log::warn!("[conn {}] unknown message type: {}", conn_id, msg_type),
     }
 }
 
 // ============================================================================
-// Send message back TO the extension (via native host TCP)
+// Sending to the extension(s)
 // ============================================================================
 
-fn send_to_extension(state: &Arc<Mutex<AppState>>, msg: &Value) -> Result<(), String> {
+/// Broadcast a message to every connected browser/profile's extension.
+fn broadcast_to_extensions(state: &Arc<Mutex<AppState>>, msg: &Value) -> usize {
     let mut s = state.lock().unwrap();
-    if let Some(ref mut writer) = s.tcp_writer {
-        write_tcp_message(writer, msg).map_err(|e| format!("TCP write error: {}", e))
-    } else {
-        Err("No active connection to extension".to_string())
+    let mut sent = 0;
+    for conn in s.connections.values_mut() {
+        if let Some(writer) = conn.writer.as_mut() {
+            if write_tcp_message(writer, msg).is_ok() {
+                sent += 1;
+            }
+        }
     }
+    sent
+}
+
+/// Push the app-sourced day streak + global block total to every extension, so
+/// their pages show the same numbers the app does.
+fn broadcast_app_data(state: &Arc<Mutex<AppState>>) {
+    let (streak, blocks) = {
+        let s = state.lock().unwrap();
+        (s.app_streak, s.stats.total_blocks)
+    };
+    let msg = serde_json::json!({ "type": "set_app_data", "streak": streak, "globalBlocks": blocks });
+    let _ = broadcast_to_extensions(state, &msg);
 }
 
 // ============================================================================
-// TCP Server — Listens for connections from the native host
+// TCP Server — accepts connections from native host instances
 // ============================================================================
 
 fn start_tcp_server(app: AppHandle, state: Arc<Mutex<AppState>>) {
@@ -267,71 +338,367 @@ fn start_tcp_server(app: AppHandle, state: Arc<Mutex<AppState>>) {
         };
 
         for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
-                    log::info!("Native host connected");
-
-                    // Store the writer clone for sending messages back
-                    let writer_clone = stream.try_clone().ok();
-                    {
-                        let mut s = state.lock().unwrap();
-                        s.tcp_writer = writer_clone;
-                        s.connection.connected = true;
-                        s.connection.last_heartbeat = now_unix_ms();
-                    }
-
-                    let _ = app.emit("extension-status", &ConnectionStatus {
-                        connected: true,
-                        last_heartbeat: now_unix_ms(),
-                        extension_version: String::new(),
-                    });
-
-                    // Immediately ask the extension for fresh data
-                    {
-                        let sync_msg = serde_json::json!({ "type": "request_sync" });
-                        let _ = send_to_extension(&state, &sync_msg);
-                    }
-
-                    // Spawn a thread for this connection so the listener
-                    // can accept new connections (e.g. after extension reconnect)
-                    let app_clone = app.clone();
-                    let state_clone = state.clone();
-                    std::thread::spawn(move || {
-                        let mut reader = BufReader::new(stream);
-                        loop {
-                            match read_tcp_message(&mut reader) {
-                                Ok(msg) => {
-                                    handle_extension_message(&app_clone, &state_clone, &msg);
-                                }
-                                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock
-                                    || e.kind() == std::io::ErrorKind::TimedOut =>
-                                {
-                                    continue;
-                                }
-                                Err(e) => {
-                                    log::warn!("Native host disconnected: {}", e);
-                                    let mut s = state_clone.lock().unwrap();
-                                    s.connection.connected = false;
-                                    s.tcp_writer = None;
-                                    let status = s.connection.clone();
-                                    drop(s);
-                                    let _ = app_clone.emit("extension-status", &status);
-                                    break;
-                                }
-                            }
-                        }
-                    });
-                }
+            let stream = match stream {
+                Ok(s) => s,
                 Err(e) => {
                     log::error!("TCP accept error: {}", e);
+                    continue;
+                }
+            };
+
+            let app_clone = app.clone();
+            let state_clone = state.clone();
+            std::thread::spawn(move || {
+                handle_connection(app_clone, state_clone, stream);
+            });
+        }
+    });
+}
+
+/// One native-host connection. The host sends `host_hello` first (identifying
+/// the browser that spawned it), then relays the extension's messages (which
+/// carry the per-profile id).
+fn handle_connection(app: AppHandle, state: Arc<Mutex<AppState>>, stream: TcpStream) {
+    let conn_id = CONN_SEQ.fetch_add(1, Ordering::Relaxed);
+    let writer_clone = stream.try_clone().ok();
+    let mut reader = BufReader::new(stream);
+
+    // Register the connection immediately so heartbeats land somewhere.
+    {
+        let mut s = state.lock().unwrap();
+        s.connections.insert(
+            conn_id,
+            ConnState {
+                browser: "unknown".to_string(),
+                profile_id: String::new(),
+                last_heartbeat: now_unix_ms(),
+                extension_version: String::new(),
+                writer: writer_clone.as_ref().and_then(|w| w.try_clone().ok()),
+            },
+        );
+    }
+
+    loop {
+        match read_tcp_message(&mut reader) {
+            Ok(msg) => {
+                let mtype = msg.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+                if mtype == "host_hello" {
+                    let key = msg
+                        .get("browser")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let bname = msg.get("browserName").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let bproc = msg.get("browserProcess").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    log::info!("[conn {}] native host for browser: {} ({})", conn_id, key, bproc);
+                    {
+                        let mut s = state.lock().unwrap();
+                        if let Some(conn) = s.connections.get_mut(&conn_id) {
+                            conn.browser = key.clone();
+                            conn.last_heartbeat = now_unix_ms();
+                        }
+                        // Learn a browser the built-in table doesn't know about.
+                        if key != "unknown" && browsers::browser_by_key(&key).is_none() {
+                            let name = if bname.is_empty() { key.clone() } else { bname };
+                            s.custom_browsers
+                                .entry(key.clone())
+                                .or_insert(CustomBrowser { name, process: bproc });
+                        }
+                    }
+                    // Ask this profile's extension for fresh data, and push the
+                    // current theme + app data so its pages match immediately.
+                    let _ = broadcast_to_extensions(&state, &serde_json::json!({ "type": "request_sync" }));
+                    let theme = state.lock().unwrap().ext_theme.clone();
+                    if let Some(display) = theme {
+                        let _ = broadcast_to_extensions(
+                            &state,
+                            &serde_json::json!({ "type": "set_theme", "display": display }),
+                        );
+                    }
+                    broadcast_app_data(&state);
+                    continue;
+                }
+
+                handle_extension_message(&app, &state, conn_id, &msg);
+            }
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                continue;
+            }
+            Err(e) => {
+                log::warn!("[conn {}] native host disconnected: {}", conn_id, e);
+                state.lock().unwrap().connections.remove(&conn_id);
+                break;
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Status aggregation
+// ============================================================================
+
+fn engine_str(engine: Engine) -> &'static str {
+    match engine {
+        Engine::Chromium => "chromium",
+        Engine::Gecko => "gecko",
+    }
+}
+
+fn enforce_str(outcome: EnforceOutcome) -> &'static str {
+    match outcome {
+        EnforceOutcome::Dormant => "dormant",
+        EnforceOutcome::Enforced => "enforced",
+        EnforceOutcome::Failed => "failed",
+        EnforceOutcome::Unsupported => "unsupported",
+    }
+}
+
+/// Build the connected-profile list for one browser, deduped by profile id
+/// (latest heartbeat wins) and labelled "Profile 1..N" by stable id order.
+fn profiles_for(conns: &HashMap<u64, ConnState>, browser: &str, now: u64) -> Vec<ProfileStatus> {
+    let mut by_id: HashMap<String, ProfileStatus> = HashMap::new();
+    for c in conns.values() {
+        if c.browser != browser {
+            continue;
+        }
+        // Use the profile id once known; before the handshake, fall back to a
+        // per-connection placeholder so a connecting profile still shows.
+        let id = if c.profile_id.is_empty() {
+            format!("pending-{:p}", c as *const _)
+        } else {
+            c.profile_id.clone()
+        };
+        let entry = by_id.entry(id.clone()).or_insert(ProfileStatus {
+            id: id.clone(),
+            label: String::new(),
+            connected: false,
+            last_heartbeat: 0,
+            version: String::new(),
+        });
+        if c.last_heartbeat >= entry.last_heartbeat {
+            entry.last_heartbeat = c.last_heartbeat;
+            entry.connected = now.saturating_sub(c.last_heartbeat) < HEARTBEAT_STALE_MS;
+            entry.version = c.extension_version.clone();
+        }
+    }
+    let mut v: Vec<ProfileStatus> = by_id.into_values().collect();
+    v.sort_by(|a, b| a.id.cmp(&b.id));
+    for (i, p) in v.iter_mut().enumerate() {
+        p.label = format!("Profile {}", i + 1);
+    }
+    v
+}
+
+/// Compose a full per-browser status snapshot for the given running set.
+///
+/// "Installed / missing" comes from the browser's own per-profile record
+/// (profiles.rs) — ground truth that survives the MV3 service worker sleeping.
+/// The native-messaging heartbeat is only a fallback for browsers whose profile
+/// data we can't read (Firefox etc.), where we never force-flag "missing".
+fn build_status(
+    state: &Arc<Mutex<AppState>>,
+    running: &[&'static str],
+    proc_names: &[String],
+    now: u64,
+) -> Vec<BrowserStatus> {
+    let s = state.lock().unwrap();
+    let mut out: Vec<BrowserStatus> = BROWSERS
+        .iter()
+        .map(|def| {
+            let running_now = running.iter().any(|r| *r == def.key);
+            let dormant_enf =
+                if browsers::enforcement_configured(def.engine) { "off" } else { "dormant" }.to_string();
+
+            // Heartbeat view (used as a "live now" hint and as a fallback).
+            let hb = profiles_for(&s.connections, def.key, now);
+            let live = hb.iter().any(|p| p.connected);
+
+            match profiles::cached_profiles(def) {
+                // Ground truth available.
+                Some(list) => {
+                    let installed_n = list.iter().filter(|p| p.installed).count();
+                    let installed_any = installed_n > 0;
+                    let all_installed = installed_any && installed_n == list.len();
+                    let version = list
+                        .iter()
+                        .find(|p| p.installed)
+                        .map(|p| p.version.clone())
+                        .filter(|v| !v.is_empty())
+                        .or_else(|| hb.iter().find(|p| p.connected).map(|p| p.version.clone()))
+                        .unwrap_or_default();
+
+                    let profiles: Vec<ProfileStatus> = list
+                        .iter()
+                        .map(|p| ProfileStatus {
+                            id: p.profile_dir.clone(),
+                            label: p.name.clone(),
+                            connected: p.installed,
+                            last_heartbeat: 0,
+                            version: p.version.clone(),
+                        })
+                        .collect();
+
+                    // running + all profiles covered → protected; some but not
+                    // all → partial (a profile is missing the extension); none → missing.
+                    let state_str = if running_now && all_installed {
+                        "running_connected"
+                    } else if running_now && installed_any {
+                        "running_partial"
+                    } else if running_now {
+                        "extension_missing"
+                    } else if installed_any {
+                        "idle"
+                    } else {
+                        "not_installed"
+                    };
+
+                    BrowserStatus {
+                        key: def.key.to_string(),
+                        name: def.name.to_string(),
+                        engine: engine_str(def.engine).to_string(),
+                        installed: installed_any,
+                        running: running_now,
+                        connected: installed_any,
+                        extension_version: version,
+                        last_heartbeat: hb.iter().map(|p| p.last_heartbeat).max().unwrap_or(0),
+                        state: state_str.to_string(),
+                        enforcement: dormant_enf,
+                        profiles,
+                    }
+                }
+                // No ground truth (e.g. Firefox) — lean on the heartbeat, and
+                // never claim "missing" without proof.
+                None => {
+                    let version = hb
+                        .iter()
+                        .find(|p| p.connected)
+                        .map(|p| p.version.clone())
+                        .unwrap_or_default();
+                    let installed = live || browsers::is_installed(def);
+                    // Running is running — never label a live browser "not running".
+                    // Without prefs we can't prove the extension is present, so a
+                    // running-but-unconnected browser is "unknown", not "missing".
+                    let state_str = if running_now && live {
+                        "running_connected"
+                    } else if running_now {
+                        "running_unknown"
+                    } else if installed {
+                        "idle"
+                    } else {
+                        "not_installed"
+                    };
+                    BrowserStatus {
+                        key: def.key.to_string(),
+                        name: def.name.to_string(),
+                        engine: engine_str(def.engine).to_string(),
+                        installed,
+                        running: running_now,
+                        connected: live,
+                        extension_version: version,
+                        last_heartbeat: hb.iter().map(|p| p.last_heartbeat).max().unwrap_or(0),
+                        state: state_str.to_string(),
+                        enforcement: dormant_enf,
+                        profiles: hb,
+                    }
                 }
             }
+        })
+        .collect();
+
+    // Custom browsers (learned from connections). Heartbeat-only: connected ⇒
+    // running; their process tells us "running" even while the worker sleeps.
+    let customs: Vec<(String, CustomBrowser)> =
+        s.custom_browsers.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    for (key, cb) in customs {
+        let hb = profiles_for(&s.connections, &key, now);
+        let live = hb.iter().any(|p| p.connected);
+        let running_now = !cb.process.is_empty()
+            && proc_names.iter().any(|n| n == &cb.process);
+        let version = hb.iter().find(|p| p.connected).map(|p| p.version.clone()).unwrap_or_default();
+        let state_str = if live {
+            "running_connected"
+        } else if running_now {
+            "running_unknown"
+        } else {
+            "idle"
+        };
+        out.push(BrowserStatus {
+            key,
+            name: cb.name,
+            engine: "custom".to_string(),
+            installed: true,
+            running: running_now || live,
+            connected: live,
+            extension_version: version,
+            last_heartbeat: hb.iter().map(|p| p.last_heartbeat).max().unwrap_or(0),
+            state: state_str.to_string(),
+            enforcement: "unsupported".to_string(),
+            profiles: hb,
+        });
+    }
+
+    out
+}
+
+// ============================================================================
+// Monitor — reconcile running browsers against live connections, emit status,
+// and (when configured + guard on) enforce reinstallation of a missing ext.
+// ============================================================================
+
+fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
+    std::thread::spawn(move || {
+        // Browsers we've already enforced this session (don't re-write policy
+        // every tick); cleared when the browser becomes healthy again.
+        let mut enforced: HashSet<String> = HashSet::new();
+
+        loop {
+            let now = now_unix_ms();
+            let proc_names = browsers::running_process_names();
+            let running = browsers::detect_running_from(&proc_names);
+            let guard_enabled = state.lock().unwrap().guard_enabled;
+
+            let mut statuses = build_status(&state, &running, &proc_names, now);
+
+            // Run enforcement when a browser's extension is gone entirely, or
+            // missing from some profile (force-install covers every profile).
+            for st in statuses.iter_mut() {
+                if st.state != "extension_missing" && st.state != "running_partial" {
+                    enforced.remove(&st.key);
+                    continue;
+                }
+                let def = match browsers::browser_by_key(&st.key) {
+                    Some(d) => d,
+                    None => continue,
+                };
+                st.enforcement = if guard_enabled {
+                    if enforced.contains(&st.key) {
+                        if browsers::enforcement_configured(def.engine) { "enforced" } else { "dormant" }
+                            .to_string()
+                    } else {
+                        let outcome = browsers::enforce_policy(def);
+                        if outcome == EnforceOutcome::Enforced {
+                            enforced.insert(st.key.clone());
+                            log::warn!("[{}] extension missing — force-install policy applied", st.key);
+                        }
+                        enforce_str(outcome).to_string()
+                    }
+                } else {
+                    "off".to_string()
+                };
+            }
+
+            let _ = app.emit("browsers-status", &statuses);
+            std::thread::sleep(MONITOR_TICK);
         }
     });
 }
 
 // ============================================================================
-// Native Host Registration (Windows Registry, macOS plist, Linux config)
+// Native host registration (on every startup — idempotent)
 // ============================================================================
 
 fn register_native_host(app: &AppHandle) {
@@ -342,222 +709,55 @@ fn register_native_host(app: &AppHandle) {
             return;
         }
     };
-
-    // Create directory if needed
     let _ = std::fs::create_dir_all(&app_data_dir);
 
-    // Determine the native host binary path
-    // Search strategy:
-    //   1. Next to the Tauri binary (production — bundled together)
-    //   2. In the workspace's native-host build dir (development)
-    //   3. In the app data directory (manual install)
-    let host_binary_name = if cfg!(windows) {
-        "pure-path-host.exe"
-    } else {
-        "pure-path-host"
-    };
+    let host_binary = resolve_host_binary(&app_data_dir);
+    log::info!("Native host binary resolved to: {:?}", host_binary);
+
+    let (chromium_manifest, gecko_manifest) =
+        match browsers::write_manifests(&app_data_dir, &host_binary) {
+            Ok(p) => p,
+            Err(e) => {
+                log::error!("Failed to write native host manifests: {}", e);
+                return;
+            }
+        };
+
+    browsers::register_all_hosts(&chromium_manifest, &gecko_manifest);
+    log::info!("Native host registered for all known browsers");
+}
+
+/// Find the native host binary: next to the Tauri exe (production), then the
+/// dev build dirs, then the app data dir.
+fn resolve_host_binary(app_data_dir: &std::path::Path) -> std::path::PathBuf {
+    let host_binary_name = if cfg!(windows) { "pure-path-host.exe" } else { "pure-path-host" };
 
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_default();
 
-    // Candidate locations to search
-    let mut candidates: Vec<std::path::PathBuf> = vec![
-        // 1. Production: next to the Tauri exe
-        exe_dir.join(host_binary_name),
-    ];
+    let mut candidates: Vec<std::path::PathBuf> = vec![exe_dir.join(host_binary_name)];
 
-    // 2. Development: walk up from the Tauri exe dir to find native-host/target/
-    //    Tauri exe is at: desktop-app/src-tauri/target/debug/app.exe
-    //    Native host is at: desktop-app/native-host/target/debug/pure-path-host.exe
-    {
-        let mut dir = exe_dir.clone();
-        for _ in 0..5 {
-            let dev_debug = dir.join("native-host").join("target").join("debug").join(host_binary_name);
-            let dev_release = dir.join("native-host").join("target").join("release").join(host_binary_name);
-            candidates.push(dev_debug);
-            candidates.push(dev_release);
-            if !dir.pop() { break; }
+    let mut dir = exe_dir.clone();
+    for _ in 0..6 {
+        candidates.push(dir.join("native-host").join("target").join("debug").join(host_binary_name));
+        candidates.push(dir.join("native-host").join("target").join("release").join(host_binary_name));
+        if !dir.pop() {
+            break;
         }
     }
-
-    // 3. App data dir
     candidates.push(app_data_dir.join(host_binary_name));
 
-    let host_binary = candidates
+    candidates
         .iter()
         .find(|p| p.exists())
         .cloned()
-        .unwrap_or_else(|| {
-            // Default to the production location even if it doesn't exist yet
-            let default = exe_dir.join(host_binary_name);
-            log::warn!("Native host binary not found in any search path, defaulting to {:?}", default);
-            default
-        });
-
-    log::info!("Native host binary resolved to: {:?}", host_binary);
-
-    // Write the native messaging host manifest
-    let manifest_path = app_data_dir.join("com.purepath.companion.json");
-    let manifest = serde_json::json!({
-        "name": "com.purepath.companion",
-        "description": "Pure Path Desktop Companion — Native Messaging Host",
-        "path": host_binary.to_string_lossy(),
-        "type": "stdio",
-        "allowed_origins": [
-            "chrome-extension://aigfmlblmlgnimgddbphakfdmegnjiim/"
-        ]
-    });
-
-    match std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap()) {
-        Ok(_) => log::info!("Native host manifest written to {:?}", manifest_path),
-        Err(e) => {
-            log::error!("Failed to write native host manifest: {}", e);
-            return;
-        }
-    }
-
-    // Platform-specific registration
-    #[cfg(target_os = "windows")]
-    {
-        register_windows_registry(&manifest_path);
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        register_macos(&manifest_path);
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        register_linux(&manifest_path);
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn register_windows_registry(manifest_path: &std::path::Path) {
-    use std::process::Command;
-
-    let manifest_str = manifest_path.to_string_lossy();
-
-    // Write to HKCU\SOFTWARE\Google\Chrome\NativeMessagingHosts\com.purepath.companion
-    let result = Command::new("reg")
-        .args([
-            "add",
-            r"HKCU\SOFTWARE\Google\Chrome\NativeMessagingHosts\com.purepath.companion",
-            "/ve",
-            "/t", "REG_SZ",
-            "/d", &manifest_str,
-            "/f",
-        ])
-        .output();
-
-    match result {
-        Ok(output) => {
-            if output.status.success() {
-                log::info!("Registered Chrome native messaging host in registry");
-            } else {
-                log::error!(
-                    "Failed to register in Chrome registry: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-        }
-        Err(e) => log::error!("Failed to run reg command: {}", e),
-    }
-
-    // Also register for Edge (Chromium-based)
-    let _ = Command::new("reg")
-        .args([
-            "add",
-            r"HKCU\SOFTWARE\Microsoft\Edge\NativeMessagingHosts\com.purepath.companion",
-            "/ve",
-            "/t", "REG_SZ",
-            "/d", &manifest_str,
-            "/f",
-        ])
-        .output();
-
-    // Also register for Brave
-    let _ = Command::new("reg")
-        .args([
-            "add",
-            r"HKCU\SOFTWARE\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.purepath.companion",
-            "/ve",
-            "/t", "REG_SZ",
-            "/d", &manifest_str,
-            "/f",
-        ])
-        .output();
-}
-
-#[cfg(target_os = "macos")]
-fn register_macos(manifest_path: &std::path::Path) {
-    // On macOS, the manifest must be at:
-    // ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.purepath.companion.json
-    // or ~/Library/Application Support/Chromium/NativeMessagingHosts/com.purepath.companion.json
-    let home = std::env::var("HOME").unwrap_or_default();
-    let chrome_dir = format!(
-        "{}/Library/Application Support/Google/Chrome/NativeMessagingHosts",
-        home
-    );
-    let _ = std::fs::create_dir_all(&chrome_dir);
-    let target = format!("{}/com.purepath.companion.json", chrome_dir);
-    match std::fs::copy(manifest_path, &target) {
-        Ok(_) => log::info!("Registered Chrome native messaging host on macOS at {}", target),
-        Err(e) => log::error!("Failed to copy manifest on macOS: {}", e),
-    }
-
-    // Also for Edge
-    let edge_dir = format!(
-        "{}/Library/Application Support/Microsoft Edge/NativeMessagingHosts",
-        home
-    );
-    let _ = std::fs::create_dir_all(&edge_dir);
-    let _ = std::fs::copy(manifest_path, format!("{}/com.purepath.companion.json", edge_dir));
-
-    // Also for Brave
-    let brave_dir = format!(
-        "{}/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts",
-        home
-    );
-    let _ = std::fs::create_dir_all(&brave_dir);
-    let _ = std::fs::copy(manifest_path, format!("{}/com.purepath.companion.json", brave_dir));
-}
-
-#[cfg(target_os = "linux")]
-fn register_linux(manifest_path: &std::path::Path) {
-    // On Linux, the manifest goes to:
-    // ~/.config/google-chrome/NativeMessagingHosts/com.purepath.companion.json
-    // or ~/.config/chromium/NativeMessagingHosts/com.purepath.companion.json
-    let home = std::env::var("HOME").unwrap_or_default();
-    let chrome_dir = format!("{}/.config/google-chrome/NativeMessagingHosts", home);
-    let _ = std::fs::create_dir_all(&chrome_dir);
-    let target = format!("{}/com.purepath.companion.json", chrome_dir);
-    match std::fs::copy(manifest_path, &target) {
-        Ok(_) => log::info!("Registered Chrome native messaging host on Linux at {}", target),
-        Err(e) => log::error!("Failed to copy manifest on Linux: {}", e),
-    }
-
-    // Also for Chromium
-    let chromium_dir = format!("{}/.config/chromium/NativeMessagingHosts", home);
-    let _ = std::fs::create_dir_all(&chromium_dir);
-    let _ = std::fs::copy(manifest_path, format!("{}/com.purepath.companion.json", chromium_dir));
-
-    // Also for Brave
-    let brave_dir = format!("{}/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts", home);
-    let _ = std::fs::create_dir_all(&brave_dir);
-    let _ = std::fs::copy(manifest_path, format!("{}/com.purepath.companion.json", brave_dir));
-
-    // Also for Edge
-    let edge_dir = format!("{}/.config/microsoft-edge/NativeMessagingHosts", home);
-    let _ = std::fs::create_dir_all(&edge_dir);
-    let _ = std::fs::copy(manifest_path, format!("{}/com.purepath.companion.json", edge_dir));
+        .unwrap_or_else(|| exe_dir.join(host_binary_name))
 }
 
 // ============================================================================
-// Tauri Commands — called from the frontend JS
+// Tauri Commands
 // ============================================================================
 
 #[tauri::command]
@@ -570,17 +770,58 @@ fn get_extension_blocklists(state: tauri::State<'_, Arc<Mutex<AppState>>>) -> Ex
     state.lock().unwrap().blocklists.clone()
 }
 
+/// Current per-browser status (same shape as the `browsers-status` event).
 #[tauri::command]
-fn get_extension_status(state: tauri::State<'_, Arc<Mutex<AppState>>>) -> ConnectionStatus {
-    state.lock().unwrap().connection.clone()
+fn get_browsers_status(state: tauri::State<'_, Arc<Mutex<AppState>>>) -> Vec<BrowserStatus> {
+    let now = now_unix_ms();
+    let proc_names = browsers::running_process_names();
+    let running = browsers::detect_running_from(&proc_names);
+    build_status(state.inner(), &running, &proc_names, now)
+}
+
+/// Mirror the app's clean-streak day count down to the extensions so their
+/// pages show the same number the app does.
+#[tauri::command]
+fn set_app_streak(state: tauri::State<'_, Arc<Mutex<AppState>>>, streak: u64) {
+    state.lock().unwrap().app_streak = streak;
+    broadcast_app_data(state.inner());
+}
+
+/// Toggle the "keep the extension installed" guard (the uninstall-guard switch).
+#[tauri::command]
+fn set_guard_enabled(state: tauri::State<'_, Arc<Mutex<AppState>>>, enabled: bool) {
+    state.lock().unwrap().guard_enabled = enabled;
+    log::info!("Guard enabled set to {}", enabled);
+}
+
+/// Push the desktop app's selected theme/palette to every connected extension,
+/// and cache it so freshly-connecting profiles get it too.
+#[tauri::command]
+fn set_extension_theme(state: tauri::State<'_, Arc<Mutex<AppState>>>, display: Value) {
+    state.lock().unwrap().ext_theme = Some(display.clone());
+    let msg = serde_json::json!({ "type": "set_theme", "display": display });
+    let _ = broadcast_to_extensions(state.inner(), &msg);
+}
+
+/// Manually (re)apply the force-install policy for one browser, or all if
+/// `browser_key` is None. No-op ("dormant") until the release update URL is set.
+#[tauri::command]
+fn enforce_extension(browser_key: Option<String>) -> Vec<(String, String)> {
+    let targets: Vec<&BrowserDef> = match &browser_key {
+        Some(k) => browsers::browser_by_key(k).into_iter().collect(),
+        None => BROWSERS.iter().collect(),
+    };
+    targets
+        .into_iter()
+        .map(|def| (def.key.to_string(), enforce_str(browsers::enforce_policy(def)).to_string()))
+        .collect()
 }
 
 #[tauri::command]
 fn request_sync(state: tauri::State<'_, Arc<Mutex<AppState>>>) -> Result<(), String> {
-    let msg = serde_json::json!({
-        "type": "request_sync"
-    });
-    send_to_extension(&state, &msg)
+    let msg = serde_json::json!({ "type": "request_sync" });
+    let n = broadcast_to_extensions(state.inner(), &msg);
+    if n > 0 { Ok(()) } else { Err("No connected extensions".to_string()) }
 }
 
 #[tauri::command]
@@ -588,20 +829,14 @@ fn update_blocklist_domains(
     state: tauri::State<'_, Arc<Mutex<AppState>>>,
     domains: Vec<String>,
 ) -> Result<(), String> {
-    // Update local state
     {
         let mut s = state.lock().unwrap();
         s.blocklists.domains = domains.clone();
         s.blocklists.domain_count = domains.len();
     }
-
-    // Push to extension via native host
-    let msg = serde_json::json!({
-        "type": "update_blocklist",
-        "listType": "domains",
-        "data": domains
-    });
-    send_to_extension(&state, &msg)
+    let msg = serde_json::json!({ "type": "update_blocklist", "listType": "domains", "data": domains });
+    let n = broadcast_to_extensions(state.inner(), &msg);
+    if n > 0 { Ok(()) } else { Err("No connected extensions".to_string()) }
 }
 
 #[tauri::command]
@@ -609,42 +844,42 @@ fn update_blocklist_keywords(
     state: tauri::State<'_, Arc<Mutex<AppState>>>,
     keywords: Vec<String>,
 ) -> Result<(), String> {
-    // Update local state
     {
         let mut s = state.lock().unwrap();
         s.blocklists.keywords = keywords.clone();
         s.blocklists.keyword_count = keywords.len();
     }
-
-    // Push to extension via native host
-    let msg = serde_json::json!({
-        "type": "update_blocklist",
-        "listType": "keywords",
-        "data": keywords
-    });
-    send_to_extension(&state, &msg)
+    let msg = serde_json::json!({ "type": "update_blocklist", "listType": "keywords", "data": keywords });
+    let n = broadcast_to_extensions(state.inner(), &msg);
+    if n > 0 { Ok(()) } else { Err("No connected extensions".to_string()) }
 }
 
 // ============================================================================
-// Tauri App Entry Point
+// Entry point
 // ============================================================================
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let shared_state = Arc::new(Mutex::new(AppState::default()));
+    let shared_state = Arc::new(Mutex::new(AppState {
+        guard_enabled: true,
+        ..Default::default()
+    }));
 
     tauri::Builder::default()
         .manage(shared_state.clone())
         .invoke_handler(tauri::generate_handler![
             get_extension_stats,
             get_extension_blocklists,
-            get_extension_status,
+            get_browsers_status,
+            set_guard_enabled,
+            set_extension_theme,
+            set_app_streak,
+            enforce_extension,
             request_sync,
             update_blocklist_domains,
             update_blocklist_keywords,
         ])
         .setup(move |app| {
-            // Setup logging in debug mode
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -653,13 +888,10 @@ pub fn run() {
                 )?;
             }
 
-            // Register the native messaging host on every startup (idempotent)
             register_native_host(app.handle());
 
-            // Start the TCP server to listen for native host connections
-            let app_handle = app.handle().clone();
-            let state_clone = shared_state.clone();
-            start_tcp_server(app_handle, state_clone);
+            start_tcp_server(app.handle().clone(), shared_state.clone());
+            start_monitor(app.handle().clone(), shared_state.clone());
 
             log::info!("Pure Path desktop app initialized");
             Ok(())

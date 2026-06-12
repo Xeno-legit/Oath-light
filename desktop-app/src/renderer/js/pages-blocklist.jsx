@@ -23,6 +23,7 @@ function BlocklistPage({ s, PP }) {
   const [tab, setTab] = React.useState('blocked');
   const [blackQuery, setBlackQuery] = React.useState('');
   const [grayQuery, setGrayQuery] = React.useState('');
+  const [grayOpen, setGrayOpen] = React.useState(false);
   const [newSite, setNewSite] = React.useState('');
   const bl = s.blocklist;
 
@@ -127,6 +128,29 @@ function BlocklistPage({ s, PP }) {
                   </div>
                   <span className="chip">Not filtered</span>
                 </div>
+            }
+
+              {/* Collapsible catalog of every filtered site */}
+              <button
+              className="gray-catalog-toggle"
+              onClick={() => setGrayOpen((v) => !v)}
+              style={{ marginTop: 14, width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 13px', background: 'color-mix(in oklab, var(--muted) 7%, transparent)', border: '1px solid color-mix(in oklab, var(--muted) 16%, transparent)', borderRadius: 10, cursor: 'pointer', font: 'inherit', color: 'var(--text)' }}>
+                <IconList size={16} style={{ color: 'var(--accent-2)', flex: '0 0 auto' }} />
+                <span style={{ flex: 1, textAlign: 'left', fontWeight: 700, fontSize: 13 }}>All {bl.graylist.length} filtered sites</span>
+                <IconChevron size={16} style={{ flex: '0 0 auto', color: 'var(--muted)', transform: grayOpen ? 'rotate(90deg)' : 'none', transition: 'transform .2s ease' }} />
+              </button>
+              {grayOpen &&
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, maxHeight: 320, overflowY: 'auto', marginTop: 8 }}>
+                {bl.graylist.map((g) =>
+              <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'color-mix(in oklab, var(--muted) 7%, transparent)', border: '1px solid color-mix(in oklab, var(--muted) 14%, transparent)', borderRadius: 10 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <b style={{ fontSize: 13 }}>{g.url}</b>
+                      <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', marginTop: 1, lineHeight: 1.4 }}>{g.desc}</span>
+                    </div>
+                    <span className="chip" style={{ flex: '0 0 auto', color: g.kind === 'discord' ? '#7c84f6' : g.kind === 'dom' ? '#c9962f' : 'var(--accent-2)' }}>{g.kind === 'discord' ? 'Channel block' : g.kind === 'dom' ? 'Page filter' : 'Feed filter'}</span>
+                  </div>
+              )}
+              </div>
             }
             </div>
           </div>

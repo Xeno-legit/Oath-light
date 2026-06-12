@@ -31,9 +31,17 @@ function App() {
   }, [setTweak]);
 
   // keep store.display mirrored from tweaks (for components that read s.display)
+  // and push it to the browser extensions so their pages match the app theme.
   useEffect(() => {
-    PP.set({ display: { theme: t.theme, style: t.style, bg: t.bg, intensity: t.intensity } });
+    const display = { theme: t.theme, style: t.style, bg: t.bg, intensity: t.intensity };
+    PP.set({ display });
+    if (window.PPNative && PPNative.available) PPNative.setTheme(display);
   }, [t.theme, t.style, t.bg, t.intensity]);
+
+  // mirror the app's day streak down to the browser extensions
+  useEffect(() => {
+    if (window.PPNative && PPNative.available) PPNative.setStreak(s.streak || 0);
+  }, [s.streak]);
 
   // apply theme/style/intensity to the document
   useEffect(() => {

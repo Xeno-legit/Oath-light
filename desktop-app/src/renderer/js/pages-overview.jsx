@@ -169,38 +169,103 @@ const BROWSER_LOGOS = {
       <use fill="url(#ed_g)" opacity=".45" xlinkHref="#ed_j"/>
     </svg>
   ),
+  brave: (
+    <svg viewBox="0 0 48 48" width="28" height="28" aria-hidden="true">
+      <path d="M24 3l13 4 2 4-2 22-13 12-13-12-2-22 2-4 13-4z" fill="#fb542b"/>
+      <path d="M24 9l8 2.5 1 2.4-1.3 14L24 38l-7.7-10.1-1.3-14 1-2.4L24 9z" fill="#fff" opacity=".92"/>
+      <path d="M24 14l4 1.2-.7 9.3L24 30l-3.3-5.5-.7-9.3L24 14z" fill="#fb542b"/>
+    </svg>
+  ),
+  opera: (
+    <svg viewBox="0 0 48 48" width="28" height="28" aria-hidden="true">
+      <circle cx="24" cy="24" r="21" fill="#ff1b2d"/>
+      <ellipse cx="24" cy="24" rx="9.5" ry="14" fill="#fff"/>
+    </svg>
+  ),
+  vivaldi: (
+    <svg viewBox="0 0 48 48" width="28" height="28" aria-hidden="true">
+      <circle cx="24" cy="24" r="21" fill="#ef3939"/>
+      <path d="M14 16h6l4 11 4-11h6l-7 18h-6l-7-18z" fill="#fff"/>
+    </svg>
+  ),
+  chromium: (
+    <svg viewBox="0 0 48 48" width="28" height="28" aria-hidden="true">
+      <circle cx="24" cy="24" r="12" fill="#cfd8e3"/>
+      <circle cx="24" cy="24" r="21" fill="none" stroke="#5b7a99" strokeWidth="3"/>
+      <circle cx="24" cy="24" r="9.5" fill="#5b9bd5"/>
+    </svg>
+  ),
 };
 
-const EXT_STATUS = {
-  connected: { label: 'Connected', color: 'var(--accent-2)', dot: 'var(--accent-2)' },
-  outdated: { label: 'Update available', color: '#d9a441', dot: '#d9a441' },
-  disconnected: { label: 'Not connected', color: 'var(--muted)', dot: 'color-mix(in oklab, var(--muted) 70%, transparent)' },
+// Fallback badge for any browser without a dedicated logo above.
+function browserLogo(key) {
+  if (BROWSER_LOGOS[key]) return BROWSER_LOGOS[key];
+  const letter = (key || '?').charAt(0).toUpperCase();
+  return (
+    <svg viewBox="0 0 48 48" width="28" height="28" aria-hidden="true">
+      <circle cx="24" cy="24" r="21" fill="var(--accent)" opacity=".18" />
+      <text x="24" y="31" textAnchor="middle" fontSize="22" fontWeight="800" fill="var(--accent)">{letter}</text>
+    </svg>
+  );
+}
+
+// Maps the backend's per-browser `state` to how the row reads.
+const BROWSER_STATE = {
+  running_connected: { label: 'Protected', color: 'var(--accent-2)', dot: 'var(--accent-2)', off: false },
+  running_partial:   { label: 'Partially protected', color: '#d9a441', dot: '#d9a441', off: false },
+  running_unknown:   { label: 'Running · extension not detected', color: '#d9a441', dot: '#d9a441', off: false },
+  connecting:        { label: 'Connecting…', color: '#d9a441', dot: '#d9a441', off: false },
+  extension_missing: { label: 'Extension missing', color: '#e5544b', dot: '#e5544b', off: false },
+  idle:              { label: 'Installed · not running', color: 'var(--muted)', dot: 'color-mix(in oklab, var(--muted) 70%, transparent)', off: true },
+  not_installed:     { label: 'Not installed', color: 'var(--muted)', dot: 'color-mix(in oklab, var(--muted) 70%, transparent)', off: true },
 };
 
-function ExtensionRow({ ext, PP, s }) {
-  const st = EXT_STATUS[ext.status];
-  const update = (patch) => PP.set({ extensions: s.extensions.map((e) => e.id === ext.id ? { ...e, ...patch } : e) });
-  const action =
-    ext.status === 'disconnected' ? { label: 'Connect', onClick: () => update({ status: 'connected', version: '2.4.1', lastSync: 'Just now' }) } :
-    ext.status === 'outdated' ? { label: 'Update', onClick: () => update({ status: 'connected', version: '2.4.1', lastSync: 'Just now' }) } :
-    null;
+// Secondary note explaining what the desktop app will do about a missing ext.
+function enforcementNote(b) {
+  if (b.state !== 'extension_missing' && b.state !== 'running_partial') return null;
+  if (b.enforcement === 'enforced') return 'restoring on restart';
+  if (b.enforcement === 'failed') return 'auto-restore failed';
+  if (b.enforcement === 'dormant') return 'auto-restore at release';
+  return null;
+}
+
+function ExtensionRow({ b }) {
+  const st = BROWSER_STATE[b.state] || BROWSER_STATE.not_installed;
+  const note = enforcementNote(b);
+  const profiles = b.profiles || [];
+  const connProfiles = profiles.filter((p) => p.connected).length;
+  const multi = profiles.length > 1;
 
   return (
-    <div className={'ext-row' + (ext.status === 'disconnected' ? ' is-off' : '')}>
-      <div className="ext-logo">{BROWSER_LOGOS[ext.id]}</div>
+    <div className={'ext-row' + (st.off ? ' is-off' : '')}>
+      <div className="ext-logo">{browserLogo(b.key)}</div>
       <div className="ext-info">
         <div className="ext-name">
-          {ext.name}
-          {ext.version && <span className="ext-ver">v{ext.version}</span>}
+          {b.name}
+          {b.extension_version && <span className="ext-ver">v{b.extension_version}</span>}
         </div>
         <div className="ext-status" style={{ color: st.color }}>
           <span className="ext-dot" style={{ background: st.dot }} />
           {st.label}
-          {ext.lastSync && <span className="ext-sync">· synced {ext.lastSync}</span>}
+          {multi && <span className="ext-sync">· {connProfiles}/{profiles.length} profiles</span>}
+          {note && <span className="ext-sync">· {note}</span>}
         </div>
+
+        {/* Per-profile breakdown — names every profile and flags any that are
+            missing the extension so an uncovered profile can't hide. */}
+        {multi &&
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginTop: 6 }}>
+            {profiles.map((p) => (
+              <span key={p.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: p.connected ? 'var(--muted)' : '#d9a441' }}>
+                <span className="ext-dot" style={{ background: p.connected ? 'var(--accent-2)' : '#d9a441' }} />
+                {p.label}{p.connected ? (p.version ? ` · v${p.version}` : '') : ' · not installed'}
+              </span>
+            ))}
+          </div>
+        }
       </div>
-      {action &&
-        <button className="btn btn-ghost btn-sm" onClick={action.onClick}>{action.label}</button>
+      {b.state === 'extension_missing' && PPNative.available &&
+        <button className="btn btn-ghost btn-sm" onClick={() => PPNative.enforce(b.key)}>Restore</button>
       }
     </div>
   );
@@ -225,6 +290,12 @@ function StatTile({ icon: I, label, value, sub }) {
 }
 
 function OverviewPage({ s, PP }) {
+  const extStats = useExtensionStats();
+  // Total blocked = the sum reported across every connected extension/profile;
+  // fall back to the local weekly count when the desktop bridge isn't live.
+  const totalBlocked = extStats && typeof extStats.total_blocks === 'number'
+    ? extStats.total_blocks
+    : (s.blockedThisWeek || 0);
   const msg = DAILY_MESSAGES[new Date().getDate() % DAILY_MESSAGES.length];
   const nextMilestone = [7, 14, 30, 60, 90, 180, 365].find((m) => m > s.streak) || s.streak + 30;
   const ringVal = Math.min(100, Math.round(s.streak / nextMilestone * 100));
@@ -253,7 +324,7 @@ function OverviewPage({ s, PP }) {
             <p style={{ fontSize: 14, color: 'var(--text-2)', lineHeight: 1.55, margin: '10px 0 16px' }}>
               You're <b style={{ color: 'var(--text)' }}>{nextMilestone - s.streak} days</b> from your next milestone of {nextMilestone} days. Keep the rhythm.
             </p>
-            <button className="btn btn-ghost btn-sm" onClick={() => PP.set({ streak: 0 })}>
+            <button className="btn btn-ghost btn-sm" onClick={() => PP.relapse()}>
               <IconFlame size={16} /> Relapsed?
             </button>
           </div>
@@ -262,7 +333,7 @@ function OverviewPage({ s, PP }) {
         {/* stat tiles */}
         <div className="grid" style={{ gridTemplateRows: '1fr 1fr', gap: 16 }}>
           <StatTile icon={IconArrowUp} label="Best streak" value={`${s.bestStreak} days`} sub="Your personal record" />
-          <StatTile icon={IconShield} label="Blocked this week" value={s.blockedThisWeek} sub="Attempts intercepted" />
+          <StatTile icon={IconShield} label="Sites blocked" value={totalBlocked.toLocaleString()} sub="Across all your browsers" />
         </div>
       </div>
 
@@ -280,29 +351,54 @@ function OverviewPage({ s, PP }) {
       </div>
 
       {/* extension connection status */}
-      <div className="card fade-up" style={{ marginTop: 18 }}>
-        <div className="spread" style={{ marginBottom: 4 }}>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 16, letterSpacing: '-.02em' }}>Browser protection</div>
-            <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3 }}>Pure Path enforces blocking through its browser extensions</div>
-          </div>
-          {(() => {
-            const conn = s.extensions.filter((e) => e.status === 'connected').length;
-            const total = s.extensions.length;
-            const allGood = conn === total;
-            return (
-              <span className="chip" style={{ color: allGood ? 'var(--accent-2)' : 'var(--warn, #d9a441)' }}>
-                <IconShield size={14} /> {conn}/{total} active
-              </span>
-            );
-          })()}
-        </div>
-
-        <div className="ext-grid">
-          {s.extensions.map((ext) => <ExtensionRow key={ext.id} ext={ext} PP={PP} s={s} />)}
-        </div>
-      </div>
+      <BrowserProtectionCard />
     </div>);
 
+}
+
+// Live browser-protection panel. Shows the desktop app monitoring each running
+// browser's extension; falls back to a calm empty state when nothing is up yet.
+function BrowserProtectionCard() {
+  const browsers = useBrowsers();
+
+  // Show what's running plus any browser that has the extension installed
+  // (even if currently closed); ignore the rest of the large table.
+  const shown = browsers.filter((b) => b.running || b.installed);
+  const runningBrowsers = browsers.filter((b) => b.running);
+  const protectedRunning = runningBrowsers.filter((b) => b.state === 'running_connected').length;
+  const missing = runningBrowsers.some((b) => b.state === 'extension_missing');
+  const allGood = runningBrowsers.length > 0 && protectedRunning === runningBrowsers.length;
+
+  return (
+    <div className="card fade-up" style={{ marginTop: 18 }}>
+      <div className="spread" style={{ marginBottom: 4 }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 16, letterSpacing: '-.02em' }}>Browser protection</div>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3 }}>
+            Pure Path watches every running browser and keeps its extension in place
+          </div>
+        </div>
+        {runningBrowsers.length > 0 &&
+          <span className="chip" style={{ color: allGood ? 'var(--accent-2)' : (missing ? '#e5544b' : 'var(--warn, #d9a441)') }}>
+            <IconShield size={14} /> {protectedRunning}/{runningBrowsers.length} protected
+          </span>
+        }
+      </div>
+
+      {!PPNative.available ? (
+        <div style={{ fontSize: 13.5, color: 'var(--muted)', padding: '14px 2px' }}>
+          Browser monitoring runs in the desktop app.
+        </div>
+      ) : shown.length === 0 ? (
+        <div style={{ fontSize: 13.5, color: 'var(--muted)', padding: '14px 2px' }}>
+          No browser is running right now. Open one and Pure Path will protect it automatically.
+        </div>
+      ) : (
+        <div className="ext-grid">
+          {shown.map((b) => <ExtensionRow key={b.key} b={b} />)}
+        </div>
+      )}
+    </div>
+  );
 }
 window.OverviewPage = OverviewPage;

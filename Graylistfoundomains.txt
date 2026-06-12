@@ -1,292 +1,140 @@
 ================================================================================
-GRAYLIST - Platforms That Host Adult/NSFW Content But Aren't Primarily Porn Sites
+GRAYLIST — TRIAGED STATUS  (mixed-content platforms: legit, but host NSFW)
 ================================================================================
-Generated: 2026-04-27
-Purpose: Domains for the Pure Path NSFW Blocker that allow adult content
-         but are general-purpose platforms (not dedicated porn sites)
+Last updated: 2026-06-12   ·   Original inventory generated: 2026-04-27
 
-These are "gray area" domains - they have legitimate uses but also host
-significant amounts of NSFW/adult content that users may want to block.
+This is the LIVE handling status of every graylist domain — what mechanism (if
+any) Pure Path applies to each, and why. It replaces the old raw category dump.
 
-================================================================================
-SOCIAL MEDIA PLATFORMS
-================================================================================
-reddit.com              # NSFW subreddits (r/gonewild, r/nsfw, etc.)
-twitter.com             # Allows adult content marked as "Sensitive"
-x.com                   # Same as Twitter - allows adult content
-bsky.app                # Bluesky - allows NSFW with labeling
-bluesky.social          # Bluesky instance
-tumblr.com              # Still hosts some NSFW content (reversed partial ban)
-mastodon.social         # Mastodon flagship instance - many NSFW posts
-vk.com                  # Russian social network, very permissive on adult content
-mewe.com                # Privacy-focused social network, allows adult content
-gab.com                 # Less moderated, allows adult content
-minds.com               # Decentralized social network, allows adult content
-parler.com              # Less moderated platform
-pillowfort.io           # Tumblr alternative, allows NSFW
-speakbits.com           # Reddit alternative, less censorship
+Mechanisms:
+  API      → graylist-inject.js strips NSFW items from the JSON the site fetches
+  DOM      → content.js removes adult items from server-rendered pages + blocks
+             adult content pages outright
+  DISCORD  → content.js blocks age-restricted channels/servers (DOM age-gate)
+  BLACKLIST→ whole-site blocked at navigation (curated domains_part*.json)
+  DECIDED  → deliberately left alone (documented decision, not an oversight)
+  TODO     → buildable, not done yet
+  CANT     → not technically feasible (E2E / no public structure)
+
+Counts: ~110 domains · ~79 actively handled · ~31 not (see bottom).
+        (+8 added 2026-06-12 beyond the original scrape — Steam, itch.io, Weasyl,
+         PeerTube, Lemmy, Mangadex, ArtStation, Flickr. The 2026-04-27 inventory
+         was never complete; audit for more big platforms before trusting it.)
 
 ================================================================================
-CHAT / MESSAGING PLATFORMS
+[API]  ACTIVE — NSFW stripped from fetched JSON  (graylist-inject.js)
 ================================================================================
-discord.com             # NSFW channels/servers widely available
-discord.gg              # Discord invite links (often to NSFW servers)
-telegram.org            # NSFW groups and channels
-t.me                    # Telegram short links to NSFW channels
-kik.com                 # Messaging app used extensively for adult content sharing
-snapchat.com            # Used for sharing adult content privately
-whatsapp.com            # Used for adult content sharing in groups (harder to block)
+reddit.com              over_18 / isNsfw  (+ NUCLEAR search: any soft/hard kw blocked)
+twitter.com             possibly_sensitive
+x.com                   possibly_sensitive
+bsky.app                label system (porn/sexual/nudity)
+bluesky.social          (covered via the bsky API hosts)
+tumblr.com              is_nsfw / is_adult / sensitive
+mastodon.social         sensitive   |
+mastodon.online         sensitive   |  Mastodon matched by REST path, so EVERY
+mas.to                  sensitive   |  instance is covered, not just these.
+mstdn.social            sensitive   |
+fosstodon.org           sensitive   |
+techhub.social          sensitive   |
+gab.com                 sensitive   (Mastodon fork — covered incidentally)
+pixiv.net               xRestrict >= 1
+deviantart.com          is_mature / isMature
+artstation.com          adult_content / hide_as_adult
+imgur.com               nsfw
+flickr.com              safety_level 2/3 (moderate/restricted)   (best-effort)
+nexusmods.com           contains_adult_content / adultContent
+PeerTube (all)          nsfw  (fediverse video — matched by REST path, every instance)
+Lemmy (all)             nsfw  (fediverse reddit — matched by /api/v3 path, every instance)
+mangadex.org            attributes.contentRating = erotica / pornographic
+vimeo.com               content_rating[] contains nudity/mature   (best-effort)
+dailymotion.com         explicit  (+ family_filter URL-rewrite in background.js)  (best-effort)
+odysee.com              mature flag / "mature" tag                 (best-effort)
+patreon.com             is_nsfw                                    (best-effort)
+gumroad.com             is_adult / adult / nsfw                    (best-effort)
+minds.com               nsfw[] non-empty / mature                  (best-effort)
+itaku.ee                maturity_rating = NSFW/Questionable        (best-effort)
+
+  best-effort = field name from public API docs, NOT yet verified on live traffic.
+  Wrong field = harmless no-op (no false positives). Verify when convenient.
 
 ================================================================================
-IMAGEBOARD / FORUM PLATFORMS
+[DOM]  ACTIVE — adult items removed + adult pages blocked  (content.js)
 ================================================================================
-4chan.org               # Multiple NSFW boards (/b/, /s/, /hc/, /d/, etc.)
-8kun.top                # Successor to 8chan, NSFW boards
-endchan.net             # Imageboard with NSFW boards
-7chan.org               # Imageboard with NSFW boards
-420chan.org             # Imageboard with NSFW boards
-lainchan.org            # Imageboard, some NSFW
-wizchan.org             # Imageboard, some adult content
+newgrounds.com          .rating-a items removed; meta[name=rating]=adult pages blocked
+archiveofourown.org     .rating-explicit/.rating-mature works removed; work pages blocked
+furaffinity.net         r-adult/r-mature submissions removed; submission pages blocked
+fanfiction.net          "Rated: M/MA" stories removed; story pages blocked
+inkbunny.net            rating_e/rating_m submissions removed       (best-effort selectors)
+sofurry.com             rating-adult/mature content removed         (best-effort selectors)
+weasyl.com              mature/explicit submissions removed         (best-effort selectors)
+itch.io                 adult games blocked at content-warning gate (best-effort selectors)
+steampowered.com        adult games age-gated -> tab blocked        (store agecheck + mature gate)
+steamcommunity.com      mature artwork/screenshot pages blocked     (best-effort selectors)
 
 ================================================================================
-IMAGE / MEDIA HOSTING
+[DISCORD]  ACTIVE (best-effort) — NSFW channels/servers blocked, platform kept
 ================================================================================
-imgur.com               # Still hosts some NSFW (banned but not fully enforced)
-catbox.moe              # Allows NSFW image hosting
-litterbox.catbox.moe    # Catbox temporary hosting, allows NSFW
-pomf.cat                # Allows NSFW image hosting
-uguu.se                 # File hosting, allows NSFW
-files.catbox.moe        # Catbox file hosting
-postimg.cc              # Some NSFW content
-imagebam.com            # Image hosting, some adult content
-imagevenue.com          # Image hosting, some adult content
-redgifs.com             # GIF hosting, heavily used for NSFW (successor to GFYcat NSFW)
+discord.com             age-restricted channel/server gate → tab blocked; NSFW
+discord.gg              channels hidden in sidebar.
+                        GAP: a user who already enabled "Display age-restricted
+                        content" sees NSFW channels with no gate — header-marker
+                        detection for that case is deferred (hashed selectors).
+
+  Discord directories — now redundant once Discord itself is filtered, but they
+  are NOT yet handled (no rule). Drop/blacklist later:
+disboard.org            DISCORD-DIR / TODO
+discadia.com            DISCORD-DIR / TODO
+discord.me              DISCORD-DIR / TODO
+discordlist.io          DISCORD-DIR / TODO
+top.gg                  DISCORD-DIR / TODO
 
 ================================================================================
-ART / CREATIVE PLATFORMS
+[BLACKLIST]  whole-site blocked at navigation  (verified present in blocklist)
 ================================================================================
-pixiv.net               # Japanese art platform, allows R-18 content
-deviantart.com          # Allows artistic nudity and fetish art
-newgrounds.com          # Allows adult art and games (rated A)
-itaku.ee                # Art platform, allows NSFW
-inkbunny.net            # Furry art platform, allows NSFW
-sofurry.com             # Furry community, allows NSFW
-furaffinity.net         # Furry art platform, allows NSFW (with filters)
-e621.net                # Furry image board, primarily NSFW
-danbooru.donmai.us      # Anime image board, allows NSFW
-gelbooru.com            # Anime image board, allows NSFW
-rule34.xxx              # Rule34 image board (borderline - mostly porn but user-generated)
-rule34.paheal.net       # Rule34 image board variant
-tbib.org                # The Big ImageBoard, NSFW anime art
-yande.re               # Anime image board, NSFW content
-konachan.com            # Anime wallpaper board, some NSFW
-safebooru.donmai.us     # Danbooru variant (supposedly SFW but leaks)
+-- Imageboards / chans --
+4chan.org  8kun.top  endchan.net  7chan.org  420chan.org  lainchan.org  wizchan.org
+-- Boorus (entirely/mostly adult; API rule is a dormant backstop) --
+danbooru.donmai.us  safebooru.donmai.us  gelbooru.com  konachan.com  yande.re  tbib.org
+-- Entirely-NSFW (filtering == blocking) --
+redgifs.com  e621.net  rule34.xxx  rule34.paheal.net  literotica.com  chyoa.com
+loverslab.com  f95zone.to  lewdrg.com  subscribestar.adult
+-- NSFW fediverse instances --
+baraag.net  pawoo.net  poa.st
+-- Video-chat (no per-item label exists) --
+ome.tv  chatroulette.com  chathub.cam  strangercam.com  shagle.com
+dirtyroulette.com  camgo.com  bazoocam.org  coomeet.me
 
 ================================================================================
-VIDEO PLATFORMS
+[DECIDED]  deliberately left alone
 ================================================================================
-vimeo.com               # More permissive than YouTube, some adult content
-dailymotion.com         # Some adult content slips through
-bitchute.com            # Less moderated, some adult content
-odysee.com              # Decentralized, less moderation, some adult content
-rumble.com              # Less moderated video platform
-streamable.com          # Video hosting, some NSFW content
+-- Link shorteners (block = too much collateral; resolve-and-check later) --
+bit.ly  tinyurl.com  t.ly  shorturl.at
+-- File hosts that "slide" (general-purpose, direct-link only, not browsable) --
+catbox.moe  litterbox.catbox.moe  files.catbox.moe  pomf.cat  uguu.se  postimg.cc
+-- Borderline image hosts (block ONLY if going strict) --
+imagebam.com  imagevenue.com
 
 ================================================================================
-SUBSCRIPTION / CREATOR PLATFORMS (not primarily adult but widely used for it)
+[CANT]  messaging — not technically feasible (E2E / no public NSFW structure)
 ================================================================================
-patreon.com             # Allows some adult content from creators
-gumroad.com             # Allows adult content sales
-subscribestar.adult     # Adult variant of SubscribeStar
-subscribestar.com       # Some adult creators
-ko-fi.com               # Some adult creators (against TOS but present)
-buymeacoffee.com        # Some adult creators link here
+telegram.org  t.me  kik.com  snapchat.com  whatsapp.com
+  Whole-site blocking is rejected (people need these to communicate). Nothing
+  visible to filter — leave them.
 
 ================================================================================
-MASTODON / FEDIVERSE INSTANCES (known for allowing NSFW)
+[TODO]  low-priority — no filter yet, leakage accepted for now
 ================================================================================
-poa.st                  # Mastodon instance, allows NSFW
-baraag.net              # Mastodon instance for NSFW art
-pawoo.net               # Japanese Mastodon instance, allows NSFW
-mastodon.online         # Some NSFW content
-mas.to                  # Some NSFW content
-mstdn.social            # Some NSFW content
-fosstodon.org           # Some NSFW content
-techhub.social          # Some NSFW content
+vk.com  mewe.com  parler.com  pillowfort.io  speakbits.com  bitchute.com
+rumble.com  streamable.com  ko-fi.com  buymeacoffee.com  subscribestar.com
+gamebanana.com  writing.com
 
 ================================================================================
-FANFICTION / STORY PLATFORMS
+WHAT'S LEFT  (~31 not actively handled)
 ================================================================================
-archiveofourown.org     # Fanfiction with explicit content (rated E/M)
-literotica.com          # Erotic stories (borderline - primarily adult)
-fanfiction.net          # Some explicit content (against TOS but present)
-chyoa.com               # Interactive erotic stories
-writing.com             # Some adult interactive stories
-
-================================================================================
-GAMING / MODDING PLATFORMS
-================================================================================
-loverslab.com           # Game modding community focused on adult mods
-nexusmods.com           # Some adult mods available (with age gate)
-gamebanana.com          # Some adult mods/skins
-f95zone.to              # Adult gaming community
-lewdrg.com              # Adult game reviews
-
-================================================================================
-DISCORD SERVER DIRECTORIES (NSFW server listings)
-================================================================================
-disboard.org            # Discord server list, many NSFW servers
-discadia.com            # Discord server list, NSFW servers
-discord.me              # Discord server list, NSFW servers
-discordlist.io          # Discord server list
-top.gg                  # Discord bots/servers, some NSFW
-
-================================================================================
-LINK SHORTENERS / REDIRECTS (used to bypass filters)
-================================================================================
-bit.ly                  # Can link to adult content
-tinyurl.com             # Can link to adult content
-t.ly                    # Can link to adult content
-shorturl.at             # Can link to adult content
-
-================================================================================
-OTHER / MISC
-================================================================================
-ome.tv                  # Video chat, adult content common
-chatroulette.com        # Video chat, adult content common
-chathub.cam             # Video chat, adult content
-strangercam.com         # Video chat, adult content
-shagle.com              # Video chat, adult content
-dirtyroulette.com       # Video chat (borderline - name implies adult)
-camgo.com               # Video chat, some adult content
-bazoocam.org            # Video chat, adult content
-coomeet.me              # Video chat, adult content
-
-================================================================================
-NOTES
-================================================================================
-- Domains marked as "borderline" are close to being dedicated adult sites
-  but still have some non-adult usage
-- Many of these platforms have legitimate uses - blocking them entirely
-  may cause false positives
-- Consider implementing path-level blocking instead of domain-level
-  (e.g., block reddit.com/r/nsfw* instead of all of reddit.com)
-- Some domains may already exist in the main blocklist with subdomains
-- Shorteners cannot be effectively blocked without collateral damage
-================================================================================
-
-================================================================================
-REFINED FILTER ANALYSIS: RELIABILITY OF BUILT-IN NSFW FILTERS
-================================================================================
-
-[RELIABLE FILTERS]
--- Robust site-wide Safe Search, Blur features, or Age-Gates that work consistently --
-- archiveofourown.org
-- bluesky.social
-- bsky.app
-- dailymotion.com
-- deviantart.com
-- furaffinity.net
-- gumroad.com
-- newgrounds.com
-- nexusmods.com
-- patreon.com
-- pixiv.net
-- reddit.com
-- tumblr.com
-- twitter.com
-- vimeo.com
-- x.com
-
-[NOT SO RELIABLE FILTERS]
--- Filters exist but are easily bypassed, depend on user tagging, or require manual blacklisting --
-- bitchute.com
-- buymeacoffee.com
-- disboard.org
-- discadia.com
-- discord.com
-- discord.gg
-- discord.me
-- discordlist.io
-- fanfiction.net
-- fosstodon.org
-- gab.com
-- gamebanana.com
-- inkbunny.net
-- itaku.ee
-- ko-fi.com
-- mas.to
-- mastodon.online
-- mastodon.social
-- mewe.com
-- minds.com
-- mstdn.social
-- odysee.com
-- parler.com
-- pillowfort.io
-- rumble.com
-- snapchat.com
-- sofurry.com
-- speakbits.com
-- subscribestar.com
-- t.me
-- techhub.social
-- telegram.org
-- top.gg
-
-[NO FILTERS AT ALL]
--- Zero content moderation for NSFW, or pure file/chat hosts with no filtering interface --
-- 420chan.org
-- 4chan.org
-- 7chan.org
-- 8kun.top
-- baraag.net
-- bazoocam.org
-- bit.ly
-- camgo.com
-- catbox.moe
-- chathub.cam
-- chatroulette.com
-- chyoa.com
-- coomeet.me
-- danbooru.donmai.us
-- dirtyroulette.com
-- e621.net
-- endchan.net
-- f95zone.to
-- files.catbox.moe
-- gelbooru.com
-- imagebam.com
-- imagevenue.com
-- imgur.com
-- kik.com
-- konachan.com
-- lainchan.org
-- lewdrg.com
-- literotica.com
-- litterbox.catbox.moe
-- loverslab.com
-- ome.tv
-- pawoo.net
-- poa.st
-- pomf.cat
-- postimg.cc
-- redgifs.com
-- rule34.paheal.net
-- rule34.xxx
-- safebooru.donmai.us
-- shagle.com
-- shorturl.at
-- strangercam.com
-- streamable.com
-- subscribestar.adult
-- t.ly
-- tbib.org
-- tinyurl.com
-- uguu.se
-- whatsapp.com
-- wizchan.org
-- writing.com
-- yande.re
-
+  5   Discord directories  — redundant once Discord is solid; drop/blacklist
+ 13   low-priority         — buildable, low value; deferred on purpose
+  5   messaging            — CANT (dead end)
+  ~8  best-effort verifies — the (best-effort) API + Discord opted-in gap +
+                             inkbunny/sofurry selectors need a live-DOM/traffic check
+Everything else is blocked, filtered, or a deliberate DECIDED no-op.
 ================================================================================

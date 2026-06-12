@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="breeze">
+<html lang="en" data-theme="dark" data-style="aurora">
 
 <head>
   <meta charset="UTF-8">
@@ -429,6 +429,58 @@
       display: none !important;
     }
 
+    /* Graylist list */
+    .graylist-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 360px;
+      overflow-y: auto;
+    }
+    .graylist-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      background: var(--input-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+    }
+    .graylist-row .gl-txt { flex: 1; min-width: 0; }
+    .graylist-row .gl-url {
+      font-weight: 700;
+      font-size: 13.5px;
+      display: block;
+    }
+    .graylist-row .gl-desc {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.55);
+      display: block;
+      margin-top: 2px;
+    }
+    .gl-badge {
+      flex: 0 0 auto;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      padding: 4px 9px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .gl-badge.api {
+      background: color-mix(in oklab, #6366f1 22%, transparent);
+      color: #a5b4fc;
+    }
+    .gl-badge.dom {
+      background: color-mix(in oklab, #c9962f 22%, transparent);
+      color: #e5c074;
+    }
+    .gl-badge.discord {
+      background: color-mix(in oklab, #5865f2 24%, transparent);
+      color: #b3bcff;
+    }
+
     /* Modals */
     .modal-overlay {
       position: fixed;
@@ -707,6 +759,24 @@
           <div id="domainResult" class="hidden"></div>
         </div>
 
+        <!-- Graylist (filtered, not blocked) -->
+        <div class="blocklist-section">
+          <div class="section-header">
+            <div class="section-title-group">
+              <div class="section-icon">🩶</div>
+              <div class="section-title-text">
+                <h3>Graylist — Filtered Sites</h3>
+                <p>MAINSTREAM SITES, RISKY PARTS REMOVED</p>
+              </div>
+            </div>
+          </div>
+          <p style="font-size:13px;color:rgba(255,255,255,.6);line-height:1.5;margin:0 0 14px;">
+            These sites aren't explicit themselves, so they're not blocked. Instead Pure Path
+            strips the explicit content out in place — feed posts, galleries, and adult pages.
+          </p>
+          <div id="graylistList" class="graylist-list"></div>
+        </div>
+
       </div>
     </div>
   </main>
@@ -744,6 +814,8 @@
 
 
 
+  <script src="theme-sync.js"></script>
+  <script src="graylist-sites.js"></script>
   <script src="blocklists.js"></script>
 </body>
 

@@ -64,15 +64,21 @@ function openManager() {
 }
 
 /* ---------- stats ---------- */
+// Prefer the desktop app's canonical numbers (day streak + global block total
+// summed across every browser/profile); fall back to this profile's own stats.
 function loadStats() {
-  chrome.runtime.sendMessage({ action: 'getStats' }, (res) => {
-    if (chrome.runtime.lastError || !res || !res.stats) return;
-    const s = res.stats;
-    $('statBlocked').textContent = (s.totalBlocks || 0).toLocaleString();
-    if (s.installDate) {
-      const days = Math.floor((Date.now() - new Date(s.installDate).getTime()) / 86400000);
-      $('statStreak').textContent = Math.max(0, days);
-    }
+  chrome.storage.local.get(['ppAppData'], (store) => {
+    const app = (store && store.ppAppData) || {};
+    chrome.runtime.sendMessage({ action: 'getStats' }, (res) => {
+      const s = (res && res.stats) || {};
+      const blocks = typeof app.globalBlocks === 'number' ? app.globalBlocks : (s.totalBlocks || 0);
+      $('statBlocked').textContent = blocks.toLocaleString();
+
+      let days = null;
+      if (typeof app.streak === 'number') days = app.streak;
+      else if (s.installDate) days = Math.floor((Date.now() - new Date(s.installDate).getTime()) / 86400000);
+      if (days !== null) $('statStreak').textContent = Math.max(0, days);
+    });
   });
 }
 

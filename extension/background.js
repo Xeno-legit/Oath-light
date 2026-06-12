@@ -434,7 +434,11 @@ const HARD_PORN_KEYWORDS = [
   'goregasm', 'dolcett', 'guro', 'vorarephilia',
   'suicidegirls', 'babestation', 'slutwife', 'hotwife',
   'ecchi', 'ahegao', 'oppai', 'yaoi', 'yuri',
-  'shotacon', 'lolicon', 'doujinshi', 'ero manga', 'eroge'
+  'shotacon', 'lolicon', 'doujinshi', 'ero manga', 'eroge',
+  // Bare unambiguous terms — safe under whole-word matching (used only in the
+  // Reddit subreddit/search checks). 'xxx'/'cum' are whole-word-only (len < 4),
+  // so they can't Scunthorpe; 'gonewild'/'r34'/'lewd' are long enough to substring.
+  'xxx', 'cum', 'gonewild', 'r34', 'lewd'
 ].map(k => k.toLowerCase());
 
 // SEARCH ENGINE SAFESEARCH ENFORCEMENT
@@ -1375,12 +1379,33 @@ function shouldBlockUrl(url, depth = 0) {
         }
       }
 
-      // 4c. Check Reddit SEARCH queries for NSFW keywords
+      // 4c. NUCLEAR Reddit SEARCH filtering — block the search outright if the
+      //     query contains ANY NSFW keyword, soft OR hard. Reddit stays usable
+      //     for legit purposes, but every adult search dies. Whole-word match for
+      //     short keywords (ass/sex/cum…) so we don't Scunthorpe innocent queries
+      //     (essex/massachusetts/document); substring for ≥4-char keywords so
+      //     run-together terms ("milfhunter", "hotbabes") are still caught.
       const searchQuery = urlObj.searchParams.get('q');
       if (searchQuery) {
         const queryLower = searchQuery.toLowerCase();
+        // Boundary-padded, separator-normalised form for whole-word checks.
+        // NB: don't strip '+' — searchParams already turned URL '+' into spaces,
+        // so a surviving '+' is a literal one we must keep (e.g. the "18+" keyword).
+        const qText = ' ' + queryLower.replace(/[_\-.,]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
+        const queryHasKeyword = (keyword) => {
+          // Whole-word (handles single- and multi-word keywords).
+          if (qText.includes(' ' + keyword + ' ')) return true;
+          // Run-together substring — only safe for longer, unambiguous keywords.
+          if (keyword.length >= 4 && queryLower.includes(keyword)) return true;
+          return false;
+        };
         for (const keyword of HARD_PORN_KEYWORDS) {
-          if (keyword.length >= 4 && queryLower.includes(keyword)) {
+          if (queryHasKeyword(keyword)) {
+            return { blocked: true, reason: 'reddit_search_keyword', match: keyword, tier: 'blacklist', hostname };
+          }
+        }
+        for (const keyword of SOFT_PORN_KEYWORDS) {
+          if (queryHasKeyword(keyword)) {
             return { blocked: true, reason: 'reddit_search_keyword', match: keyword, tier: 'blacklist', hostname };
           }
         }
@@ -1666,6 +1691,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'graylistFiltered') {
+    // Graylist V2 stripped N site-labelled NSFW items from a JSON response.
+    // Track it separately from navigation blocks (it's filtering, not a redirect).
+    const n = Number(request.count) || 0;
+    if (n > 0) {
+      (async () => {
+        const { stats } = await chrome.storage.local.get(['stats']);
+        const s = stats || { totalBlocks: 0, installDate: new Date().toISOString() };
+        s.graylistFiltered = (s.graylistFiltered || 0) + n;
+        await chrome.storage.local.set({ stats: s });
+        if (typeof NativeMessagingBridge !== 'undefined') {
+          NativeMessagingBridge.sendStatsUpdate();
+        }
+      })();
+    }
+    return false;
+  }
+
   if (request.action === 'isDomainSafe') {
     // Unified whitelist check — single source of truth
     const hostname = (request.hostname || '').toLowerCase();
@@ -1698,6 +1741,26 @@ const NativeMessagingBridge = (function () {
   let reconnectDelay = 250;
   let reconnectTimer = null;
   let isConnected = false;
+  let profileId = null;
+
+  // ─ Stable per-profile id ───────────────────────────────────
+  // Each Chrome profile has its own extension storage, so a value stored here
+  // is unique to (and stable for) this profile. The desktop app uses it to tell
+  // multiple connected profiles of the same browser apart.
+  async function ensureProfileId() {
+    if (profileId) return profileId;
+    try {
+      const { ppProfileId } = await chrome.storage.local.get(['ppProfileId']);
+      if (ppProfileId) { profileId = ppProfileId; return profileId; }
+      profileId = (self.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : 'p-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      await chrome.storage.local.set({ ppProfileId: profileId });
+    } catch (e) {
+      profileId = profileId || ('p-' + Math.random().toString(36).slice(2, 10));
+    }
+    return profileId;
+  }
 
   // ─ Connect to desktop app ──────────────────────────────────
   function connect() {
@@ -1762,9 +1825,11 @@ const NativeMessagingBridge = (function () {
 
   // ─ Handshake ───────────────────────────────────────────────
   async function sendHandshake() {
+    await ensureProfileId();
     const { stats } = await chrome.storage.local.get(['stats']);
     send({
       type: 'handshake',
+      profileId,
       extensionVersion: chrome.runtime.getManifest().version,
       installDate: stats?.installDate || new Date().toISOString()
     });
@@ -1776,6 +1841,7 @@ const NativeMessagingBridge = (function () {
   function sendHeartbeat() {
     send({
       type: 'heartbeat',
+      profileId,
       timestamp: Date.now()
     });
   }
@@ -1851,9 +1917,44 @@ const NativeMessagingBridge = (function () {
         handleBlocklistUpdate(msg);
         break;
 
+      case 'set_theme':
+        // Desktop app pushed its selected theme/palette — mirror it so every
+        // extension page matches (theme-sync.js / blocked.js read this).
+        handleSetTheme(msg);
+        break;
+
+      case 'set_app_data':
+        // Desktop app pushed the canonical day-streak + global block total
+        // (summed across every browser/profile). Pages read `ppAppData`.
+        handleSetAppData(msg);
+        break;
+
       default:
         console.log('Unknown message from desktop:', msg.type);
     }
+  }
+
+  // ─ Mirror the app's day streak + global block total into storage ──
+  async function handleSetAppData(msg) {
+    const data = {};
+    if (typeof msg.streak === 'number') data.streak = msg.streak;
+    if (typeof msg.globalBlocks === 'number') data.globalBlocks = msg.globalBlocks;
+    if (Object.keys(data).length === 0) return;
+    const { ppAppData } = await chrome.storage.local.get(['ppAppData']);
+    await chrome.storage.local.set({ ppAppData: Object.assign({}, ppAppData, data) });
+  }
+
+  // ─ Mirror the desktop app's theme into storage ─────────────
+  async function handleSetTheme(msg) {
+    const d = (msg.display && typeof msg.display === 'object') ? msg.display : msg;
+    const display = {};
+    if (d.theme) display.theme = d.theme;
+    if (d.style) display.style = d.style;
+    if (d.bg) display.bg = d.bg;
+    if (typeof d.intensity !== 'undefined') display.intensity = d.intensity;
+    if (Object.keys(display).length === 0) return;
+    // Store the object plus mirrored top-level keys (blocked.js reads either).
+    await chrome.storage.local.set({ display, ...display });
   }
 
   // ─ Handle blocklist updates from desktop ───────────────────
