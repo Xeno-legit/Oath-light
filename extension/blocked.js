@@ -157,14 +157,14 @@ function buildBG(bg, intensity) {
    BLOCK REASON
    ============================================================ */
 const quotes = [
-  "The only person you are destined to become is the person you decide to be. — Ralph Waldo Emerson",
-  "Success is the sum of small efforts repeated day in and day out. — Robert Collier",
-  "You are not your urges. You are the one who decides. — Anonymous",
-  "Every moment is a fresh beginning. — T.S. Eliot",
-  "The best time to plant a tree was 20 years ago. The second best time is now. — Chinese Proverb",
-  "Your future self will thank you for the choices you make today. — Anonymous",
-  "Discipline is choosing between what you want now and what you want most. — Abraham Lincoln",
-  "The pain of discipline is far less than the pain of regret. — Anonymous",
+  { t: "The only person you are destined to become is the person you decide to be.", a: "Ralph Waldo Emerson" },
+  { t: "Success is the sum of small efforts repeated day in and day out.", a: "Robert Collier" },
+  { t: "You are not your urges. You are the one who decides.", a: "Anonymous" },
+  { t: "Every moment is a fresh beginning.", a: "T.S. Eliot" },
+  { t: "The best time to plant a tree was 20 years ago. The second best time is now.", a: "Chinese Proverb" },
+  { t: "Your future self will thank you for the choices you make today.", a: "Anonymous" },
+  { t: "Discipline is choosing between what you want now and what you want most.", a: "Abraham Lincoln" },
+  { t: "The pain of discipline is far less than the pain of regret.", a: "Anonymous" },
 ];
 
 const urlParams = new URLSearchParams(window.location.search);
@@ -188,7 +188,27 @@ const reasonMap = {
 reasonEl.textContent = reasonMap[reason] || 'This page was blocked to help you stay focused.';
 
 const quoteEl = document.getElementById('quote');
-quoteEl.textContent = quotes[Math.floor(Math.random() * quotes.length)];
+const quoteTextEl = document.getElementById('quoteText');
+const quoteAuthorEl = document.getElementById('quoteAuthor');
+let qi = Math.floor(Math.random() * quotes.length);
+
+function renderQuote() {
+  quoteTextEl.textContent = quotes[qi].t;
+  quoteAuthorEl.textContent = quotes[qi].a;
+}
+renderQuote();
+
+// tap the quote to cycle to another (fades text/author out, swaps, fades back in)
+quoteEl.addEventListener('click', () => {
+  quoteTextEl.style.opacity = '0';
+  quoteAuthorEl.style.opacity = '0';
+  setTimeout(() => {
+    qi = (qi + 1) % quotes.length;
+    renderQuote();
+    quoteTextEl.style.opacity = '1';
+    quoteAuthorEl.style.opacity = '1';
+  }, 260);
+});
 
 /* ============================================================
    STATS
