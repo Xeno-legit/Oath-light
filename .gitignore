@@ -83,3 +83,6 @@ Error/
 /Bugs and issues/
 
 # Other stuff
+.agents/
+.claude/
+skills-lock.json
