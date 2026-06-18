@@ -59,7 +59,7 @@ function TipsPage({ s, PP }) {
         <div className="ico" style={{ width: 44, height: 44, flex: '0 0 44px', borderRadius: 12, display: 'grid', placeItems: 'center', background: 'var(--bg-1)', color: 'var(--accent-3)' }}><IconShield size={22} /></div>
         <div style={{ flex: 1 }}>
           <b style={{ fontSize: 14.5, fontWeight: 800 }}>Disclaimer</b>
-          <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 2, lineHeight: 1.5 }}>Pure Path is not fool-proof, nor is it a replacement for therapy or medical treatment. If you can afford therapy or medical treatment, please seek those first before you rely fully on Pure Path.</div>
+          <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 2, lineHeight: 1.5 }}>Pure Path is not fool-proof, nor is it a replacement for therapy or medical treatment. If you can afford therapy or medical treatment, please seek those first before you rely fully on Pure Path. But we won't disappoint you.</div>
         </div>
       </div>
 

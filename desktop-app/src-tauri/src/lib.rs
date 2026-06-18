@@ -142,6 +142,9 @@ pub struct AppState {
     guard_enabled: bool,
     /// Last theme/palette pushed from the UI, re-sent to extensions on connect.
     ext_theme: Option<Value>,
+    /// Last blocking settings (redirect target + reminder schedule) pushed from
+    /// the UI, re-sent to extensions on connect.
+    ext_blocking: Option<Value>,
     /// Clean-streak day count from the app, mirrored down to the extensions.
     app_streak: u64,
 }
@@ -414,6 +417,13 @@ fn handle_connection(app: AppHandle, state: Arc<Mutex<AppState>>, stream: TcpStr
                         let _ = broadcast_to_extensions(
                             &state,
                             &serde_json::json!({ "type": "set_theme", "display": display }),
+                        );
+                    }
+                    let blocking = state.lock().unwrap().ext_blocking.clone();
+                    if let Some(settings) = blocking {
+                        let _ = broadcast_to_extensions(
+                            &state,
+                            &serde_json::json!({ "type": "set_blocking", "settings": settings }),
                         );
                     }
                     broadcast_app_data(&state);
@@ -803,6 +813,46 @@ fn set_extension_theme(state: tauri::State<'_, Arc<Mutex<AppState>>>, display: V
     let _ = broadcast_to_extensions(state.inner(), &msg);
 }
 
+/// Push the desktop app's blocking settings (the "Redirect link" target and the
+/// focus-schedule reminder config) to every connected extension, and cache them
+/// so freshly-connecting profiles get them on handshake too.
+#[tauri::command]
+fn set_blocking_settings(state: tauri::State<'_, Arc<Mutex<AppState>>>, settings: Value) {
+    state.lock().unwrap().ext_blocking = Some(settings.clone());
+    let msg = serde_json::json!({ "type": "set_blocking", "settings": settings });
+    let _ = broadcast_to_extensions(state.inner(), &msg);
+}
+
+/// Open an http(s) URL in the user's default browser. The in-app webview can't
+/// follow `target="_blank"` links itself, so the blocking-settings "Test" button
+/// routes through here. Validates the scheme and never goes through a shell, so
+/// query strings with `&` are passed intact.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    let u = url.trim();
+    if !(u.starts_with("http://") || u.starts_with("https://")) {
+        return Err("Only http(s) URLs are allowed".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // rundll32 (not `cmd /C start`) so `&` in the query isn't shell-parsed.
+        std::process::Command::new("rundll32")
+            .arg("url.dll,FileProtocolHandler")
+            .arg(u)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(u).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open").arg(u).spawn().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Manually (re)apply the force-install policy for one browser, or all if
 /// `browser_key` is None. No-op ("dormant") until the release update URL is set.
 #[tauri::command]
@@ -873,6 +923,8 @@ pub fn run() {
             get_browsers_status,
             set_guard_enabled,
             set_extension_theme,
+            set_blocking_settings,
+            open_external,
             set_app_streak,
             enforce_extension,
             request_sync,

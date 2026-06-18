@@ -4,6 +4,19 @@ let blocklistSet = new Set(); // O(1) domain lookup
 
 let defaultDomains = [];
 
+// Blocking settings pushed down from the desktop app (the "Redirect link" target
+// and the focus-schedule reminders). Cached in memory for a zero-cost read on
+// every navigation; mirrored to chrome.storage.local under `ppBlocking` so it
+// survives a service-worker restart.
+let blockingSettings = null;
+async function loadBlockingSettings() {
+  try {
+    const { ppBlocking } = await chrome.storage.local.get(['ppBlocking']);
+    if (ppBlocking && typeof ppBlocking === 'object') blockingSettings = ppBlocking;
+  } catch (_) {}
+  return blockingSettings;
+}
+
 // Cached Set of the built-in domains, for fast "is this a default?" checks.
 let defaultSetCache = null;
 function getDefaultSet() {
@@ -72,6 +85,7 @@ chrome.runtime.onStartup.addListener(async () => {
 // against the first navigation that also triggers a load.
 ensureBlocklistLoaded();
 loadDefaultListsIntoMemory();
+loadBlockingSettings();
 
 // Cache default lists into variables to send to Desktop app
 // Loads all 3 part files in parallel for fastest cold-start
@@ -440,6 +454,38 @@ const HARD_PORN_KEYWORDS = [
   // so they can't Scunthorpe; 'gonewild'/'r34'/'lewd' are long enough to substring.
   'xxx', 'cum', 'gonewild', 'r34', 'lewd'
 ].map(k => k.toLowerCase());
+
+// NUCLEAR SEARCH-QUERY FILTER (shared by Reddit §4c and Patreon §5)
+// Returns the matched NSFW keyword if the raw search query contains ANY soft- or
+// hard-porn term, else null. Whole-word match for short keywords so we don't
+// Scunthorpe innocent queries (essex/massachusetts/document); substring for
+// ≥4-char keywords so run-together terms ("milfhunter", "hotbabes") are caught.
+// This is the ground-truth-INDEPENDENT layer: it kills the adult *search itself*,
+// catching under-tagged/suggestive content the platform never labels NSFW (the
+// "privates covered by one pixel → not 18+" leak that DOM label-hiding can't reach).
+// ≥4-char keywords that are ALSO substrings of common innocent words — these must
+// match WHOLE-WORD ONLY (never run-together), or they Scunthorpe legit searches:
+//   cock→cocktail/peacock  butt→button/butter  dick→Dickens  balls→footballs
+//   rape→grape/scrape/drape  milf→Milford. Standalone use still blocks; we only
+//   give up run-together matches for these few (rare in real adult queries).
+const SUBSTRING_UNSAFE_KEYWORDS = new Set(['cock', 'butt', 'dick', 'balls', 'rape', 'milf']);
+
+function matchSearchQueryPorn(searchQuery) {
+  if (!searchQuery) return null;
+  const queryLower = searchQuery.toLowerCase();
+  // NB: don't strip '+' — searchParams already turned URL '+' into spaces, so a
+  // surviving '+' is a literal one we must keep (e.g. the "18+" keyword).
+  const qText = ' ' + queryLower.replace(/[_\-.,]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
+  const has = (keyword) => {
+    if (qText.includes(' ' + keyword + ' ')) return true;            // whole-word
+    if (keyword.length >= 4 && !SUBSTRING_UNSAFE_KEYWORDS.has(keyword) &&
+        queryLower.includes(keyword)) return true;                   // run-together
+    return false;
+  };
+  for (const keyword of HARD_PORN_KEYWORDS) if (has(keyword)) return keyword;
+  for (const keyword of SOFT_PORN_KEYWORDS) if (has(keyword)) return keyword;
+  return null;
+}
 
 // SEARCH ENGINE SAFESEARCH ENFORCEMENT
 
@@ -1385,29 +1431,27 @@ function shouldBlockUrl(url, depth = 0) {
       //     short keywords (ass/sex/cum…) so we don't Scunthorpe innocent queries
       //     (essex/massachusetts/document); substring for ≥4-char keywords so
       //     run-together terms ("milfhunter", "hotbabes") are still caught.
-      const searchQuery = urlObj.searchParams.get('q');
-      if (searchQuery) {
-        const queryLower = searchQuery.toLowerCase();
-        // Boundary-padded, separator-normalised form for whole-word checks.
-        // NB: don't strip '+' — searchParams already turned URL '+' into spaces,
-        // so a surviving '+' is a literal one we must keep (e.g. the "18+" keyword).
-        const qText = ' ' + queryLower.replace(/[_\-.,]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
-        const queryHasKeyword = (keyword) => {
-          // Whole-word (handles single- and multi-word keywords).
-          if (qText.includes(' ' + keyword + ' ')) return true;
-          // Run-together substring — only safe for longer, unambiguous keywords.
-          if (keyword.length >= 4 && queryLower.includes(keyword)) return true;
-          return false;
-        };
-        for (const keyword of HARD_PORN_KEYWORDS) {
-          if (queryHasKeyword(keyword)) {
-            return { blocked: true, reason: 'reddit_search_keyword', match: keyword, tier: 'blacklist', hostname };
-          }
-        }
-        for (const keyword of SOFT_PORN_KEYWORDS) {
-          if (queryHasKeyword(keyword)) {
-            return { blocked: true, reason: 'reddit_search_keyword', match: keyword, tier: 'blacklist', hostname };
-          }
+      const redditSearchHit = matchSearchQueryPorn(urlObj.searchParams.get('q'));
+      if (redditSearchHit) {
+        return { blocked: true, reason: 'reddit_search_keyword', match: redditSearchHit, tier: 'blacklist', hostname };
+      }
+    }
+
+    // STEP 5: PATREON SEARCH — NUCLEAR keyword filter (mirrors Reddit §4c).
+    //   Patreon labels its adult creators/posts well (the DOM scrub in content.js
+    //   hides every 18+-chipped card), but SEARCH still surfaces suggestive content
+    //   the platform leaves UNLABELLED — under-tagging the ground-truth filter is
+    //   blind to. So we kill the adult search outright. Patreon stays fully usable
+    //   for legit creators; only NSFW-keyword searches die. Search lives at
+    //   /explore/search?query=… (a typed /search?q=… redirects there) — handle both.
+    if (hostname === 'patreon.com' || hostname.endsWith('.patreon.com')) {
+      const p = urlObj.pathname.toLowerCase();
+      if (p === '/search' || p === '/explore/search' || p.startsWith('/explore/search/')) {
+        const patreonSearchHit = matchSearchQueryPorn(
+          urlObj.searchParams.get('query') || urlObj.searchParams.get('q')
+        );
+        if (patreonSearchHit) {
+          return { blocked: true, reason: 'patreon_search_keyword', match: patreonSearchHit, tier: 'blacklist', hostname };
         }
       }
     }
@@ -1457,20 +1501,63 @@ async function recordBlockAndRedirect(tabId, url, reason, match, skipTabUpdate =
   const blockedPrefix = chrome.runtime.getURL('blocked.html');
   if (url.startsWith(blockedPrefix)) return null;
 
-  const blockedUrl = blockedPrefix + `?reason=${reason}&match=${encodeURIComponent(match)}`;
-  
+  // TEMP (testing): both block destinations — blocked.html AND the user-configured
+  // "Redirect link" — are PAUSED here, because navigating to either can crash/hang
+  // the Playwright automation bridge. While PP_TESTING is true, every block routes
+  // to a light about:blank instead. Set PP_TESTING=false to restore BOTH the normal
+  // block screen and the redirect-link behaviour.
+  const PP_TESTING = true;
+  const blockedUrl = PP_TESTING
+    ? 'about:blank'
+    : blockedPrefix + `?reason=${reason}&match=${encodeURIComponent(match)}`;
+  if (PP_TESTING) console.log('[PurePath][TEST] BLOCK', { reason, match, url });
+
+  // Desktop "Redirect link": send the user to the configured URL instead of the
+  // block screen. The loop guard (the url isn't already the target) stops an
+  // infinite bounce if the redirect destination ever resolves as blocked itself.
+  // (Suppressed entirely while PP_TESTING — see above.)
+  const redirectTarget = PP_TESTING ? null : getRedirectTarget();
+  const targetUrl = (redirectTarget && !url.startsWith(redirectTarget)) ? redirectTarget : blockedUrl;
+  if (redirectTarget) {
+    console.log('[PurePath] block →', targetUrl === redirectTarget ? 'redirecting to ' + redirectTarget : 'block screen (loop guard)');
+  } else if (!blockingSettings) {
+    console.log('[PurePath] block → block screen (no settings from desktop app yet)');
+  }
+
   if (!skipTabUpdate) {
     try {
       const tab = await chrome.tabs.get(tabId);
       if (tab && !tab.url.startsWith(blockedPrefix)) {
-        await chrome.tabs.update(tabId, { url: blockedUrl });
+        await chrome.tabs.update(tabId, { url: targetUrl });
       }
     } catch (e) {
-      chrome.tabs.update(tabId, { url: blockedUrl }).catch(() => {});
+      chrome.tabs.update(tabId, { url: targetUrl }).catch(() => {});
     }
   }
 
-  return blockedUrl;
+  return targetUrl;
+}
+
+// The active "Redirect link" destination, or null when the setting is off /
+// blank / unusable. Tolerates a scheme-less entry ("youtube.com/watch?v=…") by
+// assuming https, so the user doesn't have to type the protocol.
+function getRedirectTarget() {
+  const b = blockingSettings;
+  if (!b || !b.redirectLinkOn) return null;
+  let u = (b.redirectUrl || '').trim();
+  if (!u) return null;
+  if (!/^https?:\/\//i.test(u)) {
+    // Only auto-prefix things that look like a host (has a dot, no spaces).
+    if (!/^[^\s/]+\.[^\s/]+/.test(u)) return null;
+    u = 'https://' + u;
+  }
+  try {
+    const p = new URL(u);
+    if (p.protocol !== 'http:' && p.protocol !== 'https:') return null;
+  } catch (_) {
+    return null;
+  }
+  return u;
 }
 
 async function handleBlock(tabId, url, skipTabUpdate = false) {
@@ -1485,7 +1572,10 @@ async function handleBlock(tabId, url, skipTabUpdate = false) {
   if (result && result.safesearch) {
     if (url !== result.redirectUrl) {
       console.log(`Forcing SafeSearch: ${result.match}`);
-      chrome.tabs.update(tabId, { url: result.redirectUrl });
+      // Fire-and-forget: Firefox rejects tabs.update with "Navigation rejected"
+      // when the navigation has already moved on. Swallow it — the redirect just
+      // didn't apply, which is harmless.
+      chrome.tabs.update(tabId, { url: result.redirectUrl }).catch(() => {});
     }
     return;
   }
@@ -1503,7 +1593,9 @@ async function handleBlock(tabId, url, skipTabUpdate = false) {
         const rewrittenUrl = enforceGraylistUrlRewrite(url, baseDomain);
         if (rewrittenUrl && rewrittenUrl !== url) {
           console.log(`Graylist URL rewrite: ${baseDomain}`);
-          chrome.tabs.update(tabId, { url: rewrittenUrl });
+          // Fire-and-forget: see SafeSearch redirect above — swallow Firefox's
+          // "Navigation rejected" rejection when the navigation already changed.
+          chrome.tabs.update(tabId, { url: rewrittenUrl }).catch(() => {});
         }
       }
     }
@@ -1929,6 +2021,12 @@ const NativeMessagingBridge = (function () {
         handleSetAppData(msg);
         break;
 
+      case 'set_blocking':
+        // Desktop app pushed the blocking settings (redirect target + reminder
+        // schedule). Cache them and re-arm the reminder loop.
+        handleSetBlocking(msg);
+        break;
+
       default:
         console.log('Unknown message from desktop:', msg.type);
     }
@@ -1942,6 +2040,18 @@ const NativeMessagingBridge = (function () {
     if (Object.keys(data).length === 0) return;
     const { ppAppData } = await chrome.storage.local.get(['ppAppData']);
     await chrome.storage.local.set({ ppAppData: Object.assign({}, ppAppData, data) });
+  }
+
+  // ─ Cache the desktop app's blocking settings ───────────────
+  async function handleSetBlocking(msg) {
+    const settings = (msg.settings && typeof msg.settings === 'object') ? msg.settings : null;
+    if (!settings) return;
+    blockingSettings = settings;
+    console.log('[PurePath] blocking settings received — redirect:',
+      settings.redirectLinkOn ? (settings.redirectUrl || '(blank)') : 'off');
+    try { await chrome.storage.local.set({ ppBlocking: settings }); } catch (_) {}
+    // Re-arm the reminder loop to reflect the new schedule immediately.
+    if (typeof armReminderAlarm === 'function') armReminderAlarm();
   }
 
   // ─ Mirror the desktop app's theme into storage ─────────────
@@ -1992,3 +2102,100 @@ chrome.runtime.onInstalled.addListener(() => {
   // This ensures the native bridge connects after setup.
   setTimeout(() => NativeMessagingBridge.connect(), 500);
 });
+
+// REMINDER POP-UPS — Focus-schedule nudges
+// During the desktop app's "Vulnerable hours" window, fire a gentle in-page
+// pop-up (rendered by content.js) for whichever reminder types are enabled.
+// A single persistent alarm drives this — it survives the MV3 service worker
+// sleeping and wakes it to fire. The schedule (window + which alerts) is
+// evaluated at fire time from the cached settings, so the alarm itself never
+// needs rebuilding when settings change.
+
+const REMINDER_ALARM = 'pp-reminder';
+const REMINDER_PERIOD_MIN = 30; // roughly twice an hour while inside the window
+
+// A small rotating pool for the "Motivational reminder" type.
+const REMINDER_QUOTES = [
+  'The man who moves a mountain begins by carrying away small stones.',
+  'You are not your urges. You are the one who notices them — and chooses.',
+  'Discipline is choosing between what you want now and what you want most.',
+  'Every time you say no, the next no gets easier. You are rewiring yourself.',
+  'The urge always passes. Outlast it — ride the wave, don’t feed it.',
+  'Who you become is built from the moments you refuse to give in.',
+  'Fall seven times, stand up eight. The streak is the man, not the number.',
+  'Close the tab. Take a walk. Future-you is already grateful.',
+];
+
+function buildReminder(kind) {
+  if (kind === 'checkin') {
+    return {
+      title: 'Still with you',
+      body: 'Take a slow breath. You’re stronger than this moment — it will pass.',
+    };
+  }
+  // 'quote' (and any future text type) → a short line.
+  const q = REMINDER_QUOTES[Math.floor(Math.random() * REMINDER_QUOTES.length)];
+  return { title: 'Remember your why', body: q };
+}
+
+// Is the current local time inside [start, end)? Handles overnight windows
+// (e.g. 22:00 → 06:00) and a full-day window (start === end).
+function isWithinWindow(start, end) {
+  const toMin = (s) => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec((s || '').trim());
+    return m ? (Math.min(23, +m[1]) * 60 + Math.min(59, +m[2])) : null;
+  };
+  const a = toMin(start), z = toMin(end);
+  if (a == null || z == null) return false;
+  if (a === z) return true;
+  const now = new Date();
+  const cur = now.getHours() * 60 + now.getMinutes();
+  return a < z ? (cur >= a && cur < z) : (cur >= a || cur < z);
+}
+
+// Ensure the reminder alarm exists (idempotent — never resets a live timer).
+async function armReminderAlarm() {
+  try {
+    const existing = await chrome.alarms.get(REMINDER_ALARM);
+    if (existing && existing.periodInMinutes === REMINDER_PERIOD_MIN) return;
+    chrome.alarms.create(REMINDER_ALARM, {
+      periodInMinutes: REMINDER_PERIOD_MIN,
+      delayInMinutes: REMINDER_PERIOD_MIN,
+    });
+  } catch (_) {}
+}
+
+async function maybeShowReminder() {
+  if (!blockingSettings) await loadBlockingSettings();
+  const b = blockingSettings;
+  if (!b) return;
+  const v = b.vulnerable || {};
+  if (!v.on || !isWithinWindow(v.start, v.end)) return;
+  const enabled = Array.isArray(b.alerts) ? b.alerts.filter((a) => a && a.on) : [];
+  if (!enabled.length) return;
+
+  const pick = enabled[Math.floor(Math.random() * enabled.length)];
+  const content = buildReminder(pick.id);
+
+  // Show on whatever tab the user is currently looking at.
+  let tabs = [];
+  try { tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); } catch (_) {}
+  const tab = tabs && tabs[0];
+  if (!tab || tab.id == null || isIgnoredUrl(tab.url || '')) return;
+
+  try {
+    await chrome.tabs.sendMessage(tab.id, {
+      action: 'showReminder', kind: pick.id, title: content.title, body: content.body,
+    });
+  } catch (_) {
+    // No content script in this tab yet (or a page we don't run on) — skip silently.
+  }
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === REMINDER_ALARM) maybeShowReminder();
+});
+
+chrome.runtime.onInstalled.addListener(armReminderAlarm);
+chrome.runtime.onStartup.addListener(armReminderAlarm);
+armReminderAlarm();

@@ -125,11 +125,20 @@ elevated) and falls back to `HKCU`.
 ## 5. Backend command / event surface
 
 Tauri commands (`invoke`): `get_extension_stats`, `get_extension_blocklists`,
-`get_browsers_status`, `set_guard_enabled`, `enforce_extension`, `request_sync`,
+`get_browsers_status`, `set_guard_enabled`, `set_extension_theme`,
+`set_blocking_settings`, `set_app_streak`, `enforce_extension`, `request_sync`,
 `update_blocklist_domains`, `update_blocklist_keywords`.
 
 Events (`listen`): `browsers-status` (per-browser array, every 3s),
 `extension-stats`, `extension-blocklist`.
+
+Messages pushed app→extension over the bridge: `request_sync`, `set_theme`,
+`set_app_data` (streak + global blocks), `set_blocking` (the "Redirect link"
+target + focus-schedule reminder config — cached as `ext_blocking` and re-sent
+on each `host_hello`), `update_blocklist`. The extension acts on `set_blocking`
+by redirecting blocked navigations to the configured URL and firing in-page
+reminder pop-ups (a `chrome.alarms` loop, every 30 min, gated to the vulnerable-
+hours window) via the content script.
 
 ---
 

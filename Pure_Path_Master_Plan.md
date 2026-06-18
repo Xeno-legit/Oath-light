@@ -34,26 +34,26 @@ Until every stage is complete or before it by one stage.
    blocked site viewed through them is still caught. Private IP ranges exempt. DNS/DoH bypass
    deferred — not doing DNS yet.)
 
-## Phase 3: (In Progress)
+## Phase 3: (Almost Complete)
 
 ▶ Phase 3 should focus more on the vibe and establishing proper cross browser integration.
 
 * Theme unison (Done)
-* Desktop app UI, UX remake (Almost Done)
-* Fixing cross browser issues. (Almost Done)
-* Blocking speed optimization. (Almost Done)
+* Desktop app UI, UX remake (Done)
+* Fixing cross browser issues. (Done)
+* Blocking speed optimization. (Done)
 * Useful advices and protocols (Done)
-* Graylist V2 — API/network-layer interception (In Progress — `extension/graylist-inject.js`)
+* Graylist V2 — API/network-layer interception (Almost Done — `extension/graylist-inject.js`)
   (Instead of hiding each site's filter UI, intercept the JSON the site fetches and strip the items
    the SITE ITSELF already labelled NSFW — reddit over_18, X possibly_sensitive, pixiv xRestrict,
    mastodon sensitive, bluesky labels, booru rating, etc. Ground-truth, not a heuristic; survives UI
    redesigns because API fields stay stable. Needs a MAIN-world injected script to patch fetch/XHR.
    Sites with no per-item label — file hosts, chat, video-chat, shorteners — get whole-site block instead.)
 
-* Open Beta
+* Open Beta (6/21/2026)
 
 
-## Phase 4:
+## Phase 4: (In Progress)
 
 ▶ Phase 4 is undeniably the most important, Because it focuses more on The Friction systems and the watchdog system.
 
@@ -63,6 +63,7 @@ Until every stage is complete or before it by one stage.
 * extension monitoring
 * optional Ai monitoring
 * Pre-Alpha launch test. (Testing everything again at full scale, pushing the app to its absolute limits.)
+* Blocking certain desktop versions of apps (Discord, etc.)
 * Desktop Alpha launch.
 
 ## Phase 5:

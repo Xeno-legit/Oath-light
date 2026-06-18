@@ -48,8 +48,6 @@
   } catch (_) {}
 
   // ── Label vocabularies ────────────────────────────────────────────────────
-  // Bluesky self-labels / moderation labels that mark adult content.
-  const BSKY_NSFW = new Set(['porn', 'sexual', 'nudity', 'sexual-figurative', 'graphic-media']);
   // Booru `rating` values that are NSFW. danbooru: g/s/q/e · gelbooru: safe/questionable/explicit.
   const BOORU_NSFW = new Set(['q', 'e', 'questionable', 'explicit']);
 
@@ -67,19 +65,22 @@
                      : (typeof o.xRestrict === 'string' && o.xRestrict !== '' && o.xRestrict !== '0'),
     // Mastodon (every instance) + Tumblr neue post format both use `sensitive`.
     sensitive: o => o.sensitive === true,
-    // Tumblr post objects.
-    tumblr:   o => o.is_nsfw === true || o.is_adult === true,
+    // Tumblr post objects. Legacy flags + the CURRENT model: community labels
+    // (introduced 2022) — { hasCommunityLabel, categories:
+    // [mature|sexual_themes|drug_use|violence] }. Any community label = strip.
+    // NOTE casing: the www.tumblr.com web API returns camelCase
+    // (communityLabels/hasCommunityLabel/isNsfw); the public api.tumblr.com uses
+    // snake_case (community_labels/has_community_label/is_nsfw). Handle BOTH —
+    // checking only snake_case was a silent no-op on the web app (0/16 stripped).
+    tumblr:   o => o.is_nsfw === true || o.isNsfw === true || o.is_adult === true ||
+                   (o.community_labels && o.community_labels.has_community_label === true) ||
+                   (o.communityLabels && o.communityLabels.hasCommunityLabel === true),
     // Boorus.
     booru:    o => typeof o.rating === 'string' && BOORU_NSFW.has(o.rating.toLowerCase()),
-    // Bluesky: labels array of {val} (or bare strings) on the post / author.
-    bsky:     o => Array.isArray(o.labels) && o.labels.some(l =>
-                     BSKY_NSFW.has(typeof l === 'string' ? l : (l && l.val))),
     // Imgur: gallery/album/image `nsfw` boolean (may be null when unrated).
     imgur:    o => o.nsfw === true,
     // NexusMods: mod object `contains_adult_content` (REST) / `adultContent` (GraphQL v2).
     nexus:    o => o.contains_adult_content === true || o.containsAdultContent === true || o.adultContent === true,
-    // DeviantArt: deviation `is_mature` (API) / `isMature` (Eclipse).
-    deviant:  o => o.is_mature === true || o.isMature === true,
     // ── Best-effort (field names from public APIs — verify against live data) ──
     // Vimeo: video `content_rating` array (e.g. ["safe"] / ["nudity","drugs"]).
     vimeo:    o => Array.isArray(o.content_rating) && o.content_rating.some(r => /nudity|mature|explicit|unrated/i.test(r)),
@@ -105,7 +106,52 @@
     // ArtStation: project `adult_content` / `hide_as_adult`.
     artstation: o => o.adult_content === true || o.hide_as_adult === true,
     // Flickr: `safety_level` 1=safe, 2=moderate, 3=restricted.
-    flickr:   o => o.safety_level === 2 || o.safety_level === 3 || o.safety_level === '2' || o.safety_level === '3'
+    flickr:   o => o.safety_level === 2 || o.safety_level === 3 || o.safety_level === '2' || o.safety_level === '3',
+    // Sketchfab: model `isAgeRestricted` — staff-moderated bool present on EVERY
+    // model object (verified live on /v3/models + /v3/search). Ground-truth.
+    sketchfab: o => o.isAgeRestricted === true,
+    // 500px: photo `notSafeForWork` bool — present on every photo node (verified
+    // live off rendered card props). NOTE: target this, NOT the sibling `showNude`,
+    // which is the *viewer's* preference, not the photo's label.
+    px500:    o => o.notSafeForWork === true,
+    // GameBanana (apiv11 JSON, _aRecords[]). Its visibility enum reserves
+    // 'hide'/'warn' for SEXUAL/explicit content — gore & flashing-lights mods stay
+    // 'show' (verified live), so visibility is a clean anti-porn signal in LISTINGS
+    // (which omit the detailed ratings). Detail objects also carry _aContentRatings
+    // (code→label map); match the sexual codes there for precision. Non-sexual codes
+    // (bg=Blood/Gore, ps=Flashing Lights, etc.) are intentionally NOT matched.
+    gamebanana: o => {
+      const v = o._sInitialVisibility;
+      if (v === 'hide' || v === 'warn') return true;
+      const cr = o._aContentRatings;
+      if (cr && typeof cr === 'object') {
+        for (const k in cr) if (k==='nu'||k==='pn'||k==='sa'||k==='sc'||k==='st'||k==='su') return true;
+      }
+      return false;
+    },
+    // Wattpad: story `mature` boolean — the platform's official adult rating,
+    // present on story objects in both /v4/ and /api/v3/ JSON (verified live:
+    // mature=1 search returns mature:true). Strips mature stories from
+    // search/browse/tag/home story arrays.
+    wattpad:  o => o.mature === true,
+    // Fanbox (Pixiv's creator platform, api.fanbox.cc). `hasAdultContent` is the
+    // R-18 flag on BOTH creator objects (creator.listRecommended → body.creators[])
+    // and post objects (post.list*/getOfficial → body.items[]). Verified live.
+    // TAG FALLBACK: hasAdultContent is set at the CREATOR level, so R-18 posts by
+    // creators who didn't flag their whole Fanbox as adult leak through tag-search
+    // with hasAdultContent:false (verified: post.listTagged?tag=R-18 → 38/38 false,
+    // titles blatantly adult). Catch those via their own adult `tags`.
+    fanbox:   o => {
+      if (o.hasAdultContent === true) return true;
+      if (Array.isArray(o.tags)) {
+        for (let i = 0; i < o.tags.length; i++) {
+          const t = o.tags[i];
+          const s = typeof t === 'string' ? t : (t && (t.name || t.tag));
+          if (s && /r-?18|18禁|成人向|nsfw|エロ/i.test(s)) return true;
+        }
+      }
+      return false;
+    }
   };
 
   // ── Per-host rules ────────────────────────────────────────────────────────
@@ -140,10 +186,6 @@
       test: (h, p) => (h === 'tumblr.com' || h.endsWith('.tumblr.com')) && p.indexOf('/api/') !== -1,
       signals: [S.tumblr, S.sensitive] },
 
-    { id: 'bluesky',
-      test: (h, p) => p.indexOf('/xrpc/') !== -1 && h.indexOf('bsky.') !== -1,
-      signals: [S.bsky] },
-
     { id: 'booru',
       test: (h) => BOORU_HOSTS.has(h),
       signals: [S.booru] },
@@ -155,10 +197,6 @@
     { id: 'nexusmods',
       test: (h) => h === 'nexusmods.com' || h.endsWith('.nexusmods.com'),
       signals: [S.nexus] },
-
-    { id: 'deviantart',
-      test: (h) => h === 'deviantart.com' || h.endsWith('.deviantart.com'),
-      signals: [S.deviant] },
 
     // ── Best-effort hosts (verify fields on live responses) ──────────────────
     { id: 'vimeo',
@@ -214,6 +252,39 @@
       test: (h) => h.indexOf('flickr') !== -1,
       signals: [S.flickr] },
 
+    // Sketchfab — model JSON from api.sketchfab.com (also covers any sketchfab.com
+    // host that fetches model lists). Strips age-restricted models from results[].
+    { id: 'sketchfab',
+      test: (h) => h.indexOf('sketchfab.com') !== -1,
+      signals: [S.sketchfab] },
+
+    // 500px — GraphQL at api.500px.com (relay edges[].node). Strips notSafeForWork
+    // photos. (Image CDNs live on 500px.ORG, so .com matching won't touch them.)
+    { id: '500px',
+      test: (h) => h.indexOf('500px.com') !== -1,
+      signals: [S.px500] },
+
+    // GameBanana — apiv11 JSON feeds (browse / search / subfeeds). Strips mods
+    // GameBanana itself gates as sexual/explicit (visibility hide|warn) + any
+    // detail object carrying a sexual content-rating code.
+    { id: 'gamebanana',
+      test: (h) => h === 'gamebanana.com' || h.endsWith('.gamebanana.com'),
+      signals: [S.gamebanana] },
+
+    // Wattpad — story-list JSON (search / browse / tags / home). Excludes the
+    // reader's part/text endpoints (single nested objects a blind scrub could
+    // corrupt); listing feeds return story arrays and drop cleanly.
+    { id: 'wattpad',
+      test: (h, p) => (h === 'wattpad.com' || h.endsWith('.wattpad.com')) &&
+                      p.indexOf('/parts') === -1 && p.indexOf('storytext') === -1,
+      signals: [S.wattpad] },
+
+    // Fanbox — api.fanbox.cc JSON (creator & post feeds). Strips R-18 creators
+    // and posts (hasAdultContent) from body.creators[] / body.items[].
+    { id: 'fanbox',
+      test: (h) => h === 'fanbox.cc' || h.endsWith('.fanbox.cc'),
+      signals: [S.fanbox] },
+
     // Mastodon — any instance, matched purely by its stable REST paths.
     // (Also carries S.nsfwBool so PeerTube videos sharing /api/v1/accounts/ are caught.)
     { id: 'mastodon',
@@ -224,15 +295,16 @@
   // Cheap pre-filter: avoid constructing a URL object for the ~99.9% of requests
   // that can't possibly match. One substring scan over the raw URL string.
   const QUICK = [
-    'reddit.com', 'x.com', 'twitter.com', 'pixiv.net', 'tumblr.com', 'bsky.',
-    '/xrpc/', '/api/v1/timelines', '/api/v1/notifications', '/api/v1/favourites',
+    'reddit.com', 'x.com', 'twitter.com', 'pixiv.net', 'tumblr.com',
+    '/api/v1/timelines', '/api/v1/notifications', '/api/v1/favourites',
     '/api/v1/bookmarks', '/api/v1/trends', '/api/v2/search', '/api/v1/accounts/',
     'donmai.us', 'gelbooru.com', 'konachan.', 'yande.re', 'tbib.org',
-    'imgur.com', 'nexusmods.com', 'deviantart.com',
+    'imgur.com', 'nexusmods.com',
     'vimeo.com', 'dailymotion', 'odysee', 'lbry', 'patreon.com', 'gumroad.com',
     'minds.com', 'itaku.ee',
     '/api/v1/videos', '/api/v1/video-channels', '/api/v3/post', '/api/v3/comment',
-    '/api/v3/community', '/api/v3/search', 'mangadex', 'artstation.com', 'flickr'
+    '/api/v3/community', '/api/v3/search', 'mangadex', 'artstation.com', 'flickr',
+    'sketchfab.com', '500px.com', 'gamebanana.com', 'wattpad.com', 'fanbox.cc'
   ];
   function quickMatch(s) {
     for (let i = 0; i < QUICK.length; i++) if (s.indexOf(QUICK[i]) !== -1) return true;
@@ -291,16 +363,34 @@
   //               instructions[] → entries[] → … ; a shallow check would nuke the
   //               whole instructions batch (and the safe tweets in it), whereas
   //               cleaning entries[] first lets the batch survive.
-  //   • Objects → drop any child value that is itself directly flagged (catches
-  //               id→item maps, e.g. pixiv), then recurse into the rest.
+  //   • Objects → drop any child value that is itself directly flagged. This is
+  //               for id→item MAPS (e.g. pixiv `{ "123": {xRestrict} }`) where the
+  //               item is an object VALUE, not an array element.
+  //
+  //   CRUCIAL: that object-map deletion is SUPPRESSED everywhere inside an array
+  //   element's subtree (`insideArrayItem`). Otherwise a flag living on a named
+  //   child object — reddit `child.data.over_18`, mangadex/patreon `attributes.*`,
+  //   bluesky `feed[].post.labels`, X `…result.legacy.possibly_sensitive` — would
+  //   delete only that child and ORPHAN the row, leaving the item in the list
+  //   (broken, and on mangadex the cover art still renders). By suppressing it we
+  //   let the enclosing array drop the WHOLE element via subtreeFlagged.
+  //
+  //   The flag is PROPAGATED down through the element's nested objects (so X's
+  //   3-levels-deep `legacy` is protected too) and is RE-SET only when we descend
+  //   into a nested ARRAY — that inner array gets its own removal scope, which is
+  //   how the deepest array still wins: X's entries[] drops its flagged entries,
+  //   and the now-clean instructions batch survives. Map deletion therefore fires
+  //   only for genuine id→item maps that sit OUTSIDE any array (e.g. pixiv).
+  //
   // ctx.n accumulates how many items were stripped (per-call, no global races).
-  function scrub(node, signals, depth, ctx) {
+  function scrub(node, signals, depth, ctx, insideArrayItem) {
     if (node == null || typeof node !== 'object' || depth > 12) return node;
 
     if (Array.isArray(node)) {
       const kept = [];
       for (let i = 0; i < node.length; i++) {
-        const scrubbed = scrub(node[i], signals, depth + 1, ctx);
+        // Each element opens a fresh array-item scope (suppress map-delete within it).
+        const scrubbed = scrub(node[i], signals, depth + 1, ctx, true);
         if (scrubbed && typeof scrubbed === 'object' && subtreeFlagged(scrubbed, signals, 0)) {
           ctx.n++;
           continue;
@@ -312,12 +402,13 @@
 
     for (const k in node) {
       const v = node[k];
-      if (v && typeof v === 'object' && !Array.isArray(v) && signalsDirect(v, signals)) {
+      if (!insideArrayItem && v && typeof v === 'object' && !Array.isArray(v) && signalsDirect(v, signals)) {
         delete node[k];
         ctx.n++;
         continue;
       }
-      node[k] = scrub(v, signals, depth + 1, ctx);
+      // Propagate the array-item scope into nested objects; a nested array resets it.
+      node[k] = scrub(v, signals, depth + 1, ctx, insideArrayItem);
     }
     return node;
   }
@@ -373,5 +464,79 @@
     };
     // Keep the patched fetch looking native to feature-detectors.
     try { window.fetch.toString = () => 'function fetch() { [native code] }'; } catch (_) {}
+  }
+
+  // ── XMLHttpRequest patch ────────────────────────────────────────────────────
+  // Many SPAs load their feeds with XHR, not fetch (DeviantArt, Tumblr, NexusMods…).
+  // The fetch patch alone leaves those completely unfiltered. We can't replace the
+  // native responseText/response (read-only prototype getters), so on a matching
+  // request we shadow them with per-INSTANCE getters that lazily scrub the body the
+  // first time the page reads it at readyState 4 — order-independent of the page's
+  // own load handler, since it's the GETTER that returns cleaned data.
+  const RealXHR = window.XMLHttpRequest;
+  if (RealXHR && RealXHR.prototype) {
+    const rtDesc = Object.getOwnPropertyDescriptor(RealXHR.prototype, 'responseText');
+    const rDesc  = Object.getOwnPropertyDescriptor(RealXHR.prototype, 'response');
+    const realOpen = RealXHR.prototype.open;
+    const realSend = RealXHR.prototype.send;
+    if (rtDesc && rtDesc.get && rDesc && rDesc.get && typeof realOpen === 'function' && typeof realSend === 'function') {
+
+      RealXHR.prototype.open = function (method, url) {
+        try { this.__ppRule = url ? ruleFor(String(url)) : null; } catch (_) { this.__ppRule = null; }
+        return realOpen.apply(this, arguments);
+      };
+
+      RealXHR.prototype.send = function () {
+        const rule = this.__ppRule;
+        if (rule) {
+          const self = this;
+          let done = false, cachedText;
+          function isJson() { try { return (self.getResponseHeader('content-type') || '').indexOf('json') !== -1; } catch (_) { return false; } }
+          // Text path (responseType '' | 'text'): scrub the raw text once at rs=4.
+          function getText() {
+            const raw = rtDesc.get.call(self);
+            if (self.readyState !== 4) return raw;          // never cache a partial body
+            if (done) return cachedText;
+            done = true; cachedText = raw;
+            try {
+              if (self.status >= 200 && self.status < 300 && isJson() && typeof raw === 'string') {
+                const c = { n: 0 };
+                const cleaned = scrub(JSON.parse(raw), rule.signals, 0, c);
+                if (c.n > 0) { report(rule.id, c.n); cachedText = JSON.stringify(cleaned); }
+              }
+            } catch (_) {}
+            return cachedText;
+          }
+          try {
+            Object.defineProperty(this, 'responseText', { configurable: true, get: function () { try { return getText(); } catch (_) { return rtDesc.get.call(this); } } });
+          } catch (_) {}
+          try {
+            Object.defineProperty(this, 'response', {
+              configurable: true,
+              get: function () {
+                const rt = this.responseType;
+                if (rt === '' || rt === 'text') { try { return getText(); } catch (_) { return rDesc.get.call(this); } }
+                if (rt === 'json' && this.readyState === 4) {
+                  // `response` is already a parsed object; scrub a clone.
+                  try {
+                    const obj = rDesc.get.call(this);
+                    if (obj && typeof obj === 'object') {
+                      const c = { n: 0 };
+                      const cleaned = scrub(JSON.parse(JSON.stringify(obj)), rule.signals, 0, c);
+                      if (c.n > 0) report(rule.id, c.n);
+                      return cleaned;
+                    }
+                  } catch (_) {}
+                }
+                return rDesc.get.call(this);
+              }
+            });
+          } catch (_) {}
+        }
+        return realSend.apply(this, arguments);
+      };
+      try { RealXHR.prototype.open.toString = () => 'function open() { [native code] }'; } catch (_) {}
+      try { RealXHR.prototype.send.toString = () => 'function send() { [native code] }'; } catch (_) {}
+    }
   }
 })();

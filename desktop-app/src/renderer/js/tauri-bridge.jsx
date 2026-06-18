@@ -29,6 +29,16 @@
     getBrowsersStatus() { return invoke('get_browsers_status'); },
     // Push the selected theme/palette to every connected extension.
     setTheme(display) { return invoke('set_extension_theme', { display }).catch(() => {}); },
+    // Push blocking settings (redirect target + reminder schedule) to the extensions.
+    setBlocking(settings) {
+      return invoke('set_blocking_settings', { settings })
+        .catch((e) => console.warn('[PurePath] setBlocking failed (rebuild the app?):', e));
+    },
+    // Open a URL in the default browser (the "Test" button on the blocking page).
+    openExternal(url) {
+      return invoke('open_external', { url })
+        .catch((e) => console.warn('[PurePath] openExternal failed:', e));
+    },
     // Push the app's clean-streak day count to the extensions.
     setStreak(streak) { return invoke('set_app_streak', { streak: streak | 0 }).catch(() => {}); },
   };

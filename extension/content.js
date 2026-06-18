@@ -148,7 +148,9 @@
       // Hide everything immediately
       document.documentElement.style.display = 'none';
       try {
-        window.location.replace(chrome.runtime.getURL('blocked.html'));
+        // TEMP (testing): blocked.html hangs Playwright; route to a light page.
+        console.log('[PurePath][TEST] BLOCK newgrounds bypass page', window.location.href);
+        window.location.replace('about:blank');
       } catch (e) {
         // Fallback: nuke the page entirely
         document.documentElement.innerHTML = '<html><body style="background:#0f172a;"></body></html>';
@@ -231,11 +233,30 @@
   //                     adult, hard-blocks the whole tab via blocked.html. This
   //                     is the ground-truth fix for the "preference already on"
   //                     leak — we don't touch their toggle, we kill the page.
+  // Patreon helpers (used by the 'patreon.com' rule's pageLabel). Reserved
+  // top-level routes that must never be treated as a creator vanity slug.
+  const PATREON_NON_CREATOR = new Set([
+    'home', 'explore', 'search', 'messages', 'settings', 'notifications',
+    'login', 'signup', 'logout', 'posts', 'post', 'dashboard', 'c', 'cw',
+    'checkout', 'create', 'about', 'careers', 'press', 'apps', 'app', 'api',
+    'sitemap', 'collection', 'collections', 'feature', 'privacy', 'policy',
+    'terms', 'support', 'help', 'pricing', 'product', 'creators', 'media'
+  ]);
+  // Memoise the (potentially large) SSR scan per-URL so the MutationObserver's
+  // re-scans during scroll don't re-parse the payload every burst.
+  let _ppPatreonMemo = { url: '', val: false };
+
   const DOM_LABEL_RULES = {
     'newgrounds.com': {
-      // Newgrounds rates adult work "A". Cards carry .rating-a / data-rating="a".
-      markers: '.rating-a, [data-rating="a"], [data-rating="A"]',
-      item: '.item-portalsubmission, .portalsubmission-cell, .item-audiosubmission, [class*="submission"], li',
+      // Newgrounds rates work E/T/M/A. Adult ("a") and Mature ("m") cards carry a
+      // rating marker whose class TOKEN ends in `rated-a` / `rated-m`, but the
+      // prefix differs by page type — front page uses `background-color-rated-a`
+      // + `<span class="rated-a">`; the browse grid uses an icon
+      // `nohue-ngicon-small-rated-a`. A substring match on `rated-a`/`rated-m`
+      // covers every variant (rated-t / rated-e stay untouched). Hiding a+m
+      // matches the page-block, which blocks both.
+      markers: '[class*="rated-a"], [class*="rated-m"], [data-rating="a"], [data-rating="A"], [data-rating="m"], [data-rating="M"]',
+      item: 'a[href*="/view/"], .item-portalsubmission, .portalsubmission-cell, .item-audiosubmission, [class*="submission"], li',
       // Submission pages stamp the content's own rating in <meta name="rating">.
       pagePath: /^\/(portal\/view|art\/view|audio\/listen)\//i,
       pageLabel: () => {
@@ -256,18 +277,8 @@
         return false;
       }
     },
-    'furaffinity.net': {
-      // FA gallery figures carry r-general / r-mature / r-adult.
-      markers: 'figure.r-adult, figure.r-mature, .r-adult, .r-mature',
-      item: 'figure, .gallery-item, li',
-      // Submission pages show a rating box (Adult / Mature).
-      pagePath: /^\/view\/\d+/i,
-      pageLabel: () => {
-        if (document.querySelector('.rating-box.adult, .rating-box.mature')) return true;
-        const box = document.querySelector('.rating-box, .rating');
-        return box ? /\b(adult|mature)\b/i.test(box.textContent || '') : false;
-      }
-    },
+    // NOTE: furaffinity.net / inkbunny.net / sofurry.com / weasyl.com were moved to
+    // the curated BLACKLIST (blocked outright) — too unreliable to DOM-filter.
     'fanfiction.net': {
       // FF.net prints "Rated: Fiction M" as text in the gray meta bar — no class.
       textScan: { item: '.z-list, .z-list.zhover', re: /Rated:\s*(?:Fiction\s*)?(?:M|MA)\b/i },
@@ -278,23 +289,28 @@
         return top ? /Rated:\s*(?:Fiction\s*)?(?:M|MA)\b/i.test(top.textContent || '') : false;
       }
     },
-    // ── Best-effort selectors — verify against live DOM before trusting ──────
-    'inkbunny.net': {
-      markers: '[class*="rating_e"], [class*="rating_m"], .rating-explicit, .rating-mature',
-      item: '.widget_imageFromSubmission, .submissionthumb, .thumbnail_container, li, td'
-    },
-    'sofurry.com': {
-      markers: '[class*="rating-adult"], [class*="rating-mature"], [data-rating="adult"], [data-rating="mature"]',
-      item: '.items_list .item, .sf-item, .watch-item, li'
-    },
-    'weasyl.com': {
-      // Furry art ratings (general/mature/explicit) — DOM-label like FurAffinity.
-      markers: '[class*="rating-explicit"], [class*="rating-mature"], .r-explicit, .r-mature',
-      item: '.thumb-bounds, .item, figure, li',
-      pagePath: /^\/(submission|character|journal)\//i,
+    'scribblehub.com': {
+      // ScribbleHub openly hosts explicit web-fiction. Its OWN genre tags are the
+      // ground truth: every series/card links its genres to /genre/<slug>/. We key
+      // on the unambiguously-adult genre anchors (smut/adult/ecchi/mature/hentai/
+      // lolicon/shotacon) — present identically on listing cards AND series pages —
+      // so one selector drives both layers. Matching the href (not free text)
+      // avoids false-hiding a card whose description merely says "mature".
+      markers: 'a.fic_genre[href*="/genre/smut/"], a.fic_genre[href*="/genre/adult/"], a.fic_genre[href*="/genre/ecchi/"], a.fic_genre[href*="/genre/mature/"], a.fic_genre[href*="/genre/hentai/"], a.fic_genre[href*="/genre/lolicon/"], a.fic_genre[href*="/genre/shotacon/"]',
+      item: '.search_main_box',
       pageLabel: () => {
-        const r = document.querySelector('.rating, [class*="rating"]');
-        return r ? /\b(mature|explicit|adult)\b/i.test(r.textContent || '') : false;
+        const p = (window.location.pathname || '').toLowerCase();
+        // (a) Whole adult-genre browse pages (the entire grid is explicit) —
+        //     hard-block like itch.io /games/nsfw. ('mature' is intentionally
+        //     excluded here: it's broad enough to include non-sexual dark themes;
+        //     its explicit cards are still removed by item-hiding above.)
+        if (/^\/genre\/(smut|adult|ecchi|hentai|lolicon|shotacon)\//.test(p)) return true;
+        // (b) A series page tagged with an explicit genre → block the whole tab
+        //     (covers users who opened an adult series directly / have mature on).
+        if (/^\/series\/\d+/.test(p)) {
+          return !!document.querySelector('a.fic_genre[href*="/genre/smut/"], a.fic_genre[href*="/genre/adult/"], a.fic_genre[href*="/genre/ecchi/"], a.fic_genre[href*="/genre/hentai/"], a.fic_genre[href*="/genre/lolicon/"], a.fic_genre[href*="/genre/shotacon/"]');
+        }
+        return false;
       }
     },
     'itch.io': {
@@ -303,8 +319,70 @@
       markers: '.game_cell.nsfw, [data-nsfw="true"]',
       item: '.game_cell',
       pageLabel: () => {
+        // (a) Adult BROWSE listings have NO per-cell DOM marker (the whole grid is
+        //     adult), so item-hiding can't touch them — hard-block the page by path.
+        //     Covers /games/nsfw and adult tag/genre browse (tag-nsfw, tag-adult,
+        //     tag-hentai, tag-eroge, tag-porn, tag-erotic, tag-lewd, tag-sex, r18…).
+        const p = (window.location.pathname || '').toLowerCase();
+        if (/^\/games\/nsfw(?:\/|$)/.test(p)) return true;
+        const m = p.match(/^\/games\/(?:tag|genre)-([a-z0-9-]+)/);
+        if (m && /(?:^|-)(?:nsfw|adult|adults?-only|hentai|eroge|porn|porno|erotic|erotica|lewd|sex|sexual|r18|18-?plus|futanari)(?:$|-)/.test(m[1])) return true;
+        // (b) Individual adult game page: itch's own content-warning gate.
         const w = document.querySelector('.content_warning, .content_warning_inner, .game_warning');
         return w ? /adult|nsfw|explicit|sexual|mature/i.test(w.textContent || '') : false;
+      }
+    },
+    'patreon.com': {
+      // Patreon labels adult content cleanly (the OPPOSITE of the under-tagged
+      // blacklist sites) — but it's a Next.js app that SERVER-RENDERS the first
+      // paint, so the MAIN-world JSON interceptor (graylist-inject.js) only ever
+      // sees subsequent client fetches; the initial explore/feed/creator HTML
+      // slips past it. We close that transport gap here at the DOM, keyed on
+      // Patreon's OWN ground-truth markers:
+      //   LISTINGS — every adult creator/post card carries data-tag="nsfw-chip"
+      //     (verified 1:1 with cards on /explore and /home). Hide the card.
+      //   CREATOR PAGE — a direct visit to an adult creator (/<vanity> →
+      //     redirects to /cw/<vanity>) renders NO chip; the campaign's is_nsfw
+      //     flag lives only in the SSR payload. We scope it to THIS creator —
+      //     recommended adult creators ALSO embed is_nsfw:true on a SFW page —
+      //     by tying the flag to the campaign whose checkout/vanity URL is the
+      //     current slug, then hard-block the tab (pageLabel below).
+      // Class names are CSS-Modules (`Component-module__hash__local`): the
+      // component PREFIX is stable across builds, the hash is not — so we
+      // substring-match the prefix, never the hash, never the `sc-*` styled
+      // component names.
+      markers: '[data-tag="nsfw-chip"]',
+      item: '[class*="CreatorTile-module__"], [class*="ClickArea-module__"], [class*="PostCard"], [class*="-module__card"], li, [role="listitem"]',
+      pageLabel: () => {
+        const path = window.location.pathname || '';
+        const m = path.match(/^\/(?:cw\/)?([^\/?#]+)/);
+        if (!m) return false;
+        const slug = m[1].toLowerCase();
+        if (PATREON_NON_CREATOR.has(slug)) return false;
+        const href = window.location.href;
+        if (_ppPatreonMemo.url === href) return _ppPatreonMemo.val;
+        let blob = '';
+        const sc = document.querySelectorAll('script');
+        for (const s of sc) { const t = s.textContent; if (t && t.indexOf('is_nsfw') !== -1) blob += t + '\n'; }
+        let val = false;
+        if (blob) {
+          const low = blob.toLowerCase();
+          // The current creator's campaign object pairs is_nsfw with its
+          // checkout/vanity URL; look back a short window from that URL for an
+          // is_nsfw:true (escaped JSON: is_nsfw\":true). Scoping to the slug
+          // excludes recommended adult creators elsewhere on the page.
+          const needles = ['checkout/' + slug + '\\"', 'checkout/' + slug + '"', 'patreon.com/' + slug + '\\"'];
+          for (const n of needles) {
+            let i = low.indexOf(n.toLowerCase());
+            while (i !== -1 && !val) {
+              if (/is_nsfw\\?"\s*:\s*true/.test(blob.slice(Math.max(0, i - 700), i))) val = true;
+              i = low.indexOf(n.toLowerCase(), i + 1);
+            }
+            if (val) break;
+          }
+        }
+        _ppPatreonMemo = { url: href, val: val };
+        return val;
       }
     },
     // Steam — page-level block only (no JSON feed; mostly age-gated SSR pages).
@@ -443,27 +521,67 @@
 
     function scan() {
       if (blocked) return;
-      // 1) Age-gate → block the whole tab.
-      const nodes = document.querySelectorAll('[class*="nsfw" i], [class*="gate" i], [class*="ageGate" i], section, main');
-      for (const el of nodes) {
-        if (GATE_RE.test(el.textContent || '')) {
-          blocked = true;
-          try { document.documentElement.style.display = 'none'; } catch (_) {}
-          try {
-            chrome.runtime.sendMessage({
-              action: 'notifyBlock', url: window.location.href,
-              reason: 'discord_nsfw', match: 'Discord age-restricted channel/server'
-            });
-          } catch (_) {}
+
+      function hardBlock(match) {
+        blocked = true;
+        try { document.documentElement.style.display = 'none'; } catch (_) {}
+        try {
+          chrome.runtime.sendMessage({
+            action: 'notifyBlock', url: window.location.href,
+            reason: 'discord_nsfw', match: match
+          });
+        } catch (_) {}
+      }
+
+      // 0) WHOLE-SERVER block. A server with several age-restricted channels is an
+      //    NSFW server — block every page in it. This is the only thing that also
+      //    neutralises channels the server left UNFLAGGED (non-compliant with
+      //    Discord policy): once the server is known-NSFW we don't rely on per-
+      //    channel signals at all. Threshold is intentionally low (anti-addiction
+      //    bias); a normal server with one 18+ corner stays channel-filtered.
+      const NSFW_SERVER_THRESHOLD = 2; // block the server at 2+ age-restricted channels (more than one)
+      const guild = window.location.pathname.match(/^\/channels\/(\d+)\b/);
+      if (guild) {
+        const rows = new Set();
+        document.querySelectorAll('[aria-label*="age-restricted" i]').forEach(ic => {
+          rows.add(ic.closest('li, [class*="containerDefault"]') || ic);
+        });
+        if (rows.size >= NSFW_SERVER_THRESHOLD) {
+          hardBlock('NSFW Discord server (' + rows.size + ' age-restricted channels)');
           return;
         }
       }
-      // 2) Hide NSFW channels in the sidebar (best-effort).
-      let chans;
-      try { chans = document.querySelectorAll('a[aria-label*="age-restricted" i], a[aria-label*="nsfw" i], [class*="nsfw" i] a'); }
-      catch (_) { chans = []; }
-      for (const c of chans) {
-        const item = c.closest('li, [class*="containerDefault"], [class*="wrapper"]') || c;
+
+      // 1a) Age-gate TEXT → block. Covers users who have NOT enabled "Display
+      //     age-restricted content" (Discord renders its own gate then).
+      const nodes = document.querySelectorAll('[class*="nsfw" i], [class*="gate" i], [class*="ageGate" i], section, main');
+      for (const el of nodes) {
+        if (GATE_RE.test(el.textContent || '')) { hardBlock('Discord age-restricted channel/server'); return; }
+      }
+
+      // 1b) OPEN channel is age-restricted → block even when the user HAS opted in
+      //     and Discord shows no gate (the documented opt-in leak). Discord tags
+      //     every age-restricted channel row with an icon whose aria-label is
+      //     "Text (Age-Restricted) icon" — a <div>, not an <a>. Map the open
+      //     channel id (URL) to its sidebar row and check for that icon.
+      const open = window.location.pathname.match(/\/channels\/\d+\/(\d+)/);
+      if (open) {
+        const a = document.querySelector('a[href$="/' + open[1] + '"]');
+        const row = a && a.closest('li, [class*="containerDefault"]');
+        if (row && row.querySelector('[aria-label*="age-restricted" i]')) {
+          hardBlock('Discord age-restricted channel (opted-in)');
+          return;
+        }
+      }
+
+      // 2) Hide age-restricted channels in the sidebar. The marker is the icon
+      //    <div aria-label="… (Age-Restricted) …"> (NOT an <a>), so match ANY
+      //    element carrying it; keep the literal-"nsfw" name as a fallback.
+      let marks;
+      try { marks = document.querySelectorAll('[aria-label*="age-restricted" i], a[aria-label*="nsfw" i], [class*="nsfw" i] a'); }
+      catch (_) { marks = []; }
+      for (const mk of marks) {
+        const item = mk.closest('li, [class*="containerDefault"], [class*="wrapper"]') || mk;
         hideItem(item);
       }
     }
@@ -482,6 +600,109 @@
     else document.addEventListener('DOMContentLoaded', start);
   }
 
+  // FOCUS-SCHEDULE REMINDER POP-UPS
+  // The background worker fires these during the user's "vulnerable hours". We
+  // render a small, self-contained card inside a shadow root (so page CSS can't
+  // touch it) anchored bottom-right of the TOP frame only.
+  const PP_REMINDER_HOST_ID = 'pure-path-reminder';
+
+  function setupReminderListener() {
+    if (window.top !== window) return; // top frame only — avoid one card per iframe
+    if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.onMessage) return;
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (msg && msg.action === 'showReminder') {
+        try { showReminderOverlay(msg); } catch (_) {}
+        if (sendResponse) sendResponse({ ok: true });
+      }
+      return false;
+    });
+  }
+
+  function showReminderOverlay(msg) {
+    const render = (dark) => renderReminderCard(msg, dark);
+    try {
+      chrome.storage.local.get(['display', 'theme'], (r) => {
+        const d = (r && r.display && typeof r.display === 'object') ? r.display : (r || {});
+        render((d.theme || 'dark') !== 'light');
+      });
+    } catch (_) {
+      render(true);
+    }
+  }
+
+  function renderReminderCard({ title, body, kind }, dark) {
+    if (!document.body && !document.documentElement) return;
+    // Replace any existing card so reminders never stack.
+    const prev = document.getElementById(PP_REMINDER_HOST_ID);
+    if (prev) prev.remove();
+
+    const host = document.createElement('div');
+    host.id = PP_REMINDER_HOST_ID;
+    host.style.cssText = 'all: initial; position: fixed; z-index: 2147483647; right: 20px; bottom: 20px;';
+    const root = host.attachShadow({ mode: 'open' });
+
+    const bg = dark ? 'rgba(17,24,39,0.92)' : 'rgba(255,255,255,0.94)';
+    const fg = dark ? '#f3f4f6' : '#111827';
+    const sub = dark ? '#9ca3af' : '#4b5563';
+    const border = dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
+    const accent = kind === 'checkin' ? '#34d399' : '#818cf8';
+
+    root.innerHTML = `
+      <style>
+        :host { all: initial; }
+        .card {
+          position: relative;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+          width: 320px; max-width: calc(100vw - 40px);
+          background: ${bg}; color: ${fg};
+          border: 1px solid ${border}; border-radius: 16px;
+          box-shadow: 0 18px 50px rgba(0,0,0,0.35);
+          backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+          overflow: hidden; transform: translateY(16px); opacity: 0;
+          transition: transform .42s cubic-bezier(.16,1,.3,1), opacity .42s ease;
+        }
+        .card.in { transform: translateY(0); opacity: 1; }
+        .accent { height: 4px; background: linear-gradient(90deg, ${accent}, transparent); }
+        .body { padding: 16px 18px; display: flex; gap: 12px; }
+        .dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; background: ${accent}; box-shadow: 0 0 0 4px ${accent}22; }
+        .txt { flex: 1; min-width: 0; }
+        .brand { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: ${accent}; font-weight: 700; }
+        .title { font-size: 15px; font-weight: 700; margin: 3px 0 4px; }
+        .msg { font-size: 13.5px; line-height: 1.5; color: ${sub}; }
+        .close { position: absolute; top: 10px; right: 10px; width: 24px; height: 24px; border: 0; background: transparent; color: ${sub}; font-size: 18px; line-height: 1; cursor: pointer; border-radius: 8px; }
+        .close:hover { background: ${border}; color: ${fg}; }
+      </style>
+      <div class="card">
+        <div class="accent"></div>
+        <button class="close" aria-label="Dismiss">&times;</button>
+        <div class="body">
+          <div class="dot"></div>
+          <div class="txt">
+            <div class="brand">Pure Path</div>
+            <div class="title"></div>
+            <div class="msg"></div>
+          </div>
+        </div>
+      </div>`;
+    // Inject text via textContent — never interpolate the message into HTML.
+    root.querySelector('.title').textContent = title || 'Pure Path';
+    root.querySelector('.msg').textContent = body || '';
+
+    (document.body || document.documentElement).appendChild(host);
+    const card = root.querySelector('.card');
+    requestAnimationFrame(() => card.classList.add('in'));
+
+    let removed = false;
+    const dismiss = () => {
+      if (removed) return;
+      removed = true;
+      card.classList.remove('in');
+      setTimeout(() => host.remove(), 450);
+    };
+    root.querySelector('.close').addEventListener('click', dismiss);
+    setTimeout(dismiss, 12000);
+  }
+
   function initContentScript() {
     // Inject the MAIN-world interceptor as early as possible — before page scripts
     // boot their data fetches.
@@ -489,6 +710,7 @@
     setupGraylistStatsRelay();
     setupDomLabelFiltering();
     setupDiscordFiltering();
+    setupReminderListener();
 
     // FIRST: check for Newgrounds bypass page before doing anything else
     blockNewgroundsBypassPage();

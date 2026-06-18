@@ -1,4 +1,15 @@
 /* pages-blocking.jsx */
+// Open the redirect URL for the "Test" button. Normalizes a scheme-less entry
+// to https (same rule the extension uses), then opens it in the default browser
+// via the native command, falling back to window.open outside Tauri.
+function openRedirect(raw) {
+  let u = (raw || '').trim();
+  if (!u) return;
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  if (window.PPNative && window.PPNative.available) window.PPNative.openExternal(u);
+  else window.open(u, '_blank', 'noopener');
+}
+
 function SettingRow({ icon: I, title, desc, on, onToggle, accent }) {
   return (
     <div className="setting">
@@ -61,9 +72,9 @@ function BlockingPage({ s, PP }) {
                 onChange={(e) => set({ redirectUrl: e.target.value })}
                 style={{ flex: 1 }} />
               {b.redirectUrl &&
-              <a href={b.redirectUrl} target="_blank" rel="noopener noreferrer" className="redirect-test">
+              <button type="button" className="redirect-test" onClick={() => openRedirect(b.redirectUrl)}>
                   Test ↗
-                </a>
+                </button>
               }
             </div>
             }

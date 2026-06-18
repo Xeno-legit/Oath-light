@@ -43,6 +43,19 @@ function App() {
     if (window.PPNative && PPNative.available) PPNative.setStreak(s.streak || 0);
   }, [s.streak]);
 
+  // push blocking settings (the "Redirect link" target + the focus-schedule
+  // reminders) down to the extensions so they actually take effect in-browser.
+  const b = s.blocking || {};
+  const blockingPayload = {
+    redirectLinkOn: !!b.redirectLinkOn,
+    redirectUrl: b.redirectUrl || '',
+    vulnerable: b.vulnerable || { on: false },
+    alerts: b.alerts || [],
+  };
+  useEffect(() => {
+    if (window.PPNative && PPNative.available) PPNative.setBlocking(blockingPayload);
+  }, [JSON.stringify(blockingPayload)]);
+
   // apply theme/style/intensity to the document
   useEffect(() => {
     const el = document.documentElement;
