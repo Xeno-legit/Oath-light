@@ -44,6 +44,10 @@ const GRAYLIST_SITES = [
   { url: 'scribblehub.com',     kind: 'dom', desc: 'Adult/smut web-fiction removed; adult series & genre pages blocked' },
   { url: 'itch.io',             kind: 'dom', desc: 'Adult games blocked at the content-warning gate' },
   { url: 'steampowered.com',    kind: 'dom', desc: 'Adult games age-gated → blocked; mature community content blocked' },
+  { url: 'webtoons.com',        kind: 'dom', desc: 'Mature (15+/18+) series & episodes blocked' },
+  { url: 'tapas.io',            kind: 'dom', desc: 'Mature series & episodes removed/blocked at the content gate' },
+  { url: 'ko-fi.com',           kind: 'dom', desc: 'NSFW-tagged creator pages blocked at the adult-content gate' },
+  { url: 'writing.com',         kind: 'dom', desc: 'Adult (18+/GC/XGC) items removed from listings & feeds; adult item pages blocked' },
   // ── Discord (NSFW channels/servers blocked, platform kept) ────────────────
   { url: 'discord.com',         kind: 'discord', desc: 'Age-restricted channels & servers blocked' }
 ];

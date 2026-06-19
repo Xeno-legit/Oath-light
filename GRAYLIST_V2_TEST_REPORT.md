@@ -134,6 +134,30 @@ navigations → block.
 
 ---
 
+## 0.6 Session 3 update (2026-06-19) — DOM/age-gate tail + writing.com
+
+> Full session-3 write-up (testing method, complete writing.com findings + ready-to-paste
+> rule, remaining work): **[GRAYLIST_SESSION3_HANDOFF.md](GRAYLIST_SESSION3_HANDOFF.md).**
+
+- **Ko-fi → BUILT (DOM page-block), live-verified.** `content.js` `DOM_LABEL_RULES['ko-fi.com']`
+  keys on the persistent server-rendered `<span class="label-tag">Nsfw</span>` page-category pill
+  (the "Agree and Continue" age gate is transient/skipped once age-confirmed, so we don't rely on
+  it). `true` on an NSFW creator page (logged-in + age-confirmed), `false` on SFW pages. Ko-fi
+  policy bars explicit porn → suggestive/mature tier.
+- **writing.com → UNBANNED + recon complete; rule ready, not yet written.** Was blacklisted;
+  user confirmed legit (mostly-SFW writing community). Removed the blacklist line; bumped manifest
+  **3.1.7→3.1.8** (the version bump + reload re-seeds the blocklist = applies the unban). Ground
+  truth = the `crating` code on each item's `a.blue2roll` rating badge (**10=E,20=ASR,30=13+,
+  40=18+,50=GC,60=XGC**; adult ≥ 40). Listing/feed cards are each a `table.norm`; an item's own
+  rating badge is preceded by exactly "Rated:" and sits outside `table.norm`. Rule + the one
+  remaining live test are in the session-3 handoff §2.
+- **Deferred:** Behance (mature off-by-default, filtered everywhere → unsamplable; hashed CSS),
+  Dreamwidth (niche, no sample), Pillowfort (login-walled; domain is `.social`).
+- **Manifest:** **3.1.8**. All session-3 `content.js` rules need a reload (done once this session).
+- **`PP_TESTING` is still `true`** — §6 pre-ship reverts still pending.
+
+---
+
 ## 1. Engine fixes (apply to ALL graylist API sites)
 
 ### 1.1 `scrub` nested-flag bug — FIXED ✅
@@ -225,6 +249,8 @@ There are **two enforcement layers**; a site can be covered by either/both:
 | FurAffinity / SoFurry / Inkbunny / Weasyl | **BLACKLISTED** | ✅ | moved off graylist; FA navigation → about:blank confirmed |
 | Discord | DOM (3-tier) | ✅ fixed | see §4 |
 | Patreon | API + **DOM scrub & page-block** | ✅ **handled (NOT blacklisted)** | well-labeled; SSR first-paint bypassed the API scrub. `content.js` now hides cards by `data-tag="nsfw-chip"` (34/34, 0 SFW collateral, 238 SFW kept) + slug-scoped SSR `is_nsfw` page-block (Diivesgames→block, Kurzgesagt→allow). Stays graylisted for client fetches. Logic validated in-page; needs extension-reload live test (§0.5 #5) |
+| Ko-fi | DOM page-block | ✅ **built + verified (S3)** | keys on persistent `<span class="label-tag">Nsfw</span>` pill; `true` on NSFW creator page, `false` on SFW (feed/supportkofi). Suggestive tier (no explicit porn allowed) |
+| writing.com | DOM listing-hide + page-block | 🔓 **unbanned, recon done, rule ready (S3)** | `crating` code ground truth (40=18+/50=GC/60=XGC); `table.norm` cards; own rating = "Rated:" badge outside `table.norm`. Rule + last live test → session-3 handoff §2 |
 | Vimeo / Odysee / Gumroad / Minds / Flickr | API (best-effort) | ⛔ untested | login/key-gated or hide NSFW logged-out |
 
 ---

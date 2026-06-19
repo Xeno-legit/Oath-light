@@ -399,6 +399,84 @@
     'steamcommunity.com': {
       // Mature-content overlay on screenshots/artwork/workshop (best-effort).
       pageLabel: () => !!document.querySelector('.mature_content, .maturecontent, #BlurNSFWImage')
+    },
+    'tapas.io': {
+      // Tapas gates mature series/episodes with a `.filter--mature` interstitial
+      // ("This content is intended for mature audiences" — reasons include Sexual
+      // Content, so Tapas DOES host sexual content) and badges mature items with
+      // `.ico--mature`/`.sp-ico-mature*` icons. Both are ABSENT on SFW series
+      // (verified). Hide badged items in listings; hard-block any series/episode
+      // page that is mature — keyed on the gate OR the series' own mature icon,
+      // which persists even after a user has age-confirmed (so confirmed users
+      // who no longer see the gate are still blocked).
+      markers: 'i[class*="ico--mature"], i[class*="sp-ico-mature"]',
+      item: 'li, [class*="item"], a[href*="/series/"]',
+      pageLabel: () => {
+        const p = (window.location.pathname || '').toLowerCase();
+        if (p.indexOf('/series/') === -1 && p.indexOf('/episode/') === -1) return false;
+        return !!document.querySelector('.filter--mature, [class*="filter--mature"], i[class*="sp-ico-mature"], i[class*="ico--mature"]');
+      }
+    },
+    'webtoons.com': {
+      // Webtoons (incl. user-made Canvas) flags mature titles with an
+      // `ico_mature_15`/`ico_mature_18` tier icon on the series page (verified:
+      // present on a mature title, ABSENT on a SFW one like Tower of God).
+      // Listings carry no per-card marker, so we page-block the series-list & viewer
+      // pages of mature titles. Scoped to title_no= pages so the genre/canvas BROWSE
+      // grid (no title_no) is never blocked. NOTE: Webtoons policy bars explicit
+      // pornography, so this gates suggestive/mature (BL/violence) content.
+      pageLabel: () => {
+        if ((window.location.search || '').indexOf('title_no=') === -1) return false;
+        return !!document.querySelector('span[class*="ico_mature_"]');
+      }
+    },
+    'ko-fi.com': {
+      // Ko-fi creators flag an adult page with the "Nsfw" page-category, rendered
+      // as a server-side pill <span class="label-tag">Nsfw</span> inside the
+      // profile's `.tag-container`, and gate it with an "Agree and Continue"
+      // SweetAlert interstitial for un-age-confirmed visitors. The interstitial is
+      // transient (skipped once age-confirmed / logged in), but the label-tag
+      // PERSISTS regardless of viewer state (verified live: present on an NSFW
+      // creator page while logged-in & age-confirmed; ABSENT on SFW pages like the
+      // feed and supportkofi). So we key on the tag, not the gate, and hard-block
+      // the whole creator page. (Ko-fi policy bars explicit pornography, so this
+      // gates suggestive/mature art — same tier as Webtoons.)
+      pageLabel: () => {
+        const tags = document.querySelectorAll('.tag-container .label-tag, .label-tag');
+        for (const t of tags) if ((t.textContent || '').trim().toLowerCase() === 'nsfw') return true;
+        return false;
+      }
+    },
+    'writing.com': {
+      // Writing.Com rates every item E / ASR / 13+ / 18+ / GC / XGC. The rating renders as
+      //   <a class="blue2roll" href="javascript:LaunchPop('…pop_rhelp&crating=<CODE>'…)">TEXT</a>
+      // and the crating CODE is the ground truth (visible text can vary; the code can't):
+      //   10=E  20=ASR  30=13+  40=18+  50=GC  60=XGC   → adult = code >= 40.
+      //   (40=18+ and 60=XGC confirmed against Writing.Com's OWN rating-help pages;
+      //    10/20/30 confirmed off live listings.)
+      //
+      // LISTINGS & FEED: every item card is its own `table.norm` holding exactly ONE item + ONE
+      // rating badge (verified 27/27 on the /list_items Adult genre; newsfeed items too). Hide any
+      // card whose badge is 18+/GC/XGC.
+      markers: 'a.blue2roll[href*="crating=40"], a.blue2roll[href*="crating=50"], a.blue2roll[href*="crating=60"]',
+      item: 'table.norm',
+      // ITEM PAGES (any type — /view_item/, /books/→/profile/blog/, /forums/, interactives…):
+      // the item's OWN rating is the badge whose immediately-preceding text node is exactly
+      // "Rated:" (the header line "Rated: <r> · <Type> · … · #<id>") AND which is NOT inside a
+      // `table.norm`. That excludes (a) the preview's "Intro Rated:" badge and (b) every
+      // listing/feed row (those badges sit inside a table.norm). So it fires on exactly one adult
+      // item page and never on a listing. URL-agnostic on purpose (item URLs vary wildly).
+      pageLabel: () => {
+        const links = document.querySelectorAll('a.blue2roll[href*="crating="]');
+        for (const a of links) {
+          const prev = a.previousSibling ? (a.previousSibling.textContent || '').trim() : '';
+          if (prev !== 'Rated:') continue;          // the item's own rating (excludes "Intro Rated:")
+          if (a.closest('table.norm')) continue;     // exclude listing/feed rows
+          const m = (a.getAttribute('href') || '').match(/crating=(\d+)/);
+          if (m && parseInt(m[1], 10) >= 40) return true;   // 40=18+, 50=GC, 60=XGC
+        }
+        return false;
+      }
     }
   };
 

@@ -49,6 +49,13 @@ Until every stage is complete or before it by one stage.
    mastodon sensitive, bluesky labels, booru rating, etc. Ground-truth, not a heuristic; survives UI
    redesigns because API fields stay stable. Needs a MAIN-world injected script to patch fetch/XHR.
    Sites with no per-item label — file hosts, chat, video-chat, shorteners — get whole-site block instead.)
+  - JSON-scrub + a DOM-layer (`content.js` `DOM_LABEL_RULES`, page-block) now cover ~24 API + ~10 DOM
+    sites. Build/test logs: `GRAYLIST_HANDOFF.md`, `GRAYLIST_V2_TEST_REPORT.md`,
+    `GRAYLIST_SESSION3_HANDOFF.md`, `extra_graylisted_sites.md`. Latest: ko-fi built; writing.com
+    unbanned + recon-complete (rule pending). Manifest at 3.1.8.
+  - **PRE-SHIP BLOCKER (before Open Beta):** `PP_TESTING=true` in `background.js` routes all blocks
+    to `about:blank` (disables the block screen + redirect-link), and the Newgrounds bypass in
+    `content.js` likewise → both MUST be reverted. See `GRAYLIST_SESSION3_HANDOFF.md` §5.
 
 * Open Beta (6/21/2026)
 

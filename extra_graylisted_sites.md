@@ -45,7 +45,7 @@ Ranked best → worst. A site is only "easy" if it sits near the top.
 | **sketchfab.com** | **JSON scrub** (strip `isAgeRestricted:true`) — ✅ **BUILT (2026-06-18)** | `S.sketchfab` + RULES row + QUICK in graylist-inject.js; registered in graylist-sites.js + store.js. Field re-verified live on `/v3/models` + `/v3/search` (present on every model); scrub replay-verified; live extension processes the API without corruption. Logged-out server already returns SFW-only, so the scrub matters for logged-in/opted-in users. |
 | **500px.com** | **JSON scrub** (strip `notSafeForWork:true` nodes) — ✅ **BUILT (2026-06-18)** | `S.px500` (targets `notSafeForWork`, NOT the viewer-pref `showNude`) + RULES + QUICK. Field verified live off rendered card props (58/60). GraphQL `api.500px.com/graphql` relay `edges[].node`; scrub replay-verified incl. the negative test (a `showNude`-only photo is NOT stripped). |
 | **subscribestar.com** | **RESOLVED — clean domain split. ✅ done** | Adult creators live on `subscribestar.adult`, which is **now blacklisted** (this session). `.com` is the SFW main site → **allow, no system needed.** Spot-verify `.com` later for stray under-tagged creators. |
-| **ko-fi.com** | Patreon playbook | Tip/subscription site with an adult-content setting. Mixed, lots of SFW creators → filter, don't blacklist. |
+| **ko-fi.com** | **DOM page-block** (`.label-tag` "Nsfw" pill) — ✅ **BUILT + LIVE-VERIFIED (2026-06-19)** | content.js `DOM_LABEL_RULES['ko-fi.com']`. Keys on the persistent server-rendered NSFW page-category pill (not the transient "Agree and Continue" age gate). Fires on an NSFW creator page, silent on SFW. See session-3 build status + [GRAYLIST_SESSION3_HANDOFF.md](GRAYLIST_SESSION3_HANDOFF.md). |
 | **fanbox.cc** | **JSON scrub** (`hasAdultContent` + tag fallback) — ✅ **BUILT + LIVE-VERIFIED (logged-in)** | api.fanbox.cc. Adult creators stripped; R-18 tag feed 38→0. Tag fallback handles creator-scoped-flag under-tagging. See build-status section + memory `fanbox-creator-flag-tag-leak`. |
 
 ---
@@ -56,8 +56,8 @@ Ranked best → worst. A site is only "easy" if it sits near the top.
 |---|---|---|
 | **behance.net** | **DOM-hide + page-block** (Patreon mold) — RECON CONFIRMED | ✅ Server enforces `isSafeBrowsing:true` + `showMature:false` by default (logged-out is already safe; mature thumbnails blurred). SSR first-paint → needs DOM-hide for opted-in users + mature-gallery page-block. Honest mature flag, not under-tagged. Medium effort (SSR, like Patreon). |
 | **gamebanana.com** | **JSON scrub** (apiv11 feeds) — ✅ **BUILT + LIVE-VERIFIED (2026-06-18)** | Turned out to be a clean logged-out JSON scrub, not a login-gated pref. `S.gamebanana` strips mods GameBanana itself gates as sexual (`_sInitialVisibility` `hide`/`warn` — gore/flashing-lights stay `show`, verified live) + any detail object with a sexual content-rating code (`nu/pn/sa/sc/st/su`). **Live end-to-end:** through the loaded extension, the `nude` search dropped 13→0; mixed feeds (FNF subfeed, `skin` search) kept all 15 `show` mods, 0 hide/warn leaked, the gore mod survived. Records live in `_aRecords[]`. _Follow-up: per-mod page hard-block (single profile JSON isn't an array, so the feed scrub doesn't block a direct mod-page visit)._ |
-| **writing.com** | Page-gate + account adult toggle (AO3 mold) | Text; adult behind age gate. Feasible, lower harm. |
-| **pillowfort.io** | Force account "show NSFW" toggle _(unverified)_ | Tumblr-like, explicit-allowed; small userbase → low priority. |
+| **writing.com** | **DOM listing-hide + page-block** (crating code) — 🔓 **UNBANNED, RECON COMPLETE, rule ready (2026-06-19)** | Was blacklisted; user confirmed legit → unbanned. Ground-truth = `crating` code on each item's `a.blue2roll` rating badge (40=18+/50=GC/60=XGC). Hide adult cards (`item:'table.norm'`) + page-block adult item pages. Rule + remaining live test in [GRAYLIST_SESSION3_HANDOFF.md](GRAYLIST_SESSION3_HANDOFF.md) §2. |
+| **pillowfort.social** | Force account "show NSFW" toggle _(unverified)_ | ⛔ **DEFERRED** — login-walled (couldn't recon); real domain is `.social`, not `.io`. Tumblr-like, small userbase → low priority. |
 
 ---
 
@@ -69,7 +69,7 @@ Ranked best → worst. A site is only "easy" if it sits near the top.
 | **royalroad.com** | — | ⛔ **DEFERRED (recon 2026-06-18).** RoyalRoad's content rules **prohibit explicit pornography**; its "mature" toggle gates gore/language/suggestive themes, not porn. Low value for an anti-PORN blocker + rot surface → not built. |
 | **gog.com** | — | ⛔ **DEFERRED (recon 2026-06-18).** Tiny adult catalog (GOG historically purged adult VNs; "negligee" → 3 results, most delisted) and a fragile web-component/shadow-DOM store. High rot surface, near-zero payoff → not built. |
 | **wattpad.com** | **JSON scrub** (`mature` bool) — ✅ **BUILT + LIVE-VERIFIED (logged-in)** | See build-status section. 18 mature stripped / 0 leaked; 16 SFW classics kept. |
-| **tapas.io / webtoons.com** | Page-block (age-gate) — 🧱 **TAIL** | Mature is login/age-gated; need a content.js page-block on the age interstitial (+ reload to verify). Webtoons mostly SFW + age-gated Canvas; Tapas has genuine adult comics. |
+| **tapas.io / webtoons.com** | Page-block (mature icon / gate) — ✅ **BUILT + selector-verified; live as of 2026-06-19 reload** | content.js `DOM_LABEL_RULES`. Tapas keys on `.filter--mature` gate + `.sp-ico-mature` icon (Tapas hosts genuine adult comics); Webtoons keys on the `ico_mature_15/18` tier icon on `title_no=` pages (mostly SFW, age-gated Canvas). Final E2E navigation pending. |
 | **dreamwidth.org** | DOM adult-flag + page-gate (AO3 mold) | **ALLOWED (un-banned earlier).** Mostly SFW fandom/journaling → keep accessible. Optional light page-gate later; low priority, text-based. Not built. |
 
 ---
@@ -182,15 +182,74 @@ page load → the 3 JSON-scrub sites went live immediately (confirmed). `content
 content script → **ScribbleHub needs a manual extension reload** (chrome://extensions →
 reload) to activate, as does the 6-site verification pass.
 
+## Phased build status (2026-06-19, session 3) — DOM/age-gate tail
+
+Continued the DOM tail. The 4 content.js DOM rules below all need **one extension reload**
+(chrome://extensions → reload) to go live + be E2E-verified — content scripts don't hot-reload
+like the WAR-served JSON scrubs.
+
+**✅ Built this session:**
+- **ko-fi.com** — DOM page-block (content.js). Recon (logged-in): adult creators flag the page
+  with the **"Nsfw" page-category** rendered server-side as `<span class="label-tag">Nsfw</span>`
+  in `.tag-container`, and gate it with an "Agree and Continue" SweetAlert for un-age-confirmed
+  visitors. The interstitial is transient (skipped once age-confirmed), but the **label-tag
+  persists regardless of viewer state** → we key on it, not the gate. **Verified live:** fires
+  on an NSFW creator page (ciaracruz13) while logged-in+age-confirmed; does NOT fire on SFW
+  pages (feed, supportkofi). Ko-fi policy bars explicit porn → gates suggestive/mature art
+  (Webtoons tier). _Extension reloaded this session → rule is live; final E2E navigation pending._
+- **tapas.io**, **webtoons.com** — DOM page-block (built session 2/3, selector-verified live).
+  _Extension reloaded → live; final E2E navigation pending._
+
+**⛔ Deferred this session (2):**
+- **behance.net** — now logged-in on the bridge, but mature content is **off by default** and
+  filtered entirely from feeds/search (a "boudoir nude" search returned 48 cards, **zero**
+  mature markers — the mature ones simply aren't shown). Only direct-link mature projects gate
+  behind an interstitial, which I can't sample because they're filtered everywhere. Compounded
+  by **hashed CSS-module classnames** (`ProjectCover-root-X6u`, build-dependent → fragile).
+  Adobe bars porn → artistic nudity only. Low leak + high rot → defer.
+- **dreamwidth.org** — niche/low-traffic journaling site; no adult-journal sample available to
+  verify its interstitial. Optional, low priority → defer.
+- **pillowfort** — still deferred (login-walled; real domain is pillowfort.social, not .io).
+
+**🔓 writing.com — UNBANNED (user-requested); RECON COMPLETE, rule ready to write:**
+- Was on the curated **blacklist** (`blocklists/domains_part3.json`) → hard-blocked outright.
+  User confirmed it's a legit (mostly-SFW) creative-writing community and asked to unban + build
+  a graylist rule. **Removed the `"writing.com"` blacklist line.** The blacklist is re-seeded
+  from the JSON into chrome.storage only on install/**update**, so the **manifest version bump
+  (3.1.7→3.1.8) + an extension reload applied the unban** (confirmed: site now loads in the
+  bridge, logged in as `nsfwspy`).
+- **Recon done live (post-reload).** Content rating is ground-truth: every item carries a
+  `<a class="blue2roll" href="…pop_rhelp&crating=<CODE>">` badge, where **10=E, 20=ASR, 30=13+,
+  40=18+, 50=GC, 60=XGC** (40 & 60 confirmed against Writing.Com's own rating-help pages; adult =
+  code ≥ 40). Listings/feed put each item in its own `table.norm` (one item + one badge, 27/27);
+  an item's OWN rating is the badge preceded by exactly "Rated:" and NOT inside a `table.norm`
+  (the preview's "Intro Rated:" and all listing rows are thereby excluded). So one rule hides
+  adult listing cards (`markers` + `item:'table.norm'`) AND page-blocks adult item pages
+  (`pageLabel`), URL-agnostically.
+- **Rule not yet written into code** (another agent is taking the rest). The exact, verified rule
+  + the one remaining live test (a rendered adult item — the account ceiling currently blocks 18+)
+  are in **[GRAYLIST_SESSION3_HANDOFF.md](GRAYLIST_SESSION3_HANDOFF.md) §2**.
+
+**Manifest:** bumped to **3.1.8** (forced the blocklist re-seed on reload = writing.com unban,
+and activated all new content.js DOM rules, incl. Ko-fi).
+
+> **Full session-3 testing method + writing.com findings + remaining-work handoff:**
+> [GRAYLIST_SESSION3_HANDOFF.md](GRAYLIST_SESSION3_HANDOFF.md).
+
 ## Bottom line (remaining work)
 
-- **Realistically doable, RECON-confirmed (not yet built):** `sketchfab.com` +
-  `500px.com` (easy — JSON scrub of `isAgeRestricted` / `notSafeForWork`), `behance.net`
-  (medium — Patreon-mold DOM-hide + page-block).
-- **Also doable (not yet built):** the Patreon-alike cluster (ko-fi, fanbox) and the
-  reuse-a-mold set (gog = Steam; scribblehub/royalroad/wattpad = AO3).
-- **Don't bother / out of scope:** live-video (twitch/kick), libraries (archive,
-  wikimedia), and the fringe-political video/social sites — not this product's problem.
-- **Scope caution:** every added site is rot surface (we already hit Tumblr casing drift
-  + ArtStation patch-clobber in one session). Add high-reach, *verifiable* sites; iterate.
-- **Testability gate:** fanbox is login-walled — "added" means "added blind" without an account.
+> ⚠️ The per-Tier tables above are the original feasibility analysis. **Build status is
+> superseded by the dated session sections** ("Phased build status" 2026-06-18 sessions 1–2 &
+> 2026-06-19 session 3) and **[GRAYLIST_SESSION3_HANDOFF.md](GRAYLIST_SESSION3_HANDOFF.md)**.
+
+**Built since this analysis:** sketchfab, 500px, gamebanana, wattpad, fanbox (JSON scrub);
+scribblehub, webtoons, tapas, ko-fi (DOM). **Deferred:** royalroad, gog, behance, dreamwidth,
+pillowfort. **Unbanned + recon-complete, rule pending:** writing.com.
+
+- **Still to do (handed off):** write the writing.com rule (§2 of the session-3 handoff) + its
+  one live positive test; full live E2E pass (ko-fi/scribblehub/webtoons/tapas + the 6-site
+  re-verify); **pre-ship cleanup** (`PP_TESTING=false`, restore Newgrounds → blocked.html).
+- **Out of scope:** live-video (twitch/kick), libraries (archive, wikimedia), fringe-political
+  social — not this product's problem.
+- **Scope caution:** every added site is rot surface (Tumblr casing drift + ArtStation
+  patch-clobber both bit us). Add high-reach, *verifiable* sites; iterate.
