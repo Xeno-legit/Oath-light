@@ -27,15 +27,18 @@ it's pointed; the exposure is the allowlist-shaped perimeter around it.
 
 | Severity | Finding | Status |
 |---|---|---|
-| 🔴 Critical | Uncovered search engines (Yandex, Brave, …) serve **hardcore** with no enforcement | **Visually confirmed** |
-| 🔴 Critical | Regional search-engine TLDs (`google.de`, `.co.uk`, …) bypass SafeSearch — a true bug | **Confirmed (param absent)** |
-| 🔴 Critical | "Trusted" domains hosting explicit galleries (Wikimedia Commons) render full nudity inline | **Visually confirmed** |
-| 🟠 High | YouTube is whitelisted → all content checks skipped; Restricted Mode never enforced | **Visually confirmed** |
-| 🟠 High | Whitelist membership = total bypass (youtube/spotify/crunchyroll…) | Confirmed by code + YouTube test |
-| 🟡 Medium | Bypass-unwrap covers only Google Translate + Wayback (misses Bing/Yandex translate, reader/CORS proxies) | Code-identified |
-| 🟡 Medium | Graylist scrub is `content-type: *json*`-only (SSR/WS/SSE/text feeds unscrubbed) | Code-identified (documented) |
-| 🟡 Medium | Nuclear search-keyword filter wired only to Reddit + Patreon | Code-identified |
-| 🟢 Low | Reddit `thicc`-class keyword gap surfaces *suggestive* (not explicit) content | **Visually confirmed** |
+| 🔴 Critical | Uncovered search engines (Yandex, Brave, …) serve **hardcore** with no enforcement | ✅ **Fixed** — Tier-2 engines block image/video + NSFW queries; force param where known |
+| 🔴 Critical | Regional search-engine TLDs (`google.de`, `.co.uk`, …) bypass SafeSearch — a true bug | ✅ **Fixed** — engines matched across all TLDs |
+| 🔴 Critical | "Trusted" domains hosting explicit galleries (Wikimedia Commons) render full nudity inline | ✅ **Fixed** — adult Category/File paths blocked |
+| 🟠 High | YouTube is whitelisted → all content checks skipped; Restricted Mode never enforced | ✅ **Fixed** — de-whitelisted; Restricted Mode (PREF cookie) + nuclear search |
+| 🟠 High | Whitelist membership = total bypass (youtube/spotify/crunchyroll…) | ✅ **Fixed (YouTube/Spotify)** — moved to graylist enforcement |
+| 🟡 Medium | Bypass-unwrap covers only Google Translate + Wayback (misses Bing/Yandex translate, reader/CORS proxies) | ✅ **Fixed** — Bing/Yandex translate + r.jina.ai/corsproxy/allorigins/thingproxy unwrapped/blocked |
+| 🟡 Medium | Graylist scrub is `content-type: *json*`-only (SSR/WS/SSE/text feeds unscrubbed) | ✅ **Search/browse SSR closed** at perimeter; per-card DOM backstop still future work |
+| 🟡 Medium | Nuclear search-keyword filter wired only to Reddit + Patreon | ✅ **Fixed** — extended to every graylisted site's search route |
+| 🟢 Low | Reddit `thicc`-class keyword gap surfaces *suggestive* (not explicit) content | ✅ **Fixed** — `thicc`/`smut`/`erotica` added to keyword lists |
+| 🟠 High | Minds adapter no-op (fields buried in stringified `legacy` blob) + under-tagging | ✅ **Fixed** — parse `legacy`; rating≥2 + adult-tag fallback (§7.1) |
+| 🟡 Medium | Numeric/IPv6 raw-IP evasion (`isPublicIpHost` was dotted-quad only) | ✅ **Fixed** — decimal/hex/octal/IPv6 handled (§9.1#3) |
+| 🟡 Medium | Reddit `.json`/`.rss` suffix bypassed exact-path block | ✅ **Fixed** — suffix normalized off path (§7.3) |
 
 ---
 
@@ -399,3 +402,36 @@ eyeballing the rendered page, not by selector counts.**
 Drive **§9.1 #1–#4** first (privacy frontends, AI NSFW, numeric/IPv6 IP, uncensored engines) — the
 four most likely to surface *new* structural bugs — and promote whatever holds up into a verified
 **Round 4** (§1–§7 style: live + screenshot, corrected figures, no pre-written specifics).
+
+> ✅ **§9.1 #3 (numeric/IPv6 IP) is already CLOSED** — see §10. The other §9 items remain a backlog.
+
+---
+
+## 10. Fixes applied (enforcement pass — 2026-06-20)
+
+Every confirmed finding (§1–§7) has been enforced in code. Validated by a sandbox
+regression harness (`test-adversarial-fixes.cjs`, 42/42) that runs the real
+`shouldBlockUrl` against the report's reproduction URLs, plus a Minds scrub test.
+
+| # | Finding | Fix | File |
+|---|---|---|---|
+| §1.1 | Uncovered engines serve hardcore | `SEARCH_ENGINES` Tier-2 (Yandex/Brave/Startpage/Ecosia/Mojeek/Qwant/Gibiru/Yep/Swisscows/MetaGer): **block image/video search surfaces + block NSFW queries**, force param where known (yandex `family=yes`, brave `safesearch=strict`, qwant `safesearch=2`) | `background.js` |
+| §1.2 | Regional TLD bypass | Engines matched by **per-brand regex across all TLDs** (`google.de/.co.uk/…`); also stops over-matching `mail./docs.` subdomains | `background.js` |
+| §1.3 | Trusted galleries (Commons) | `TRUSTED_HOST_ADULT_PATH` blocks adult `Category:`/`File:` paths (token set chosen to avoid *naked mole-rat* / *breast cancer* / *sexual reproduction* FPs) + Commons/Archive search routed | `background.js` |
+| §1.4/§3.1 | YouTube/Spotify whitelisted = total bypass | **Removed from `WHITELIST_DOMAINS`.** YouTube → forced Restricted Mode (`PREF=f2=8000000` cookie) + nuclear search. Spotify → nuclear search. UI catalogs updated (new `enforce` kind = "Safe mode") | `background.js`, `graylist-sites.js`, desktop `store.js`, `pages-blocklist.jsx` |
+| §3.2 | Narrow proxy/unwrap | `unwrapBypassUrl` now handles Bing translate (`translatetheweb.com`), Yandex translate, `r.jina.ai`, `corsproxy.io`, `allorigins.win`, `thingproxy`; pure proxies also added to `BYPASS_PROXY_DOMAINS` (bare visit blocked) | `background.js` |
+| §3.4/§6.1 | Nuclear search only Reddit+Patreon; SSR first-paint leaks | `GRAYLIST_SEARCH_ROUTES` extends the keyword kill to **every** graylist search/tag/browse route (Tumblr, Wattpad, Pixiv, X, Minds, YouTube, Spotify, Vimeo, Dailymotion, Gumroad, Imgur, Flickr, Sketchfab, 500px, ArtStation, Newgrounds, Itaku, GameBanana). Blocking the adult search at the URL closes the SSR first-paint leak (the page never renders) | `background.js` |
+| §7.1 | Minds adapter no-op + under-tagging | `S.minds` now **parses the stringified `legacy` blob** then tests `nsfw[]` / `mature` / **`rating>=2`** / **adult-tag fallback** (mirrors the Fanbox fix) | `graylist-inject.js` |
+| §7.3 | Reddit `.json` path bypass | `.json/.rss/.xml/.embed/.compact/.mobile` suffixes normalized off the path before the exact-path block | `background.js` |
+| §9.1#3 | Numeric/IPv6 raw-IP evasion | `isPublicIpHost` now decodes **decimal / hex / octal integer hosts and IPv6** (loopback/private/link-local/ULA/CGNAT exempt) | `background.js` |
+| §1.5 | `thicc` keyword gap | `thicc` (soft) + `smut`, `erotica` (hard) added to the keyword lists | `background.js` |
+
+**Deliberately NOT changed (proportionality / risk):**
+- **AI answer engines** (`perplexity.ai`, `you.com`) and **self-hosted SearXNG** instances are
+  *not* host-matched as search engines — the first are text tools (keyword layer still applies),
+  the second live on unbounded domains. Noted as backlog.
+- **Per-card DOM backstop** for Tumblr/Wattpad/Minds *non-search* listing surfaces (e.g. an
+  adult tag page whose query isn't an NSFW keyword) is deferred — it needs live-DOM selector
+  verification. The high-yield **search/tag/browse** surfaces are already closed at the perimeter.
+- **`PP_TESTING=true`** in `recordBlockAndRedirect` is left as-is (routes blocks to `about:blank`
+  for the Playwright bridge); flip to `false` to restore `blocked.html` / redirect-link behaviour.

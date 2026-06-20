@@ -286,9 +286,12 @@ const WHITELIST_DOMAINS = [
   'irs.gov',
 
   // Entertainment (safe)
-  'youtube.com',
-  'youtu.be',
-  'spotify.com',
+  // NOTE: youtube.com / youtu.be / spotify.com were REMOVED from the whitelist
+  // (report §1.4 + §3.1). Whitelisting short-circuited ALL content filtering, so
+  // YouTube served unrestricted suggestive content and Spotify served explicit
+  // erotica audio. They now flow through the normal pipeline: YouTube gets forced
+  // Restricted Mode (GRAYLIST_COOKIE_MAP, PREF cookie) + the nuclear search filter
+  // (GRAYLIST_SEARCH_ROUTES); Spotify gets the nuclear search filter.
   'netflix.com',
   'hulu.com',
   'disneyplus.com',
@@ -412,6 +415,10 @@ const SOFT_PORN_KEYWORDS = [
   'bikini babes', 'lingerie', 'underwear models', 'swimsuit models',
   'topless', 'bottomless', 'naked', 'nude', 'nudes',
   'sex', 'sexual',
+  // Suggestive-class terms that surface nudity on graylist/tag searches (the
+  // Tumblr "/search/bikini" leak). Soft tier: forces SafeSearch on big engines,
+  // blocks the search on graylist sites / Tier-2 engines / Reddit.
+  'thicc', 'bikini', 'swimsuit', 'cleavage', 'busty', 'thong', 'panties', 'curvy',
   'strip', 'stripping', 'stripper', 'striptease',
   'cam girl', 'camgirl', 'webcam girl', 'live cam',
   'onlyfans', 'only fans', 'patreon nsfw',
@@ -449,6 +456,7 @@ const HARD_PORN_KEYWORDS = [
   'suicidegirls', 'babestation', 'slutwife', 'hotwife',
   'ecchi', 'ahegao', 'oppai', 'yaoi', 'yuri',
   'shotacon', 'lolicon', 'doujinshi', 'ero manga', 'eroge',
+  'smut', 'erotica',
   // Bare unambiguous terms — safe under whole-word matching (used only in the
   // Reddit subreddit/search checks). 'xxx'/'cum' are whole-word-only (len < 4),
   // so they can't Scunthorpe; 'gonewild'/'r34'/'lewd' are long enough to substring.
@@ -487,30 +495,175 @@ function matchSearchQueryPorn(searchQuery) {
   return null;
 }
 
+// GRAYLIST SEARCH-QUERY FILTER — extend the nuclear keyword block (used for
+// Reddit §4c + Patreon §5) to EVERY graylisted site's search endpoint. This is
+// the ground-truth-INDEPENDENT layer: it kills the adult *search itself* before
+// the page renders, which ALSO closes the SSR first-paint leak the JSON scrub
+// can't see (report §3.4 + §6.1 — Tumblr/Wattpad/Minds search is server-rendered,
+// so the fetch/XHR patch never sees it). Each extractor returns the raw search
+// string for its host, pulling it from the query string OR the path (many SPAs
+// put the term in the path, e.g. tumblr.com/search/<q>, wattpad.com/search/<q>).
+
+// URL-decoded path segment after `prefix` (e.g. '/search/'), or null.
+function pathSegmentAfter(urlObj, prefix) {
+  const p = urlObj.pathname;
+  if (!p.toLowerCase().startsWith(prefix)) return null;
+  let seg = p.slice(prefix.length).split('/')[0];
+  if (!seg) return null;
+  try { seg = decodeURIComponent(seg); } catch (_) {}
+  return seg.replace(/\+/g, ' ');
+}
+function pathStartsWith(urlObj, prefix) {
+  return urlObj.pathname.toLowerCase().startsWith(prefix);
+}
+
+const GRAYLIST_SEARCH_ROUTES = new Map([
+  ['tumblr.com',      (u) => pathSegmentAfter(u, '/search/') || pathSegmentAfter(u, '/tagged/')],
+  ['wattpad.com',     (u) => pathSegmentAfter(u, '/search/') || pathSegmentAfter(u, '/stories/') || pathSegmentAfter(u, '/list/')],
+  ['pixiv.net',       (u) => pathSegmentAfter(u, '/tags/') || u.searchParams.get('word')],
+  ['x.com',           (u) => pathStartsWith(u, '/search') ? u.searchParams.get('q') : null],
+  ['twitter.com',     (u) => pathStartsWith(u, '/search') ? u.searchParams.get('q') : null],
+  ['minds.com',       (u) => pathStartsWith(u, '/search') ? u.searchParams.get('q') : null],
+  ['youtube.com',     (u) => u.searchParams.get('search_query') || u.searchParams.get('q')],
+  ['spotify.com',     (u) => pathSegmentAfter(u, '/search/') || u.searchParams.get('q')],
+  ['vimeo.com',       (u) => pathStartsWith(u, '/search') ? u.searchParams.get('q') : null],
+  ['dailymotion.com', (u) => pathSegmentAfter(u, '/search/')],
+  ['gumroad.com',     (u) => u.searchParams.get('query') || u.searchParams.get('q')],
+  ['imgur.com',       (u) => pathStartsWith(u, '/search') ? u.searchParams.get('q') : null],
+  ['flickr.com',      (u) => pathStartsWith(u, '/search') ? u.searchParams.get('text') : null],
+  ['sketchfab.com',   (u) => pathStartsWith(u, '/search') ? u.searchParams.get('q') : null],
+  ['500px.com',       (u) => pathSegmentAfter(u, '/search/') || u.searchParams.get('q')],
+  ['artstation.com',  (u) => pathStartsWith(u, '/search') ? u.searchParams.get('query') : null],
+  ['newgrounds.com',  (u) => u.searchParams.get('terms') || u.searchParams.get('q')],
+  ['itaku.ee',        (u) => u.searchParams.get('search') || u.searchParams.get('q')],
+  ['gamebanana.com',  (u) => u.searchParams.get('_sSearchString') || u.searchParams.get('q')],
+  // "Trusted" hosts whose on-site search can surface explicit galleries (§1.3).
+  ['wikimedia.org',   (u) => u.searchParams.get('search')],
+  ['archive.org',     (u) => u.searchParams.get('query') || u.searchParams.get('q')]
+]);
+
+const GRAYLIST_SEARCH_DOMAINS = new Set(GRAYLIST_SEARCH_ROUTES.keys());
+
+function matchGraylistSearchDomain(hostname) {
+  if (GRAYLIST_SEARCH_DOMAINS.has(hostname)) return hostname;
+  const parts = hostname.split('.');
+  for (let i = 1; i < parts.length - 1; i++) {
+    const parent = parts.slice(i).join('.');
+    if (GRAYLIST_SEARCH_DOMAINS.has(parent)) return parent;
+  }
+  return null;
+}
+
+// Matched NSFW keyword if THIS url is an adult search on a graylist site, else null.
+function checkGraylistSearch(hostname, urlObj) {
+  const base = matchGraylistSearchDomain(hostname);
+  if (!base) return null;
+  let q = null;
+  try { q = GRAYLIST_SEARCH_ROUTES.get(base)(urlObj); } catch (_) {}
+  return matchSearchQueryPorn(q);
+}
+
+// TRUSTED-HOST EXPLICIT GALLERIES (report §1.3) — otherwise-SFW hosts that also
+// host browsable adult collections (Wikimedia Commons Category:Nude*, etc.).
+// We block the adult category/file SURFACES by path without nuking the whole
+// (genuinely useful) host. Tokens are chosen to avoid the obvious educational
+// collisions: 'naked' (→ naked mole-rat), bare 'sexual' (→ sexual reproduction)
+// and 'breast' (→ breast cancer) are deliberately EXCLUDED; we keep the
+// unambiguously-explicit anatomical/sexual stems that Commons renders inline.
+const TRUSTED_HOST_ADULT_PATH = new Map([
+  ['commons.wikimedia.org', /\/(?:wiki\/)?(?:category|file|special):[^?]*?(?:nude|nudity|erotic|porn|pornograph|hardcore|hentai|masturbat|orgasm|ejaculat|fellatio|cunnilingus|handjob|blowjob|penis|phallus|vulva|vagina|labia|clitoris|testicl|scrotum|genitalia|genitals|coitus|copulation|sexual_(?:intercourse|activity|penetration|stimulation|arousal|positions)|bdsm|bondage|fetish)/i]
+]);
+
+function checkTrustedAdultPath(hostname, urlObj) {
+  let re = TRUSTED_HOST_ADULT_PATH.get(hostname);
+  if (!re) {
+    const parts = hostname.split('.');
+    for (let i = 1; i < parts.length - 1 && !re; i++) re = TRUSTED_HOST_ADULT_PATH.get(parts.slice(i).join('.'));
+  }
+  if (!re) return null;
+  return re.test(urlObj.pathname.toLowerCase()) ? 'adult gallery path' : null;
+}
+
 // SEARCH ENGINE SAFESEARCH ENFORCEMENT
+//
+// TIER 1 — mainstream engines whose web UI reliably honours a SafeSearch URL
+//          param. We force the strict value across ALL regional TLDs
+//          (google.de / google.co.uk / search.yahoo.co.jp …). The old code
+//          matched only the bare `.com`, so every regional TLD bypassed
+//          SafeSearch entirely (Adversarial report §1.2). The new host regexes
+//          match the brand on any public-suffix TLD, and DON'T match unrelated
+//          sub-domains (mail./docs./news.google.com), so we no longer redirect
+//          non-search hosts.
+// TIER 2 — other engines (Yandex, Brave, Startpage, Ecosia, Mojeek, Qwant, …)
+//          that ignore URL params and/or have no reliable strict param, and were
+//          previously UNCOVERED — serving hardcore image grids with zero
+//          enforcement (report §1.1). For these we (a) force the documented param
+//          where one exists (best-effort), AND (b) hard-block their image/video
+//          search surfaces (the thumbnail grids), AND (c) hard-block any search
+//          whose query contains an NSFW keyword. General text search still works.
+//
+// NOTE: self-hosted SearXNG/Searx instances live on arbitrary domains and can't
+// be matched by host; AI answer engines (perplexity/you.com) are text and are
+// covered by the keyword layer, not here.
 
 const SEARCH_ENGINES = [
-  { domain: 'google.com', queryParam: 'q', safeParam: 'active' },
-  { domain: 'bing.com', queryParam: 'q', safeParam: 'strict' },
-  { domain: 'duckduckgo.com', queryParam: 'q', safeParam: '1' },
-  { domain: 'yahoo.com', queryParam: 'p', safeParam: 'r' }
+  // ── Tier 1 — force strict param, all TLDs ──
+  { id: 'google',     tier: 1, re: /^(www\.)?google\.[a-z]{2,3}(\.[a-z]{2})?$/,         qkeys: ['q'],          param: 'safe',       value: 'active' },
+  { id: 'bing',       tier: 1, re: /^(www\.)?(cn\.)?bing\.[a-z]{2,3}(\.[a-z]{2})?$/,     qkeys: ['q'],          param: 'adlt',       value: 'strict' },
+  { id: 'duckduckgo', tier: 1, re: /^((www|html|lite|start)\.)?duckduckgo\.com$/,        qkeys: ['q'],          param: 'kp',         value: '1' },
+  { id: 'yahoo',      tier: 1, re: /^((www|search)\.)?yahoo\.[a-z]{2,3}(\.[a-z]{2})?$/,  qkeys: ['p'],          param: 'vm',         value: 'r' },
+  // ── Tier 2 — block image/video + NSFW queries; force param where known ──
+  { id: 'yandex',     tier: 2, re: /^(www\.)?yandex\.[a-z]{2,3}(\.[a-z]{2})?$|^ya\.ru$/, qkeys: ['text', 'q'], param: 'family',     value: 'yes' },
+  { id: 'brave',      tier: 2, re: /^search\.brave\.com$/,                               qkeys: ['q'],          param: 'safesearch', value: 'strict' },
+  { id: 'qwant',      tier: 2, re: /^(www\.)?qwant\.com$/,                               qkeys: ['q'],          param: 'safesearch', value: '2' },
+  { id: 'ecosia',     tier: 2, re: /^(www\.)?ecosia\.org$/,                              qkeys: ['q'] },
+  { id: 'startpage',  tier: 2, re: /^(www\.)?startpage\.com$/,                           qkeys: ['query', 'q'] },
+  { id: 'mojeek',     tier: 2, re: /^(www\.)?mojeek\.com$/,                              qkeys: ['q'] },
+  { id: 'swisscows',  tier: 2, re: /^(www\.)?swisscows\.com$/,                           qkeys: ['query', 'q'] },
+  { id: 'gibiru',     tier: 2, re: /^(www\.)?gibiru\.com$/,                              qkeys: ['q'] },
+  { id: 'yep',        tier: 2, re: /^(www\.)?yep\.com$/,                                 qkeys: ['q'] },
+  { id: 'metager',    tier: 2, re: /^(www\.)?metager\.org$/,                             qkeys: ['eingabe', 'q'] }
 ];
+
+function matchSearchEngine(hostname) {
+  for (const se of SEARCH_ENGINES) if (se.re.test(hostname)) return se;
+  return null;
+}
+
+// Does this URL look like an image / video / picture search surface? Used to deny
+// the hardcore thumbnail grids on Tier-2 engines that ignore our forced param.
+function isMediaSearchSurface(urlObj) {
+  const p = urlObj.pathname.toLowerCase();
+  if (/(^|\/)(images?|imgs?|videos?|vids?|pics?|photos?|gallery)(\/|$)/.test(p)) return true;
+  const sp = urlObj.searchParams;
+  for (const k of ['t', 'tbm', 'ia', 'iax', 'iar', 'cat', 'kind', 'fmt', 'type']) {
+    const v = (sp.get(k) || '').toLowerCase();
+    if (/image|isch|img|video|vid|photo|pic/.test(v)) return true;
+  }
+  return false;
+}
+
+function readSearchQuery(urlObj, qkeys) {
+  for (const k of qkeys) {
+    const v = urlObj.searchParams.get(k);
+    if (v) return v;
+  }
+  return null;
+}
 
 // SAFESEARCH ENFORCEMENT (always-on)
 
 function checkSearchEngineSafeSearch(url, hostname) {
-  const searchEngine = SEARCH_ENGINES.find(se =>
-    hostname === se.domain || hostname.endsWith('.' + se.domain)
-  );
-
-  if (!searchEngine) return null;
+  const se = matchSearchEngine(hostname);
+  if (!se) return null;
 
   try {
     const urlObj = new URL(url);
 
-    // Block attempts to disable SafeSearch
-    const hasSafeSearchOff = url.includes('safe=off') || url.includes('safesearch=off') || url.includes('safe=0');
-    if (hasSafeSearchOff) {
+    // Block attempts to disable SafeSearch on ANY recognised engine.
+    const low = url.toLowerCase();
+    if (low.includes('safe=off') || low.includes('safesearch=off') || low.includes('safe=0') ||
+        low.includes('safesearch=0') || low.includes('adlt=off') || low.includes('family=no')) {
       console.log('SafeSearch disabled - blocking bypass attempt');
       return {
         blocked: true,
@@ -520,20 +673,26 @@ function checkSearchEngineSafeSearch(url, hostname) {
       };
     }
 
-    // ALWAYS enforce SafeSearch on search engines (regardless of query)
-    const currentUrl = new URL(url);
-    let paramName = 'safe';
-    if (searchEngine.domain.includes('bing.com')) paramName = 'adlt';
-    if (searchEngine.domain.includes('duckduckgo.com')) paramName = 'kp';
-    if (searchEngine.domain.includes('yahoo.com')) paramName = 'vm';
+    // TIER 2 hard blocks: image/video grids and NSFW queries leak even when the
+    // engine ignores our forced param, so deny those surfaces outright.
+    if (se.tier === 2) {
+      if (isMediaSearchSurface(urlObj)) {
+        return { blocked: true, reason: 'search_media_uncovered', match: se.id + ' image/video search', tier: 'blacklist', hostname };
+      }
+      const hit = matchSearchQueryPorn(readSearchQuery(urlObj, se.qkeys));
+      if (hit) {
+        return { blocked: true, reason: 'search_query_keyword', match: se.id + ':' + hit, tier: 'blacklist', hostname };
+      }
+    }
 
-    if (currentUrl.searchParams.get(paramName) !== searchEngine.safeParam) {
-      currentUrl.searchParams.set(paramName, searchEngine.safeParam);
+    // Force the strict SafeSearch param (Tier 1 always; Tier 2 where we know one).
+    if (se.param && urlObj.searchParams.get(se.param) !== se.value) {
+      urlObj.searchParams.set(se.param, se.value);
       return {
         safesearch: true,
-        redirectUrl: currentUrl.toString(),
+        redirectUrl: urlObj.toString(),
         reason: 'safesearch_always_on',
-        match: 'SafeSearch enforced'
+        match: se.id + ' SafeSearch enforced'
       };
     }
   } catch (error) {
@@ -563,6 +722,13 @@ const GRAYLIST_COOKIE_MAP = new Map([
   ['x.com', [
     { domain: 'x.com',  name: 'sensitive_content_flag', value: 'false', path: '/' },
     { domain: '.x.com', name: 'sensitive_content_flag', value: 'false', path: '/' }
+  ]],
+  // YouTube Restricted Mode (report §1.4). PREF cookie field f2=8000000 is the
+  // user-level Restricted Mode bit YouTube reads to filter mature/suggestive
+  // videos. Set on both the bare and dot domain so www/m/music subdomains inherit.
+  ['youtube.com', [
+    { domain: 'youtube.com',  name: 'PREF', value: 'f2=8000000', path: '/' },
+    { domain: '.youtube.com', name: 'PREF', value: 'f2=8000000', path: '/' }
   ]]
 ]);
 
@@ -1263,7 +1429,11 @@ const BYPASS_PROXY_DOMAINS = new Set([
   'unblockit.id', '12ft.io', '1ft.io',
   // archive viewers (Wayback is unwrapped instead — see unwrapBypassUrl)
   'archive.today', 'archive.ph', 'archive.is', 'archive.li', 'archive.md',
-  'archive.vn', 'archive.fo'
+  'archive.vn', 'archive.fo',
+  // reader / CORS proxies (report §3.2) — unwrapBypassUrl pulls the real target
+  // out first when present; a BARE visit (no target) lands here and is blocked.
+  'r.jina.ai', 's.jina.ai', 'corsproxy.io', 'allorigins.win',
+  'thingproxy.freeboard.io', 'cors-anywhere.herokuapp.com'
 ]);
 
 function matchesBypassProxy(hostname) {
@@ -1300,20 +1470,81 @@ function unwrapBypassUrl(urlObj) {
     if (m) return m[1];
   }
 
+  // Bing translator (report §3.2): translatetheweb.com/?...&a=<target>
+  if (host === 'translatetheweb.com' || host.endsWith('.translatetheweb.com') ||
+      host === 'microsofttranslator.com' || host.endsWith('.microsofttranslator.com')) {
+    const a = urlObj.searchParams.get('a') || urlObj.searchParams.get('u');
+    if (a) return a;
+  }
+
+  // Yandex translate: translate.yandex.*/translate?...&url=<target>
+  if (host === 'translate.yandex.com' || host === 'translate.yandex.ru' || host === 'translate.yandex.net') {
+    const u = urlObj.searchParams.get('url') || urlObj.searchParams.get('text');
+    if (u && /^https?:\/\//i.test(u)) return u;
+  }
+
+  // CORS / reader proxies that take the target in a `url`/`u` query param.
+  if (host === 'corsproxy.io' || host.endsWith('.corsproxy.io') ||
+      host === 'api.allorigins.win' || host === 'allorigins.win' || host.endsWith('.allorigins.win') ||
+      host === 'api.codetabs.com' || host === 'cors-anywhere.herokuapp.com') {
+    const u = urlObj.searchParams.get('url') || urlObj.searchParams.get('u');
+    if (u) { try { return decodeURIComponent(u); } catch (_) { return u; } }
+  }
+
+  // r.jina.ai / thingproxy: the target URL is appended to the path.
+  //   https://r.jina.ai/https://target/…   ·   https://thingproxy.freeboard.io/fetch/https://target/…
+  if (host === 'r.jina.ai' || host === 's.jina.ai' ||
+      host === 'thingproxy.freeboard.io' || host.endsWith('.thingproxy.freeboard.io')) {
+    const m = (urlObj.pathname + urlObj.search).match(/(https?:(?:\/\/|%2f%2f).+)/i);
+    if (m) { try { return decodeURIComponent(m[1]); } catch (_) { return m[1]; } }
+  }
+
   return null;
 }
 
-// Raw public-IP host? (private / loopback / link-local ranges are exempt.)
-function isPublicIpHost(host) {
-  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!m) return false;
-  const o = [m[1], m[2], m[3], m[4]].map(Number);
-  if (o.some(n => n > 255)) return false;
+// Are these 4 octets a routable PUBLIC IPv4? (private/loopback/link-local exempt.)
+function octetsArePublic(o) {
+  if (o.some(n => !Number.isInteger(n) || n > 255 || n < 0)) return false;
   if (o[0] === 0 || o[0] === 10 || o[0] === 127) return false;   // this-net / private / loopback
   if (o[0] === 192 && o[1] === 168) return false;                // private
   if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return false;    // private
   if (o[0] === 169 && o[1] === 254) return false;                // link-local
+  if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return false;   // CGNAT
+  if (o[0] >= 224) return false;                                  // multicast / reserved (not a site)
   return true;
+}
+
+// Raw public-IP host in ANY notation — dotted-quad, a single decimal/hex/octal
+// integer (http://1090052999/, http://0x7f…/), or IPv6 (http://[2606:4700::]/).
+// A classic blocklist bypass; the old code matched ONLY dotted-quad (report
+// §9.1#3). Private / loopback / link-local stay exempt so localhost dev works.
+function isPublicIpHost(host) {
+  if (!host) return false;
+  host = host.toLowerCase();
+
+  // IPv6 (new URL() keeps the [brackets] on .hostname). Strip them + any zone id.
+  if (host.indexOf(':') !== -1) {
+    const h = host.replace(/^\[/, '').replace(/\]$/, '').split('%')[0];
+    if (h === '' || h === '::' || h === '::1') return false;      // unspecified / loopback
+    if (/^fe[89ab]/.test(h)) return false;                       // fe80::/10 link-local
+    if (/^f[cd]/.test(h)) return false;                          // fc00::/7 unique-local
+    return true;                                                  // any other global IPv6
+  }
+
+  // Dotted IPv4.
+  const dq = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (dq) return octetsArePublic([dq[1], dq[2], dq[3], dq[4]].map(Number));
+
+  // Single-number host: decimal, hex (0x…) or octal (0…) → 32-bit IPv4.
+  let n = null;
+  if (/^\d+$/.test(host)) n = parseInt(host, 10);
+  else if (/^0x[0-9a-f]+$/.test(host)) n = parseInt(host, 16);
+  else if (/^0[0-7]+$/.test(host)) n = parseInt(host, 8);
+  if (n !== null && Number.isFinite(n) && n >= 0 && n <= 0xFFFFFFFF) {
+    return octetsArePublic([(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]);
+  }
+
+  return false;
 }
 
 // URL BLOCKING LOGIC — blocklist + keyword layer + bypass-vector
@@ -1381,8 +1612,10 @@ function shouldBlockUrl(url, depth = 0) {
 
     // STEP 4: REDDIT-SPECIFIC CONTENT FILTERING (Paths and Keywords)
     if (hostname === 'reddit.com' || hostname.endsWith('.reddit.com')) {
-      const pathname = urlObj.pathname.toLowerCase();
-      
+      // Normalise data-feed suffixes off the path so /r/RealGirls.json (and .rss/
+      // .xml/.embed) can't slip past the exact-path block (report §7.3).
+      const pathname = urlObj.pathname.toLowerCase().replace(/\.(json|rss|xml|embed|compact|mobile)$/, '');
+
       // 4a. Check explicit NSFW paths FIRST (exact, no false positives)
       for (const path of GRAYLIST_EXPLICIT_PATHS) {
          if (pathname === path || pathname.startsWith(path + '/')) {
@@ -1454,6 +1687,21 @@ function shouldBlockUrl(url, depth = 0) {
           return { blocked: true, reason: 'patreon_search_keyword', match: patreonSearchHit, tier: 'blacklist', hostname };
         }
       }
+    }
+
+    // STEP 6: GRAYLIST SEARCH — nuclear keyword filter on every OTHER graylisted
+    // site's search endpoint (report §3.4 + §6.1). Kills the adult search before
+    // the SSR first paint the JSON scrub can't reach (Tumblr/Wattpad/Minds/…).
+    const graylistSearchHit = checkGraylistSearch(hostname, urlObj);
+    if (graylistSearchHit) {
+      return { blocked: true, reason: 'graylist_search_keyword', match: graylistSearchHit, tier: 'blacklist', hostname };
+    }
+
+    // STEP 7: "Trusted" hosts with explicit galleries — block the adult
+    // category/file surfaces by path (Wikimedia Commons etc., report §1.3).
+    const trustedAdult = checkTrustedAdultPath(hostname, urlObj);
+    if (trustedAdult) {
+      return { blocked: true, reason: 'trusted_host_adult_path', match: hostname + ' ' + trustedAdult, tier: 'blacklist', hostname };
     }
 
     return { blocked: false, tier: 'unknown', hostname };

@@ -147,7 +147,7 @@ function BlocklistPage({ s, PP }) {
                       <b style={{ fontSize: 13 }}>{g.url}</b>
                       <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', marginTop: 1, lineHeight: 1.4 }}>{g.desc}</span>
                     </div>
-                    <span className="chip" style={{ flex: '0 0 auto', color: g.kind === 'discord' ? '#7c84f6' : g.kind === 'dom' ? '#c9962f' : 'var(--accent-2)' }}>{g.kind === 'discord' ? 'Channel block' : g.kind === 'dom' ? 'Page filter' : 'Feed filter'}</span>
+                    <span className="chip" style={{ flex: '0 0 auto', color: g.kind === 'discord' ? '#7c84f6' : g.kind === 'dom' ? '#c9962f' : g.kind === 'enforce' ? '#4fb286' : 'var(--accent-2)' }}>{g.kind === 'discord' ? 'Channel block' : g.kind === 'dom' ? 'Page filter' : g.kind === 'enforce' ? 'Safe mode' : 'Feed filter'}</span>
                   </div>
               )}
               </div>

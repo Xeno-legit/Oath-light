@@ -67,6 +67,8 @@
         { id: 'tapas', url: 'tapas.io', kind: 'dom', on: true, desc: 'Mature series & episodes removed/blocked at the content gate' },
         { id: 'kofi', url: 'ko-fi.com', kind: 'dom', on: true, desc: 'NSFW-tagged creator pages blocked at the adult-content gate' },
         { id: 'writingcom', url: 'writing.com', kind: 'dom', on: true, desc: 'Adult (18+/GC/XGC) items removed from listings & feeds; adult item pages blocked' },
+        { id: 'youtube', url: 'youtube.com', kind: 'enforce', on: true, desc: 'Restricted Mode forced (PREF cookie); explicit/suggestive searches blocked' },
+        { id: 'spotify', url: 'spotify.com', kind: 'enforce', on: true, desc: 'Explicit erotica/adult audio searches blocked' },
         { id: 'discord', url: 'discord.com', kind: 'discord', on: true, desc: 'Age-restricted channels & servers blocked' },
       ],
       customSites: [],

@@ -51,6 +51,28 @@
   // Booru `rating` values that are NSFW. danbooru: g/s/q/e · gelbooru: safe/questionable/explicit.
   const BOORU_NSFW = new Set(['q', 'e', 'questionable', 'explicit']);
 
+  // Minds adult test — shared by S.minds for both the raw object and its parsed
+  // `legacy` blob. Hoisted (function declaration) so S.minds can call it.
+  function mindsFlagged(o) {
+    if (!o || typeof o !== 'object') return false;
+    if (Array.isArray(o.nsfw) && o.nsfw.length > 0) return true;
+    if (o.mature === true || o.mature === 1) return true;
+    // rating: 1 = open, 2 = mature. Report §7.1: the adult posts set ONLY rating:2
+    // (nsfw:[], mature:false), so nsfw/mature alone miss them — honour rating too.
+    const r = typeof o.rating === 'string' ? parseInt(o.rating, 10) : o.rating;
+    if (typeof r === 'number' && r >= 2) return true;
+    // Tag/hashtag fallback for under-tagged posts (mirrors the Fanbox fix).
+    const tags = o.tags || o.hashtags;
+    if (Array.isArray(tags)) {
+      for (let i = 0; i < tags.length; i++) {
+        const t = tags[i];
+        const s = typeof t === 'string' ? t : (t && (t.name || t.value || t.tag));
+        if (s && /\b(?:nsfw|porn|sex|nude|naked|hentai|erotica?|xxx|18\+|onlyfans|boobs|milf|fetish|bdsm|lewd|hot|busty)\b/i.test(s)) return true;
+      }
+    }
+    return false;
+  }
+
   // ── Signals ───────────────────────────────────────────────────────────────
   // A "signal" returns true if THIS object node directly carries an NSFW label.
   // (Used both directly and via subtree-walks below.)
@@ -94,8 +116,18 @@
     patreon:  o => o.is_nsfw === true,
     // Gumroad: product `is_adult` / `adult` / `nsfw`.
     gumroad:  o => o.is_adult === true || o.adult === true || o.nsfw === true,
-    // Minds: activity `nsfw` is an array of category ids (non-empty = flagged).
-    minds:    o => (Array.isArray(o.nsfw) && o.nsfw.length > 0) || o.mature === true,
+    // Minds: GraphQL feed buries EVERY field inside `legacy`, a unicode-escaped
+    // JSON *string* the walker can't see into — so the old `nsfw`/`mature` test
+    // was a no-op on the search/feed (report §7.1). Parse `legacy` first, then run
+    // the shared adult test (nsfw[] / mature / rating>=2 / adult tags) on both the
+    // raw node and the parsed blob.
+    minds:    o => {
+      if (mindsFlagged(o)) return true;
+      if (typeof o.legacy === 'string' && o.legacy.length > 1) {
+        try { if (mindsFlagged(JSON.parse(o.legacy))) return true; } catch (_) {}
+      }
+      return false;
+    },
     // Itaku: `maturity_rating` of 'SFW' | 'Questionable' | 'NSFW'.
     itaku:    o => typeof o.maturity_rating === 'string' && /nsfw|questionable/i.test(o.maturity_rating),
     // PeerTube videos + Lemmy posts/communities — both use a `nsfw` boolean.
@@ -421,6 +453,27 @@
     try { console.debug('[Pure Path] Graylist V2 stripped', n, 'NSFW item(s) from', id); } catch (_) {}
   }
 
+  // §3.3 — some graylist feeds arrive with a non-JSON content-type (text/html,
+  // text/plain, or none) even though the body IS JSON. Treat a response as worth
+  // reading if the type says json OR it's a texty/empty type; never text-read
+  // images/video/binary. parseScrubbable() then only parses when the body really
+  // starts with { or [ (so a true HTML SSR document is left untouched — that case
+  // is handled by the content.js DOM backstop, not here).
+  function ctMaybeText(ct) {
+    ct = (ct || '').toLowerCase();
+    return ct.indexOf('json') !== -1 || ct === '' || ct.indexOf('text/') !== -1 ||
+           ct.indexOf('javascript') !== -1 || ct.indexOf('ndjson') !== -1;
+  }
+  function parseScrubbable(txt, ct) {
+    if (typeof txt !== 'string') return undefined;
+    if ((ct || '').toLowerCase().indexOf('json') === -1) {
+      const t = txt.replace(/^﻿/, '').replace(/^\s+/, '');
+      const c0 = t.charCodeAt(0);
+      if (c0 !== 123 && c0 !== 91) return undefined;   // not { or [
+    }
+    try { return JSON.parse(txt); } catch (_) { return undefined; }
+  }
+
   // ── fetch patch ───────────────────────────────────────────────────────────
   const realFetch = window.fetch;
   if (typeof realFetch === 'function') {
@@ -436,12 +489,12 @@
         try {
           if (!resp || resp.status === 204 || !resp.ok) return resp;
           const ct = resp.headers.get('content-type') || '';
-          if (ct.indexOf('json') === -1) return resp;
+          if (!ctMaybeText(ct)) return resp;   // images/video/binary — never text-read
 
           // Clone so the original body stream stays intact if we bail out.
           return resp.clone().text().then(txt => {
-            let data;
-            try { data = JSON.parse(txt); } catch (_) { return resp; }
+            const data = parseScrubbable(txt, ct);
+            if (data === undefined) return resp;
 
             const ctx = { n: 0 };
             const cleaned = scrub(data, rule.signals, 0, ctx);
@@ -491,18 +544,23 @@
         if (rule) {
           const self = this;
           let done = false, cachedText;
-          function isJson() { try { return (self.getResponseHeader('content-type') || '').indexOf('json') !== -1; } catch (_) { return false; } }
+          function ctOf() { try { return self.getResponseHeader('content-type') || ''; } catch (_) { return ''; } }
           // Text path (responseType '' | 'text'): scrub the raw text once at rs=4.
+          // Uses the shared §3.3 helpers so mislabeled-JSON feeds are scrubbed too.
           function getText() {
             const raw = rtDesc.get.call(self);
             if (self.readyState !== 4) return raw;          // never cache a partial body
             if (done) return cachedText;
             done = true; cachedText = raw;
             try {
-              if (self.status >= 200 && self.status < 300 && isJson() && typeof raw === 'string') {
-                const c = { n: 0 };
-                const cleaned = scrub(JSON.parse(raw), rule.signals, 0, c);
-                if (c.n > 0) { report(rule.id, c.n); cachedText = JSON.stringify(cleaned); }
+              const ct = ctOf();
+              if (self.status >= 200 && self.status < 300 && typeof raw === 'string' && ctMaybeText(ct)) {
+                const data = parseScrubbable(raw, ct);
+                if (data !== undefined) {
+                  const c = { n: 0 };
+                  const cleaned = scrub(data, rule.signals, 0, c);
+                  if (c.n > 0) { report(rule.id, c.n); cachedText = JSON.stringify(cleaned); }
+                }
               }
             } catch (_) {}
             return cachedText;

@@ -477,6 +477,46 @@
         }
         return false;
       }
+    },
+    'tumblr.com': {
+      // SSR first-paint backstop (report §6.1). Tumblr search/tag/blog pages are
+      // server-rendered, so the MAIN-world JSON scrub never sees them — and with a
+      // logged-in account that has sensitive content enabled, flagged posts render
+      // in full. Tumblr stamps every community-labelled post with a cover whose
+      // text is "Potentially mature content" / "may contain content not suitable
+      // for all audiences" (verified live on /search + /tagged). We HIDE each such
+      // post everywhere (dashboard/blog/search); and on a SEARCH/TAG surface we
+      // hard-block the whole page once ≥2 mature posts appear — an adult-surfacing
+      // search, same threshold logic as the Discord-server rule. (Under-tagged
+      // nude posts carrying NO cover are the documented image-scanner frontier.)
+      textScan: { item: 'article, [data-testid="post"]', re: /potentially mature content|may contain content not suitable|community label/i },
+      pageLabel: () => {
+        const p = (window.location.pathname || '').toLowerCase();
+        if (p.indexOf('/search/') === -1 && p.indexOf('/tagged/') === -1) return false;
+        const re = /potentially mature content|may contain content not suitable/i;
+        let n = 0;
+        for (const a of document.querySelectorAll('article, [data-testid="post"]')) {
+          if (re.test(a.textContent || '')) { if (++n >= 2) return true; }
+        }
+        return false;
+      }
+    },
+    'wattpad.com': {
+      // SSR first-paint backstop (report §6.1). The S.wattpad JSON scrub covers
+      // story-LIST endpoints, but a single story landing/reader page SSRs its own
+      // content unscrubbed. Wattpad renders the story's OWN rating in
+      // [data-testid="story-meta"] as a leaf node whose exact text is "Mature"
+      // (verified live). The user TAG "mature" lives in [data-testid="tags"]
+      // instead, so scoping to story-meta avoids false-blocking a clean story that
+      // merely carries a "mature" tag. Hard-block the whole tab on a mature story.
+      pageLabel: () => {
+        const meta = document.querySelector('[data-testid="story-meta"]');
+        if (!meta) return false;
+        for (const el of meta.querySelectorAll('*')) {
+          if (el.children.length === 0 && (el.textContent || '').trim() === 'Mature') return true;
+        }
+        return false;
+      }
     }
   };
 

@@ -48,6 +48,10 @@ const GRAYLIST_SITES = [
   { url: 'tapas.io',            kind: 'dom', desc: 'Mature series & episodes removed/blocked at the content gate' },
   { url: 'ko-fi.com',           kind: 'dom', desc: 'NSFW-tagged creator pages blocked at the adult-content gate' },
   { url: 'writing.com',         kind: 'dom', desc: 'Adult (18+/GC/XGC) items removed from listings & feeds; adult item pages blocked' },
+  // ── Safe-mode enforcement (platform kept, restricted in place) ────────────
+  // Previously whitelisted (total bypass) — now filtered (adversarial report §1.4/§3.1).
+  { url: 'youtube.com',         kind: 'enforce', desc: 'Restricted Mode forced (PREF cookie); explicit/suggestive searches blocked' },
+  { url: 'spotify.com',         kind: 'enforce', desc: 'Explicit erotica/adult audio searches blocked' },
   // ── Discord (NSFW channels/servers blocked, platform kept) ────────────────
   { url: 'discord.com',         kind: 'discord', desc: 'Age-restricted channels & servers blocked' }
 ];
