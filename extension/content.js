@@ -821,6 +821,114 @@
     setTimeout(dismiss, 12000);
   }
 
+  // PRIVACY-FRONTEND / SEARXNG FINGERPRINT BLOCK (report Round 4 §11.1, §11.3)
+  // Reddit / YouTube / X / Imgur / Quora / TikTok all have open-source "frontends"
+  // (redlib, libreddit, invidious, piped, nitter, rimgo, quetre, proxitok…) that
+  // re-serve the SAME content on ARBITRARY, ever-rotating community domains. Every
+  // host-keyed defense — the over18 cookie, the /r/ path block, the forced
+  // Restricted-Mode cookie, the X possibly_sensitive scrub — misses them because it
+  // keys on the canonical hostname. Likewise self-hosted SearXNG instances aggregate
+  // Google/Bing IMAGE results with SafeSearch stripped, on unbounded domains the
+  // SEARCH_ENGINES host-list can never enumerate.
+  //
+  // We can't list the hostnames — but the SOFTWARE is fingerprintable and stable
+  // across every instance & redesign: each instance footer links its own AGPL source
+  // repo, and SearXNG/Nitter stamp a <meta name="generator">. Detect that, then
+  // hard-block — these mirrors exist precisely to view a platform WITHOUT the
+  // filtering Pure Path already enforces on the canonical host. (Same label-over-host
+  // philosophy as the graylist; it survives the domain churn a hostlist loses to.)
+  function setupFrontendSoftwareBlock() {
+    if (window.top !== window.self) return;          // top frame only — avoids iframe FPs
+    // Don't fire on code-hosting sites (the repo pages themselves link these repos).
+    if (/(^|\.)(github\.com|gitlab\.com|codeberg\.org|bitbucket\.org|sourceforge\.net)$/.test(hostname)) return;
+
+    // Source-repo links = the near-zero-FP signal. A normal site never links these
+    // repos; an instance of the software always does (AGPL attribution in the footer).
+    const REPO_SELECTOR = [
+      'a[href*="github.com/redlib-org"]', 'a[href*="github.com/libreddit"]',
+      'a[href*="/iridium/redlib"]', 'a[href*="github.com/iv-org/invidious"]',
+      'a[href*="github.com/TeamPiped"]', 'a[href*="github.com/zedeus/nitter"]',
+      'a[href*="github.com/PrivacyDevel/nitter"]', 'a[href*="codeberg.org/rimgo"]',
+      'a[href*="github.com/rimgo"]', 'a[href*="codeberg.org/teddit"]',
+      'a[href*="github.com/teddit"]', 'a[href*="github.com/zyachel/quetre"]',
+      'a[href*="github.com/edwardloveall/scribe"]', 'a[href*="github.com/pablouser1/ProxiTok"]',
+      'a[href*="git.sr.ht/~edwardloveall/scribe"]'
+    ].join(',');
+
+    const metaContent = (sel) => { const m = document.querySelector(sel); return (m && (m.content || m.getAttribute('content'))) || ''; };
+
+    let blocked = false;
+    function detect() {
+      const genLow = metaContent('meta[name="generator"]').toLowerCase();
+      const descLow = (metaContent('meta[name="description"]') + ' ' + metaContent('meta[property="og:description"]')).toLowerCase();
+      const title = document.title || '';
+
+      // SearXNG / Searx — block ONLY the leak surfaces (image/video media grid or a
+      // weakened SafeSearch). General text search on a Searx instance stays usable.
+      const isSearx = /searx/.test(genLow) ||
+        document.querySelector('a[href*="docs.searxng.org"], a[href*="github.com/searxng"], a[href*="github.com/searx/searx"]') ||
+        document.querySelector('img[src*="/image_proxy"]');
+      if (isSearx) {
+        const sp = new URLSearchParams(window.location.search);
+        const ss = sp.get('safesearch');
+        // Block ONLY the dedicated image/video media grid, or an explicit
+        // SafeSearch-off. SearXNG expresses an image/video search either as
+        // categories=images / categories=videos OR the checkbox params
+        // category_images / category_videos (any value). Gate on the URL, NOT on
+        // rendered /image_proxy thumbnails — general TEXT search proxies favicons &
+        // infobox images through image_proxy too and must stay usable (that
+        // over-trigger blocked legit text search in testing).
+        const mediaSearch = /\b(image|video|pic)/i.test(sp.get('categories') || '') ||
+                            sp.has('category_images') || sp.has('category_videos');
+        if (mediaSearch || ss === '0' || ss === '1') {
+          return 'SearXNG media/SafeSearch-off';
+        }
+        return null;   // legit text search on a Searx instance — leave it alone
+      }
+
+      // Redlib / Libreddit (Reddit) — every page carries the same stable meta
+      // description regardless of instance ("View on Redlib/Libreddit, an
+      // alternative private front-end to Reddit"). Instance-independent, near-zero FP.
+      if (/\bredlib\b|\blibreddit\b|front-?end to reddit/.test(descLow)) return 'Redlib/Libreddit (Reddit frontend)';
+
+      // Invidious (YouTube) stamps "- Invidious" into every page title.
+      if (/(?:^|[\-|]\s*)invidious\b/i.test(title)) return 'Invidious (YouTube frontend)';
+
+      // Nitter stamps its own generator meta.
+      if (/nitter/.test(genLow)) return 'Nitter (X frontend)';
+
+      // Any FOSS-frontend source repo linked on the page → this is an instance.
+      const repo = document.querySelector(REPO_SELECTOR);
+      if (repo) {
+        const h = (repo.getAttribute('href') || '').replace(/^https?:\/\//, '').split('/').slice(0, 2).join('/');
+        return 'privacy frontend (' + h + ')';
+      }
+      return null;
+    }
+
+    function run() {
+      if (blocked) return;
+      let match = null;
+      try { match = detect(); } catch (_) {}
+      if (!match) return;
+      blocked = true;
+      try { document.documentElement.style.display = 'none'; } catch (_) {}
+      try {
+        chrome.runtime.sendMessage({
+          action: 'notifyBlock', url: window.location.href,
+          reason: 'privacy_frontend', match: match
+        });
+      } catch (_) {}
+    }
+
+    if (document.readyState !== 'loading') run();
+    document.addEventListener('DOMContentLoaded', run);
+    // SPA frontends (Piped) hydrate their footer late, and anti-bot challenge pages
+    // (Anubis/Cloudflare) render the real content a beat later — poll a short burst.
+    let n = 0;
+    const iv = setInterval(() => { if (blocked || n++ > 20) { clearInterval(iv); return; } run(); }, 300);
+  }
+
   function initContentScript() {
     // Inject the MAIN-world interceptor as early as possible — before page scripts
     // boot their data fetches.
@@ -828,6 +936,7 @@
     setupGraylistStatsRelay();
     setupDomLabelFiltering();
     setupDiscordFiltering();
+    setupFrontendSoftwareBlock();
     setupReminderListener();
 
     // FIRST: check for Newgrounds bypass page before doing anything else

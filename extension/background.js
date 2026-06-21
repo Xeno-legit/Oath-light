@@ -563,15 +563,28 @@ function checkGraylistSearch(hostname, urlObj) {
   return matchSearchQueryPorn(q);
 }
 
-// TRUSTED-HOST EXPLICIT GALLERIES (report §1.3) — otherwise-SFW hosts that also
-// host browsable adult collections (Wikimedia Commons Category:Nude*, etc.).
-// We block the adult category/file SURFACES by path without nuking the whole
-// (genuinely useful) host. Tokens are chosen to avoid the obvious educational
-// collisions: 'naked' (→ naked mole-rat), bare 'sexual' (→ sexual reproduction)
-// and 'breast' (→ breast cancer) are deliberately EXCLUDED; we keep the
-// unambiguously-explicit anatomical/sexual stems that Commons renders inline.
+// TRUSTED-HOST EXPLICIT GALLERIES (report §1.3, §3.1, Round 5) — otherwise-SFW
+// hosts that also host browsable adult collections / explicit articles. We block
+// the adult SURFACES by path without nuking the whole (genuinely useful) host.
+// IMPORTANT: this check runs BEFORE the whitelist short-circuit (report §3.1
+// "whitelist grants navigation trust, NOT content-filter suppression"), so it
+// fires even on whitelisted hosts (wikipedia.org). Tokens are chosen to avoid
+// the obvious educational collisions: 'naked' (→ naked mole-rat), bare 'sexual'
+// (→ sexual reproduction) and 'breast' (→ breast cancer) are EXCLUDED.
+//   • commons.wikimedia.org — adult Category:/File:/Special: gallery surfaces.
+//   • wikipedia.org (ALL language + m. subdomains) — explicit SEX-ACT/practice
+//     articles that embed real photos & inline VIDEO of the act (report Round 5:
+//     /wiki/Ejaculation served an inline "Video of a human male ejaculating",
+//     /wiki/Oral_sex|Fellatio|Orgasm carried video, /wiki/Anal_sex 10 photos…).
+//     Scope = sex ACTS only (user decision): each slug is anchored at /wiki/ and
+//     bounded by (?![a-z]) so pure anatomy / reproduction / health / sex-ed
+//     articles (Penis, Vulva, Sexual_reproduction, Sexual_health, Sex_education,
+//     Puberty, Pregnancy …) stay ALLOWED. Slugs that would collide with SFW
+//     articles are deliberately omitted (e.g. 'squirting'→Squirting_cucumber,
+//     'golden_shower'→Golden_shower_tree, 'deep_throat'→Watergate/X-Files).
 const TRUSTED_HOST_ADULT_PATH = new Map([
-  ['commons.wikimedia.org', /\/(?:wiki\/)?(?:category|file|special):[^?]*?(?:nude|nudity|erotic|porn|pornograph|hardcore|hentai|masturbat|orgasm|ejaculat|fellatio|cunnilingus|handjob|blowjob|penis|phallus|vulva|vagina|labia|clitoris|testicl|scrotum|genitalia|genitals|coitus|copulation|sexual_(?:intercourse|activity|penetration|stimulation|arousal|positions)|bdsm|bondage|fetish)/i]
+  ['commons.wikimedia.org', /\/(?:wiki\/)?(?:category|file|special):[^?]*?(?:nude|nudity|erotic|porn|pornograph|hardcore|hentai|masturbat|orgasm|ejaculat|fellatio|cunnilingus|handjob|blowjob|penis|phallus|vulva|vagina|labia|clitoris|testicl|scrotum|genitalia|genitals|coitus|copulation|sexual_(?:intercourse|activity|penetration|stimulation|arousal|positions)|bdsm|bondage|fetish)/i],
+  ['wikipedia.org', /\/wiki\/(?:(?:ejaculation|female_ejaculation|cum_shot|cumshot|creampie|oral_sex|anal_sex|group_sex|sexual_intercourse|sexual_penetration|mutual_masturbation|female_masturbation|masturbation|orgasm|fellatio|cunnilingus|anilingus|handjob|mammary_intercourse|intercrural_sex|tribadism|bukkake|gokkun|snowballing|felching|gangbang|double_penetration|list_of_sex_positions?|sex_positions?|fisting|coprophilia|urolagnia|hentai|ahegao)(?![a-z])|(?:facial|pearl_necklace|fingering)_(?:\(|%28)sex)/i]
 ]);
 
 function checkTrustedAdultPath(hostname, urlObj) {
@@ -1430,10 +1443,11 @@ const BYPASS_PROXY_DOMAINS = new Set([
   // archive viewers (Wayback is unwrapped instead — see unwrapBypassUrl)
   'archive.today', 'archive.ph', 'archive.is', 'archive.li', 'archive.md',
   'archive.vn', 'archive.fo',
-  // reader / CORS proxies (report §3.2) — unwrapBypassUrl pulls the real target
-  // out first when present; a BARE visit (no target) lands here and is blocked.
+  // reader / CORS proxies (report §3.2 + §11.4) — unwrapBypassUrl pulls the real
+  // target out first when present; a BARE visit (no target) lands here and is blocked.
   'r.jina.ai', 's.jina.ai', 'corsproxy.io', 'allorigins.win',
-  'thingproxy.freeboard.io', 'cors-anywhere.herokuapp.com'
+  'thingproxy.freeboard.io', 'cors-anywhere.herokuapp.com',
+  'api.codetabs.com', 'corsproxy.org', 'proxy.cors.sh', 'whateverorigin.org'
 ]);
 
 function matchesBypassProxy(hostname) {
@@ -1483,11 +1497,15 @@ function unwrapBypassUrl(urlObj) {
     if (u && /^https?:\/\//i.test(u)) return u;
   }
 
-  // CORS / reader proxies that take the target in a `url`/`u` query param.
+  // CORS / reader proxies that take the target in a query param. Param name varies
+  // by service: allorigins/corsproxy use `url`, codetabs uses `quest`, others `u`
+  // (report §11.4 — codetabs slipped because only url/u were read).
   if (host === 'corsproxy.io' || host.endsWith('.corsproxy.io') ||
+      host === 'corsproxy.org' || host === 'proxy.cors.sh' || host === 'whateverorigin.org' ||
       host === 'api.allorigins.win' || host === 'allorigins.win' || host.endsWith('.allorigins.win') ||
       host === 'api.codetabs.com' || host === 'cors-anywhere.herokuapp.com') {
-    const u = urlObj.searchParams.get('url') || urlObj.searchParams.get('u');
+    const u = urlObj.searchParams.get('url') || urlObj.searchParams.get('u') ||
+              urlObj.searchParams.get('quest');
     if (u) { try { return decodeURIComponent(u); } catch (_) { return u; } }
   }
 
@@ -1547,6 +1565,61 @@ function isPublicIpHost(host) {
   return false;
 }
 
+// CURATED SUPPLEMENTAL BLACKLIST (report Round 4 §11.2)
+// "Uncensored" AI image/character platforms that the 500k list AND the domain-
+// keyword stems both miss: the stems match the registrable LABEL only, and
+// "mage"/"tensor"/"chub"/"perchance" aren't stems (and a bare stem would
+// over-match SFW words). The brand-name AI *companions* (candy.ai, crushon.ai,
+// seaart.ai) are already on the main blacklist — these are the general-purpose
+// generators / character hubs that were left open.
+const EXTRA_BLACKLIST_DOMAINS = new Set([
+  'mage.space',                       // self-titled "Unlimited & Uncensored AI Image & Video Generator"
+  'tensor.art', 'tusiart.com',        // R-18 AI-art platforms
+  'chub.ai', 'characterhub.org',      // uncensored NSFW character-card / roleplay hub (+ venus subdomain)
+  'yodayo.com', 'pixai.art', 'figgs.ai', 'sakura.fm'  // adjacent NSFW-capable AI art/companion hubs
+]);
+
+// PRIVACY-FRONTEND INSTANCE SEED LIST (report Round 4 §11.1)
+// redlib/libreddit (Reddit), invidious/piped (YouTube), nitter (X) and rimgo
+// (Imgur) are pure PROXIES of platforms Pure Path already restricts on the
+// canonical host — they re-serve the same content UNFILTERED on arbitrary
+// community domains, so every host-keyed defense misses them. They have no SFW
+// value to preserve (the canonical platform IS the legit path), so per the
+// "leaking + no legit use case → blacklist" rule we hard-block the popular,
+// stable instances at the navigation layer (clean ERR_ABORTED, fires BEFORE the
+// instance's anti-bot challenge even loads). This is the belt; the content.js
+// fingerprint detector is the suspenders for instances not on this list.
+// (SearXNG instances are deliberately NOT here — they have legit private text
+//  search; content.js scope-blocks only their image/SafeSearch-off surfaces.)
+const FRONTEND_INSTANCE_DOMAINS = new Set([
+  // redlib / libreddit (Reddit)
+  'redlib.catsarch.com', 'safereddit.com', 'redlib.privacyredirect.com',
+  'reddit.nerdvpn.de', 'l.opnxng.com', 'redlib.perennialte.ch', 'libreddit.kavin.rocks',
+  'redlib.tux.pizza', 'rl.bloat.cat', 'redlib.r4fo.com', 'redlib.4o1x5.dev',
+  'redlib.kittywa.ves', 'red.ngn.tf', 'redlib.freedit.eu', 'redlib.privacy.com.de',
+  // invidious (YouTube)
+  'yewtu.be', 'inv.nadeko.net', 'invidious.nerdvpn.de', 'iv.ggtyler.dev',
+  'yt.artemislena.eu', 'invidious.jing.rocks', 'inv.tux.pizza', 'invidious.fdn.fr',
+  'invidious.privacyredirect.com', 'iv.melmac.space',
+  // piped (YouTube)
+  'piped.video', 'piped.kavin.rocks', 'piped.privacydev.net', 'piped.reallyaweso.me',
+  // nitter (X)
+  'xcancel.com', 'nitter.poast.org', 'nitter.privacyredirect.com', 'nitter.net',
+  'lightbrd.com', 'nitter.tiekoetter.com', 'nitter.kavin.rocks',
+  // rimgo (Imgur)
+  'rimgo.totaldarkness.net', 'rimgo.bus-hit.me', 'rimgo.privacydev.net', 'rimgo.pussthecat.org'
+]);
+
+// perchance.org hosts BOTH innocuous generators (names, dice, lists…) AND the
+// notorious uncensored AI image + character-chat generators. Block only the AI
+// generator/chat paths so the SFW generators keep working (report §11.2).
+function isBlockedPerchancePath(hostname, urlObj) {
+  if (hostname !== 'perchance.org' && !hostname.endsWith('.perchance.org')) return false;
+  const p = urlObj.pathname.toLowerCase();
+  return /^\/ai[-/]/.test(p) || p.includes('image-generator') ||
+         p.includes('character-chat') || p.includes('-chat') || p.includes('nsfw');
+}
+
 // URL BLOCKING LOGIC — blocklist + keyword layer + bypass-vector
 
 function shouldBlockUrl(url, depth = 0) {
@@ -1572,6 +1645,17 @@ function shouldBlockUrl(url, depth = 0) {
     const searchCheck = checkSearchEngineSafeSearch(url, hostname);
     if (searchCheck && (searchCheck.blocked || searchCheck.safesearch)) {
       return searchCheck;
+    }
+
+    // STEP 1.5: "Trusted" hosts with explicit galleries / sex-act articles —
+    // block the adult SURFACES by path (Wikimedia Commons, Wikipedia sex-act
+    // articles). Runs BEFORE the whitelist so a whitelisted host (wikipedia.org)
+    // can no longer suppress this content check (report §3.1 architectural fix /
+    // Round 5). For non-adult paths it returns null and the host proceeds
+    // normally (e.g. en.wikipedia.org/wiki/Cat → whitelist allow).
+    const trustedAdult = checkTrustedAdultPath(hostname, urlObj);
+    if (trustedAdult) {
+      return { blocked: true, reason: 'trusted_host_adult_path', match: hostname + ' ' + trustedAdult, tier: 'blacklist', hostname };
     }
 
     // STEP 2: Check WHITELIST (never block these)
@@ -1601,6 +1685,25 @@ function shouldBlockUrl(url, depth = 0) {
           return { blocked: true, reason: 'blacklist_domain', match: domainToCheck, tier: 'blacklist', hostname };
         }
       }
+    }
+
+    // STEP 3a: Curated supplemental blacklist — uncovered "uncensored" AI
+    // image/character platforms (report Round 4 §11.2), pure-proxy privacy-
+    // frontend instances (§11.1), and perchance AI paths.
+    {
+      const parts = hostname.split('.');
+      for (let i = 0; i < parts.length - 1; i++) {
+        const d = parts.slice(i).join('.');
+        if (EXTRA_BLACKLIST_DOMAINS.has(d)) {
+          return { blocked: true, reason: 'blacklist_ai_platform', match: d, tier: 'blacklist', hostname };
+        }
+        if (FRONTEND_INSTANCE_DOMAINS.has(d)) {
+          return { blocked: true, reason: 'privacy_frontend_instance', match: d, tier: 'blacklist', hostname };
+        }
+      }
+    }
+    if (isBlockedPerchancePath(hostname, urlObj)) {
+      return { blocked: true, reason: 'perchance_ai_path', match: 'perchance.org AI generator', tier: 'blacklist', hostname };
     }
 
     // STEP 3b: DOMAIN-NAME KEYWORD LAYER — catches unlisted porn domains
@@ -1697,12 +1800,8 @@ function shouldBlockUrl(url, depth = 0) {
       return { blocked: true, reason: 'graylist_search_keyword', match: graylistSearchHit, tier: 'blacklist', hostname };
     }
 
-    // STEP 7: "Trusted" hosts with explicit galleries — block the adult
-    // category/file surfaces by path (Wikimedia Commons etc., report §1.3).
-    const trustedAdult = checkTrustedAdultPath(hostname, urlObj);
-    if (trustedAdult) {
-      return { blocked: true, reason: 'trusted_host_adult_path', match: hostname + ' ' + trustedAdult, tier: 'blacklist', hostname };
-    }
+    // (Trusted-host adult-path check moved to STEP 1.5 — see above — so it
+    // applies to whitelisted hosts too.)
 
     return { blocked: false, tier: 'unknown', hostname };
 

@@ -39,6 +39,7 @@ it's pointed; the exposure is the allowlist-shaped perimeter around it.
 | 🟠 High | Minds adapter no-op (fields buried in stringified `legacy` blob) + under-tagging | ✅ **Fixed** — parse `legacy`; rating≥2 + adult-tag fallback (§7.1) |
 | 🟡 Medium | Numeric/IPv6 raw-IP evasion (`isPublicIpHost` was dotted-quad only) | ✅ **Fixed** — decimal/hex/octal/IPv6 handled (§9.1#3) |
 | 🟡 Medium | Reddit `.json`/`.rss` suffix bypassed exact-path block | ✅ **Fixed** — suffix normalized off path (§7.3) |
+| 🔴 Critical | Whitelisted **Wikipedia** serves explicit sex-act photos + **inline video**, fully unfiltered (§3.1 whitelist short-circuit, only YouTube/Spotify were ever de-whitelisted) | ✅ **Fixed (Round 5)** — adult-path check moved **before** the whitelist; Wikipedia sex-act articles path-blocked (§12) |
 
 ---
 
@@ -435,3 +436,207 @@ regression harness (`test-adversarial-fixes.cjs`, 42/42) that runs the real
   verification. The high-yield **search/tag/browse** surfaces are already closed at the perimeter.
 - **`PP_TESTING=true`** in `recordBlockAndRedirect` is left as-is (routes blocks to `about:blank`
   for the Playwright bridge); flip to `false` to restore `blocked.html` / redirect-link behaviour.
+
+---
+
+## 11. Round 4 — pre-beta sweep of the §9 backlog (privacy frontends, AI gen, SearXNG)
+
+> Run **2026-06-21** (open-beta eve), live in the same logged-in browser (`__purePathGraylistV2 === true`,
+> `fetch` patched). This pass drives the **untested §9 backlog** — the vectors §1–§7 only *hypothesised*.
+> Method mandate unchanged: every leak below was confirmed by what actually **rendered** (rendered NSFW
+> post titles + real loaded `img` natural-dimensions / result counts), every "blocked" by a real
+> `net::ERR_ABORTED` / `about:blank` route. Verdict: **three new structural leak classes** confirmed,
+> and the Round 1–3 fixes that were re-probed all **held**.
+
+### 11.1 🔴 NEW (highest value) — Privacy frontends bypass the *entire* host-keyed defense stack
+Every Reddit/YouTube/X defense keys on the real hostname (`reddit.com` / `youtube.com` / `x.com`).
+An open-source **mirror** serves the same content on an arbitrary community domain, where the graylist
+content script still injects (`__purePathGraylistV2 === true`) but **does nothing** — there is no rule
+for the host. Confirmed live:
+
+| Frontend (software) | URL driven | What rendered | Defenses bypassed |
+|---|---|---|---|
+| **Redlib** (Reddit) | `safereddit.com/r/nsfw` → redirected to `redlib.catsarch.com/r/nsfw` | Page title **"Not Safe for Work"**, **275** post elements, NSFW titles (e.g. *"Her face is the best seat in the house NSFW"*), **full-resolution media loaded** (4032×6048, 683×1024, 800×1100 jpeg) **proxied through `redlib.catsarch.com/img/`** | `over18=0` cookie, `/r/` path block, `over_18` API scrub, nuclear search-keyword filter — **all** key on `reddit.com`, none fire |
+| **Invidious** (YouTube) | `yewtu.be/search?q=lingerie+try+on+haul` | **117** video result elements (title *"Lizeth Ramirez Savage X Fall Try-On Haul"* …) | Forced Restricted Mode (`PREF` cookie) + `GRAYLIST_SEARCH_ROUTES` nuclear keyword block — both key on `youtube.com` |
+| **Nitter** (X) | `xcancel.com/search?f=media&q=nsfw` | Reached the instance's **own error page** (X upstream rate-limit), **not** a Pure Path block — host is uncovered | X `possibly_sensitive` scrub keys on `x.com` |
+
+**Why it's the worst hole on the board:** redlib **re-proxies the images through its own domain**
+(`/img/…`), so even a hypothetical CDN-level block wouldn't help; and the class is open-ended —
+**libreddit, teddit, safereddit, redlib.*** (Reddit); **piped, viewtube** (YouTube); **rimgo** (Imgur);
+**quetre** (Quora); **scribe.rip** (Medium); **proxitok** (TikTok). Nitter is structurally uncovered too
+but **low-yield today** because X's API lockdown breaks most instances (as seen).
+
+**Fix (the important one):** you cannot enumerate the infinite set of instance hostnames. Detect the
+**software fingerprint** instead — these frontends emit stable, instance-independent markers:
+`<meta>`/footer "redlib"/"libreddit" branding + the `/img/` & `/vid/` proxy paths; Invidious's
+`<html>` / `window` globals + `/vi/` proxy; Nitter's `<meta name="generator">`. A generic `content.js`
+detector that recognises a frontend and then **blocks (or applies the upstream platform's NSFW filter)**
+regardless of host is the same label-over-host philosophy the graylist already uses — applied to the
+perimeter. (Hostname allow/deny will always lose this race.)
+
+### 11.2 🔴 NEW — "Uncensored" AI gen / character platforms slip the stem layer
+The domain-keyword stems (`civitai`, `spicychat`, `janitorai`, `crushonai`, `dreamgf` …) match only the
+**registrable label**, and the curated blacklist covers the **brand-name companion** apps — but the
+general-purpose "uncensored" generators/hubs are uncovered:
+
+| Site | Result | Note |
+|---|---|---|
+| `perchance.org/ai-text-to-image-generator` | 🔴 **reachable** | own title *"AI Image Generator (free, no sign-up, unlimited)"*; label `perchance` ∉ stems, not listed |
+| `mage.space` | 🔴 **reachable** | own title literally *"Mage — Unlimited & **Uncensored** AI Image & Video Generator"* |
+| `tensor.art` | 🔴 **reachable** | R-18 AI-art platform (Cloudflare challenge, not a PP block) |
+| `chub.ai` | 🔴 **reachable** | major uncensored NSFW character-card / roleplay hub |
+| `candy.ai` | ✅ **blocked** (`ERR_ABORTED`) | on curated list |
+| `crushon.ai` | ✅ **blocked** | on curated list |
+| `seaart.ai` | ✅ **blocked** | on curated list |
+
+**Fix:** add `perchance.org` (at least the AI generator/chat paths), `mage.space`, `tensor.art`,
+`chub.ai`/`chub.ai/venus`, plus the obvious neighbours (`yodayo.com`, `pixai.art`, `figgs.ai`) to the
+blacklist. A bare `perchance`/`mage`/`tensor` stem would over-match SFW words — prefer explicit hosts.
+
+### 11.3 🔴 NEW (visually confirmed) — SearXNG instances serve unfiltered aggregated image search
+`searx.be/search?q=naked+women&categories=images&safesearch=0` → **100 result articles, 100 loaded
+thumbnails**, all proxied through `searx.be/image_proxy?url=…` (the live **Google/Bing image index with
+SafeSearch stripped**). Pure Path appended **no** forced param and did **not** block — `SEARCH_ENGINES`
+can't host-match the unbounded SearXNG instance space (the exact reason §10 left it as backlog). This is
+the Yandex/Brave class but worse: it's the mainstream engines' own index, unfiltered, on an arbitrary host.
+
+**Fix:** SearXNG is also **fingerprintable** — `<meta name="generator" content="searxng/…">`, the
+`/image_proxy` path, the `categories=`/`safesearch=` params. Same generic `content.js` detector as §11.1:
+recognise a Searx/SearXNG instance → force `safesearch=2` (redirect) or deny the `categories=images`
+surface. Folds into one mechanism with the privacy-frontend fix.
+
+### 11.4 🟡 Proxy list is finite — concrete new example (re-confirms §3.2)
+`api.codetabs.com/v1/proxy/?quest=<blocked-url>` → **not blocked**; the host isn't in
+`BYPASS_PROXY_DOMAINS` and `unwrapBypassUrl` doesn't recognise the `quest=` param, so the wrapped target
+is never extracted/re-checked. (codetabs' *own* API returned "Bad request" on the test URLs, so no porn
+actually rendered — but the **Pure Path defect** — an uncovered proxy host + unparsed wrapper param —
+is real.) Generalises to any reader/CORS/web proxy off the ~25-entry list. Add `api.codetabs.com` and the
+generic `?url=`/`?quest=`/`?u=` unwrap; longer-term the finite-list approach needs a generic
+"this response is a proxied foreign page" heuristic.
+
+### 11.5 ✅ Regressions re-probed — all HELD (don't lose these)
+| Surface | Test | Result |
+|---|---|---|
+| **Yandex Images** (§1.1 fix) | `yandex.com/images/search?text=naked women` | ✅ blocked — `ERR_ABORTED` (Tier-2 media-surface deny) |
+| **Reader-proxy unwrap** (§3.2 fix) | `r.jina.ai/https://www.pornhub.com/` | ✅ blocked — `ERR_ABORTED` (unwrap → re-check) |
+| **YouTube Restricted Mode reaches Shorts** (§1.4 fix) | `youtube.com/shorts/` | ✅ `PREF` cookie = `f2=8000000` (Restricted Mode ON); Shorts feed restricted |
+| **NSFW companion brands** | candy.ai / crushon.ai / seaart.ai | ✅ all blocked |
+| **NSFW file host** | `catbox.moe` | ✅ blocked — `ERR_ABORTED` |
+
+### 11.6 Noted but not a new finding
+- **Twitch** `directory/all/tags/Hot Tub` → reachable, uncovered platform; suggestive-class only (Twitch
+  ToS caps it), same bucket as Giphy/Tenor. Not driven to a hardcore leak.
+- **Telegram `t.me`** channel-block still not built (known backlog) — not driven to a specific channel.
+- **File hosts** are mixed: `catbox.moe` is blocked, but `mega.nz`/`pixeldrain`/Discord-CDN were not
+  individually driven this round.
+
+### 11.7 Round-4 bottom line
+The Round 1–3 enforcement held everywhere it was re-tested. The remaining exposure is now clearly
+**one shape: open-ended hostnames that Pure Path can't enumerate** — privacy frontends (§11.1), SearXNG
+instances (§11.3), and off-list proxies (§11.4). All three want the *same* fix the graylist already
+proved out: **stop matching hosts, start matching software/content fingerprints in `content.js`** (stable
+across instances, survives the domain churn). Plus a small blacklist top-up for the uncovered AI
+platforms (§11.2). Highest ROI before beta: the generic frontend/SearXNG fingerprint detector — it closes
+the single highest-yield addict path found in this entire report.
+
+### 11.8 Fixes applied (enforcement pass — 2026-06-21, manifest 3.2.0)
+
+Every Round-4 finding is enforced in code. Validated by the regression harness
+(`test-adversarial-fixes.cjs`, **69/69**) plus live re-test in the reloaded extension.
+
+| # | Finding | Fix | File |
+|---|---|---|---|
+| §11.1 | Privacy frontends bypass all host-keyed defenses | **(a)** `content.js` `setupFrontendSoftwareBlock()` — a generic, instance-independent **fingerprint detector** (top-frame only): Redlib/Libreddit via the stable `<meta name=description>` "front-end to Reddit" (+ source-repo links), Invidious via the "- Invidious" title (+ `iv-org/invidious` link), Nitter via its generator meta, Piped/rimgo/teddit/quetre/scribe/proxitok via their source-repo footer links → hide page + `notifyBlock`. **(b)** `FRONTEND_INSTANCE_DOMAINS` seed list hard-blocks ~40 popular redlib/invidious/piped/nitter/rimgo instances at the **navigation layer** (fires before their anti-bot challenge even loads). Code-host domains (github/gitlab/codeberg…) are exempted to avoid FPs. | `content.js`, `background.js` |
+| §11.2 | Uncovered "uncensored" AI gen/character platforms | `EXTRA_BLACKLIST_DOMAINS` (STEP 3a) blocks `mage.space`, `tensor.art`, `tusiart.com`, `chub.ai`/`characterhub.org`, `yodayo.com`, `pixai.art`, `figgs.ai`, `sakura.fm`. `perchance.org` is **path-scoped** (`isBlockedPerchancePath`): only `/ai-*`, image-generator, character-chat & nsfw paths block — the SFW generators survive. (candy.ai/crushon.ai/seaart.ai were already listed.) | `background.js` |
+| §11.3 | SearXNG serves unfiltered aggregated image search | The same `content.js` detector recognises a Searx/SearXNG instance (generator meta / `docs.searxng.org` link / `/image_proxy`) and **scope-blocks only the leak surface** (`categories=images/videos`, `safesearch=0/1`, or a rendered `image_proxy` thumbnail) → general private **text** search stays usable. Deliberately *not* navigation-blacklisted (preserves the legit use). | `content.js` |
+| §11.4 | Finite proxy list / unparsed wrapper param | `unwrapBypassUrl` now also reads the `quest=` param (codetabs) alongside `url`/`u`; `corsproxy.org`, `proxy.cors.sh`, `whateverorigin.org`, `api.codetabs.com` added to both the unwrap branch and `BYPASS_PROXY_DOMAINS` (bare visit blocked). | `background.js` |
+
+**Live-verified after reload (2026-06-21):**
+- `mage.space` → `ERR_ABORTED`; `perchance.org/ai-text-to-image-generator` → `ERR_ABORTED` while `perchance.org/welcome` (SFW) renders normally.
+- `redlib.catsarch.com/r/nsfw`, `yewtu.be` (invidious) search, `xcancel.com` (nitter) → **`ERR_ABORTED` at navigation**, instant, *before* their anti-bot challenge loads (seed list). The content.js detector independently routed them to `about:blank` post-challenge before the seed list was added — both layers confirmed.
+- **SearXNG** (`searx.be`): image search (`categories=images&safesearch=0`) → `about:blank` (blocked); **text** search (`categories=general`) → renders 10 results, page not hidden — **stays usable**.
+- Controls: `en.wikipedia.org/wiki/Cat`, `perchance.org/welcome` → untouched.
+- **FP caught & fixed during this verification:** the first searx implementation triggered on any rendered `/image_proxy` thumbnail and wrongly blocked *text* search (SearXNG proxies favicons through `/image_proxy` on general search too). Re-gated to block on the URL only (`categories=images/videos`, `safesearch=0/1`). Exactly the kind of leak-vs-overblock the "verify on the rendered page" rule exists to catch.
+
+**Validation:** regression harness `test-adversarial-fixes.cjs` → **69/69**.
+
+**Design note (per project triage rule):** pure-proxy frontends (redlib/invidious/nitter/piped/rimgo) have **no SFW value to preserve** — the canonical platform is the legit path — so they're hard-blocked. SearXNG and perchance **do** have legit surfaces, so they're filtered/path-scoped instead of blanket-blocked. The fingerprint detector is the durable catch-all; the seed lists are the immediate belt-and-suspenders for the highest-traffic instances.
+
+---
+
+## 12. Round 5 — the whitelist perimeter ("trusted" hosts), driven again
+
+> Run **2026-06-21**, live in the same logged-in browser (`__purePathGraylistV2 === true`,
+> `fetch` patched). This pass re-attacked the one class Round 1–4 *named but never fully closed*:
+> the **§3.1 whitelist short-circuit** — any host in `WHITELIST_DOMAINS` returns
+> `{ blocked:false, tier:'whitelist' }` at `shouldBlockUrl` STEP 2 and skips **every** content
+> check. Round 1 only de-whitelisted YouTube/Spotify; the rest of the whitelist stayed a total
+> bypass. Method mandate unchanged: the leak below was confirmed by what actually **rendered**
+> (real inline media + same-origin article sweep), not by predicate logic.
+
+### 12.1 🔴 NEW (highest value) — whitelisted **Wikipedia** serves explicit sex-act photos *and inline video*, fully unfiltered
+`wikipedia.org` is whitelisted (`background.js` ~L232), so `en.wikipedia.org` short-circuits at
+STEP 2. The `checkTrustedAdultPath` block that protects **Wikimedia Commons** ran at STEP 7 —
+*after* the whitelist already returned — and was scoped to `commons.wikimedia.org` only. Net
+result: Wikipedia's explicit articles got **zero** filtering. Confirmed live:
+
+- **`/wiki/Ejaculation`** → rendered, **not blocked** (`tier:'whitelist'`); DOM carried **2 inline
+  `.mw-tmh-player` video players**, one captioned **"Video of a human male ejaculating"**, plus a
+  photographic ejaculation sequence. (Screenshot tool timed out on the live video element; the
+  leak is evidenced by the DOM inventory + caption on the rendered, unblocked page.)
+- **Same-origin sweep** of 12 sex-act articles — **all HTTP 200, all `tier:'whitelist'`:**
+
+  | Article | Inline video players | Explicit photos (filename-matched) |
+  |---|---|---|
+  | `Oral_sex` | 1 | 4 |
+  | `Fellatio` | 1 | 4 |
+  | `Orgasm` | 1 | 6 |
+  | `Anal_sex` | 0 | 10 |
+  | `Cunnilingus` | 0 | 7 |
+  | `Masturbation` | 0 | 6 |
+  | `Sexual_intercourse` | 0 | 5 |
+  | `Cum_shot` / `Facial_(sex_act)` / `Creampie_(sexual_act)` / `Pearl_necklace_(sexuality)` | 0 | 2–4 each |
+
+**Why it's high-value:** Wikipedia is the single most *trusted, endless, never-suspect* host on
+the board — the perfect relapse vector precisely because no filter is expected to be watching it.
+The class is not Wikipedia-specific: **every** whitelisted domain (`quora.com` NSFW spaces,
+`amazon.com`/`ebay.com` adult listings, …) inherits the same total bypass. Quora was Cloudflare-
+challenge-walled under automation but is structurally identical (code-confirmed `tier:'whitelist'`).
+
+### 12.2 Other results
+| Vector | Result | Note |
+|---|---|---|
+| **telegra.ph** (`/Sample-Page-…`) | 🟡 **uncovered** (re-confirmed) | Renders arbitrary user HTML + images inline; no rule, no porn stem, not whitelisted/blacklisted. The known §7.5/§9 Telegram-adjacent host vector — any porn link shared in a Telegram channel renders fully unfiltered. Backlog (needs a content/host heuristic). |
+| **Privacy-frontend fresh instances** (off-seed redlib `redlib.private.coffee`, invidious `invidious.f5.si`, libreddit `libreddit.bus-hit.me`) | ⚪ **inconclusive** | Every instance tried was Anubis/Cloudflare **anti-bot challenge-walled** (HTTP 418 → 502) or dead (`ERR_NAME_NOT_RESOLVED`). That's the *instance's* bot defense fighting the Playwright bridge — **not** a Pure Path result — so the content.js fingerprint detector (the Round-4 keystone, which fires only once real content renders) could **not** be exercised end-to-end. Honest non-result; needs a non-challenge instance or a manual (human-driven) pass to verify. The seed-list navigation block (§11.1) is unaffected and still 6/6 in the harness. |
+
+### 12.3 Fix applied (enforcement pass — 2026-06-21, manifest 3.3.0)
+User decisions for this round: **(scope)** block explicit **sex-ACT/practice** articles only —
+keep pure anatomy / reproduction / health / sex-education articles allowed; **(architecture)** the
+proper §3.1 fix — the whitelist grants *navigation trust* but **no longer suppresses** the
+trusted-host adult-path content check.
+
+| # | Finding | Fix | File |
+|---|---|---|---|
+| §12.1 / §3.1 | Whitelist short-circuit hides explicit content on trusted hosts | **(architecture)** `checkTrustedAdultPath` **moved to STEP 1.5 — before the whitelist** (was STEP 7, after it). The whitelist now grants navigation trust without suppressing the adult-path block, so it fires on whitelisted hosts. Generalizes: any whitelisted host can be added to `TRUSTED_HOST_ADULT_PATH`. | `background.js` |
+| §12.1 | Wikipedia explicit sex-act articles unfiltered | **(scope)** `TRUSTED_HOST_ADULT_PATH` gains a `wikipedia.org` entry (covers ALL language + `m.` subdomains via the parent-domain fallback) matching the explicit **sex-act/practice** article slugs (ejaculation, oral/anal/group sex, masturbation, orgasm, fellatio, cunnilingus, creampie, cum_shot, facial/pearl_necklace/fingering `_(sex…)`, bukkake, gangbang, list_of_sex_positions, fisting, coprophilia, urolagnia, hentai, ahegao, sexual_intercourse, …). Each slug is anchored at `/wiki/` and bounded by `(?![a-z])`. | `background.js` |
+| §12.1 | Over-block risk (educational / homographs) | Scope is **sex-acts only**: pure anatomy/reproduction/health/sex-ed articles stay allowed, and SFW-colliding slugs are deliberately omitted — `squirting` (→ *Squirting_cucumber*), `golden_shower` (→ *Golden_shower_tree*), `deep_throat` (→ Watergate / X-Files). Verified non-blocked: `Sexual_reproduction`, `Sex_education`, `Human_sexuality`, `Puberty`, `Pregnancy`, `Oral_history`, `Analysis`, `Cream_pie` (food), `Facial` (beauty), `Fingering_(guitar)`. | `test-adversarial-fixes.cjs` |
+
+**Validation:** regression harness `test-adversarial-fixes.cjs` → **92/92** (was 69; +23 Round-5
+cases: 11 sex-act blocks incl. de./en.m. subdomains + paren-disambig titles, 12 educational/FP
+allows). The harness executes the **real** edited `background.js` via `vm`, so it faithfully tests
+`shouldBlockUrl`. **Live re-test after extension reload — PASSED ✅:** `/wiki/Ejaculation` and
+`/wiki/Oral_sex` → `net::ERR_ABORTED` (blocked); `/wiki/Sexual_reproduction` (educational),
+`/wiki/Squirting_cucumber` (→ *Ecballium* plant), `/wiki/Oral_history` → render normally (no
+over-block, homograph + anchoring FPs avoided). (The pre-reload live check still rendered
+`/wiki/Ejaculation` only because Chrome doesn't hot-reload unpacked extensions on file change —
+the running service worker held the pre-edit `background.js`.) Same harness-then-reload process as
+Round 4.
+
+### 12.4 Round-5 bottom line
+The deferred **§3.1 whitelist class is real and was exploitable on the highest-trust host in the
+allowlist.** It's now closed architecturally (adult-path check runs *before* the whitelist) and
+scoped on Wikipedia to explicit sex-acts only. Remaining exposure carried forward as backlog:
+the **other** whitelisted hosts (Quora/Amazon — the mechanism now supports them, pending
+verified adult paths), **telegra.ph** and similar uncovered user-content hosts, and a
+**human-driven re-verification of the privacy-frontend fingerprint detector** (automation can't
+clear the instances' anti-bot challenges).
