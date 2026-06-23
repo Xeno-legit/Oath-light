@@ -1,5 +1,7 @@
 mod browsers;
+pub mod nsfw;
 mod profiles;
+pub mod screen;
 
 use browsers::{BrowserDef, Engine, EnforceOutcome, BROWSERS};
 use serde::{Deserialize, Serialize};
@@ -7,9 +9,11 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use base64::Engine as _;
 use tauri::{AppHandle, Emitter, Manager};
 
 // ============================================================================
@@ -147,6 +151,106 @@ pub struct AppState {
     ext_blocking: Option<Value>,
     /// Clean-streak day count from the app, mirrored down to the extensions.
     app_streak: u64,
+}
+
+/// Lazily-loaded NSFW image classifier (Phase 4 optional AI monitoring). The
+/// model (~340MB) is only loaded on first use, then shared across calls.
+#[derive(Default)]
+pub struct NsfwState {
+    classifier: Mutex<Option<Arc<nsfw::NsfwClassifier>>>,
+}
+
+/// Controls the background screen-scanning monitor thread.
+#[derive(Default)]
+pub struct MonitorState {
+    running: Arc<AtomicBool>,
+}
+
+// Monitor tuning.
+const SCAN_POLL: Duration = Duration::from_millis(500);
+const SCAN_FP_SIZE: u32 = 32;
+const SCAN_CHANGE_THRESH: f32 = 6.0; // mean abs luma diff (0..255)
+const SCAN_MIN_GAP: Duration = Duration::from_millis(800);
+
+/// One scan result pushed to the UI (`nsfw-scan` event).
+#[derive(Debug, Clone, Serialize)]
+pub struct ScanEvent {
+    pub ts: u64,
+    pub change: f32,
+    pub capture_ms: f64,
+    pub infer_ms: f64,
+    pub labels: Vec<String>,
+    #[serde(flatten)]
+    pub classification: nsfw::Classification,
+    /// Downscaled JPEG of the captured frame as a data URL ("what it sees").
+    pub thumb: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Downscaled JPEG data-URL of a frame (for the UI preview).
+fn make_thumb(img: &image::DynamicImage, max_side: u32) -> String {
+    let thumb = img.resize(max_side, max_side, image::imageops::FilterType::Triangle);
+    let rgb = thumb.to_rgb8();
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 72);
+    if enc.encode_image(&rgb).is_err() {
+        return String::new();
+    }
+    format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes))
+}
+
+/// The monitor loop: poll the screen, classify only on a major change, and emit
+/// a `nsfw-scan` event (with timing + a thumbnail) each time it does.
+fn run_monitor(app: AppHandle, clf: Arc<nsfw::NsfwClassifier>, running: Arc<AtomicBool>) {
+    log::info!("nsfw screen monitor started");
+    let mut prev_fp: Vec<u8> = Vec::new();
+    let mut last_scan = Instant::now().checked_sub(SCAN_MIN_GAP).unwrap_or_else(Instant::now);
+
+    while running.load(Ordering::Relaxed) {
+        let t_cap = Instant::now();
+        let frame = match screen::capture_primary() {
+            Ok(f) => f,
+            Err(e) => {
+                log::warn!("screen capture failed: {e}");
+                std::thread::sleep(SCAN_POLL);
+                continue;
+            }
+        };
+        let capture_ms = t_cap.elapsed().as_secs_f64() * 1000.0;
+        let (width, height) = (frame.width(), frame.height());
+
+        let fp = screen::fingerprint(&frame, SCAN_FP_SIZE);
+        let change = screen::change_score(&fp, &prev_fp);
+        prev_fp = fp;
+
+        if change >= SCAN_CHANGE_THRESH && last_scan.elapsed() >= SCAN_MIN_GAP {
+            let dynimg = image::DynamicImage::ImageRgba8(frame);
+            let t_inf = Instant::now();
+            match clf.classify_image(&dynimg) {
+                Ok(classification) => {
+                    let infer_ms = t_inf.elapsed().as_secs_f64() * 1000.0;
+                    let payload = ScanEvent {
+                        ts: now_unix_ms(),
+                        change,
+                        capture_ms,
+                        infer_ms,
+                        labels: nsfw::LABELS.iter().map(|s| s.to_string()).collect(),
+                        classification,
+                        thumb: make_thumb(&dynimg, 384),
+                        width,
+                        height,
+                    };
+                    let _ = app.emit("nsfw-scan", &payload);
+                    last_scan = Instant::now();
+                }
+                Err(e) => log::warn!("classify failed: {e}"),
+            }
+        }
+
+        std::thread::sleep(SCAN_POLL);
+    }
+    log::info!("nsfw screen monitor stopped");
 }
 
 // ============================================================================
@@ -904,6 +1008,71 @@ fn update_blocklist_keywords(
     if n > 0 { Ok(()) } else { Err("No connected extensions".to_string()) }
 }
 
+/// Classify an image file with the NSFW model. Loads the model on first call.
+/// Returns per-label probabilities plus `nsfw_score` / `sensitive_score`
+/// aggregates the blocking policy can threshold on.
+#[tauri::command]
+fn classify_image(
+    nsfw_state: tauri::State<'_, NsfwState>,
+    path: String,
+) -> Result<nsfw::Classification, String> {
+    // Lazy-load the model once, then drop the outer lock so inference (guarded
+    // by the session's own mutex) isn't serialized on the state lock.
+    let classifier = {
+        let mut guard = nsfw_state.classifier.lock().map_err(|e| e.to_string())?;
+        if guard.is_none() {
+            let model = nsfw::resolve_model_path().ok_or_else(|| {
+                "NSFW model not found — set PUREPATH_MODEL or place image-guard-2.0.onnx next to the app".to_string()
+            })?;
+            log::info!("Loading NSFW model from {}", model.display());
+            *guard = Some(Arc::new(nsfw::NsfwClassifier::load(&model)?));
+        }
+        guard.as_ref().unwrap().clone()
+    };
+    classifier.classify_path(std::path::Path::new(&path))
+}
+
+/// Start the background screen monitor (loads the model on first start). Emits a
+/// `nsfw-scan` event whenever the screen changes meaningfully. Idempotent.
+#[tauri::command]
+fn start_nsfw_monitor(
+    app: AppHandle,
+    nsfw_state: tauri::State<'_, NsfwState>,
+    monitor: tauri::State<'_, MonitorState>,
+) -> Result<(), String> {
+    if monitor.running.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    let classifier = {
+        let mut guard = nsfw_state.classifier.lock().map_err(|e| e.to_string())?;
+        if guard.is_none() {
+            let model = nsfw::resolve_model_path().ok_or_else(|| {
+                "NSFW model not found — set PUREPATH_MODEL or place image-guard-2.0.onnx next to the app".to_string()
+            })?;
+            log::info!("Loading NSFW model from {}", model.display());
+            *guard = Some(Arc::new(nsfw::NsfwClassifier::load(&model)?));
+        }
+        guard.as_ref().unwrap().clone()
+    };
+    monitor.running.store(true, Ordering::SeqCst);
+    let running = monitor.running.clone();
+    let app_handle = app.clone();
+    std::thread::spawn(move || run_monitor(app_handle, classifier, running));
+    Ok(())
+}
+
+/// Stop the background screen monitor.
+#[tauri::command]
+fn stop_nsfw_monitor(monitor: tauri::State<'_, MonitorState>) {
+    monitor.running.store(false, Ordering::SeqCst);
+}
+
+/// Whether the monitor is currently running.
+#[tauri::command]
+fn nsfw_monitor_running(monitor: tauri::State<'_, MonitorState>) -> bool {
+    monitor.running.load(Ordering::SeqCst)
+}
+
 // ============================================================================
 // Entry point
 // ============================================================================
@@ -917,6 +1086,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(shared_state.clone())
+        .manage(NsfwState::default())
+        .manage(MonitorState::default())
         .invoke_handler(tauri::generate_handler![
             get_extension_stats,
             get_extension_blocklists,
@@ -930,6 +1101,10 @@ pub fn run() {
             request_sync,
             update_blocklist_domains,
             update_blocklist_keywords,
+            classify_image,
+            start_nsfw_monitor,
+            stop_nsfw_monitor,
+            nsfw_monitor_running,
         ])
         .setup(move |app| {
             if cfg!(debug_assertions) {

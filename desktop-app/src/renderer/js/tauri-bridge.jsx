@@ -41,6 +41,18 @@
     },
     // Push the app's clean-streak day count to the extensions.
     setStreak(streak) { return invoke('set_app_streak', { streak: streak | 0 }).catch(() => {}); },
+    // Classify an image file with the NSFW model (Phase 4 optional AI layer).
+    // Resolves to { scores, top_label, top_score, nsfw_score, sensitive_score }.
+    classifyImage(path) { return invoke('classify_image', { path }); },
+    // Background screen monitor (scans the screen on major changes).
+    startNsfwMonitor() { return invoke('start_nsfw_monitor'); },
+    stopNsfwMonitor() { return invoke('stop_nsfw_monitor'); },
+    nsfwMonitorRunning() { return invoke('nsfw_monitor_running').catch(() => false); },
+    // Subscribe to live scan results; resolves to an unlisten function.
+    onNsfwScan(cb) {
+      if (!available) return Promise.resolve(() => {});
+      return T.event.listen('nsfw-scan', (evt) => { if (evt && evt.payload) cb(evt.payload); });
+    },
   };
 
   // React hook — live aggregate stats (total blocks across every extension).

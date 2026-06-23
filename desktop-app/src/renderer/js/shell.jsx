@@ -2,6 +2,7 @@
 
 const NAV = [
 { id: 'overview', label: 'Overview', icon: IconGrid },
+{ id: 'monitor', label: 'AI Monitor', icon: IconSearch },
 { id: 'blocklist', label: 'Blocklist', icon: IconShield },
 { id: 'blocking', label: 'Blocking Settings', icon: IconSliders },
 { id: 'mentor', label: 'Personal Mentor', icon: IconChat },

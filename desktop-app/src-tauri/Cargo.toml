@@ -24,3 +24,14 @@ log = "0.4"
 tauri = { version = "2.10.3", features = [] }
 tauri-plugin-log = "2"
 sysinfo = "0.30"
+
+# --- NSFW AI layer (Phase 4 optional monitoring) ---
+# ort = ONNX Runtime bindings; pinned (prerelease, API still churns). image =
+# decode/resize for SigLIP2 preprocessing. Inference runs on the Image-Guard-2.0
+# (SigLIP2-base, 5-class) model exported to FP32 ONNX by desktop-app/ml/export_onnx.py.
+ort = "=2.0.0-rc.12"
+image = "0.25"
+# Screen capture for the change-triggered NSFW monitor (uses image ^0.25 too).
+xcap = "0.9"
+# Base64-encode the scan thumbnail sent to the UI as a data URL.
+base64 = "0.22"

@@ -40,6 +40,7 @@ it's pointed; the exposure is the allowlist-shaped perimeter around it.
 | 🟡 Medium | Numeric/IPv6 raw-IP evasion (`isPublicIpHost` was dotted-quad only) | ✅ **Fixed** — decimal/hex/octal/IPv6 handled (§9.1#3) |
 | 🟡 Medium | Reddit `.json`/`.rss` suffix bypassed exact-path block | ✅ **Fixed** — suffix normalized off path (§7.3) |
 | 🔴 Critical | Whitelisted **Wikipedia** serves explicit sex-act photos + **inline video**, fully unfiltered (§3.1 whitelist short-circuit, only YouTube/Spotify were ever de-whitelisted) | ✅ **Fixed (Round 5)** — adult-path check moved **before** the whitelist; Wikipedia sex-act articles path-blocked (§12) |
+| 🔴 Critical | **Obfuscated search queries** (`h3ntai`/`p0rn`/`p.o.r.n`/`pron`) bypass the nuclear keyword filter on **every** search surface — host layer normalized leet, query layer never did (Round 7, confirmed live on Mojeek + YouTube) | ✅ **Fixed (Round 7)** — `matchSearchQueryPorn` now de-spaces + leet-normalizes (Scunthorpe guards intact); `pron` added (§14) |
 
 ---
 
@@ -640,3 +641,223 @@ the **other** whitelisted hosts (Quora/Amazon — the mechanism now supports the
 verified adult paths), **telegra.ph** and similar uncovered user-content hosts, and a
 **human-driven re-verification of the privacy-frontend fingerprint detector** (automation can't
 clear the instances' anti-bot challenges).
+
+---
+
+## 13. Round 6 — the "stand where it isn't looking" perimeter, re-driven
+
+> Run **2026-06-22**, live in the same logged-in browser (`__purePathGraylistV2 === true`,
+> enforcement confirmed by the Round-5 control: `/wiki/Ejaculation` → `net::ERR_ABORTED`). This
+> pass went back to the report's own TL;DR thesis — *the addict never defeats the filter, they
+> stand where it isn't looking* — and swept the **uncovered-host classes** the earlier rounds
+> named but never enumerated. **Ethics line held:** no NCII / "leaked"-content URLs were sourced
+> (the search for that was refused on purpose); leaks are evidenced by what *rendered* on benign
+> probes + the real `shouldBlockUrl` coverage map (`round6-probe.cjs`, which loads the actual
+> 100k-domain blacklist so blacklist-dependent rows are authoritative — controls redgifs/catbox/
+> imagebam/baraag all resolve via blacklist, pornhub/bunkrr via keyword, Ejaculation via trusted-
+> path, yewtu.be via frontend-instance). **34 perimeter leaks flagged**, in five classes.
+
+### 13.1 🔴 NEW (highest value) — whitelisted **cloud file hosts** are a hardcore-capable total bypass
+Round 5 closed the §3.1 whitelist short-circuit *only* for Wikipedia/Commons (via
+`checkTrustedAdultPath` at STEP 1.5) and explicitly carried "the other whitelisted hosts" forward
+as backlog. The dangerous members of that backlog are the **cloud file hosts**, which — unlike
+Quora/Amazon — render **arbitrary user-uploaded files with no self-censorship at all** (i.e.
+hardcore-capable). All short-circuit at STEP 2 (`tier:'whitelist'`), so blacklist/keyword/graylist
+never run:
+
+| Whitelisted host | `shouldBlockUrl` | Why it's a leak |
+|---|---|---|
+| `drive.google.com` | `allow (whitelist)` | a shared Drive **folder of porn** renders inline previews, fully unfiltered |
+| `docs.google.com` | `allow (whitelist)` | embedded images in a public doc |
+| `dropbox.com` | `allow (whitelist)` | public file/folder shares |
+| `onedrive.live.com` | `allow (whitelist)` | public OneDrive shares |
+| `quora.com` / `crunchyroll.com` / `amazon.com` / `ebay.com` | `allow (whitelist)` | NSFW spaces / ecchi / sexual-wellness listings (suggestive-capped) |
+
+**Fix:** the architecture for this already exists (Round 5 moved `checkTrustedAdultPath` ahead of
+the whitelist). Cloud file hosts have **no enumerable adult path** (the porn is in opaque file IDs),
+so a path rule can't catch them — they need either (a) removal from the whitelist so they flow
+through the normal pipeline + a graylist DOM/preview backstop, or (b) acceptance as a documented
+residual (file-host delivery, per the strategy doc's "file hosts slide" note). At minimum
+Quora/Amazon/eBay should get `TRUSTED_HOST_ADULT_PATH` entries like Wikipedia did.
+
+### 13.2 🔴 NEW — generic image / file hosts with no porn stem (blacklist-only coverage misses them)
+These have **no porn stem** in the registrable label and are **not on the blacklist**, so all three
+host layers are blind. They are classic NSFW gallery/CDN hosts and render arbitrary uploads with no
+self-censorship. **Live-confirmed reachable, PP-injected, no block:** `pixhost.to` (upload UI
+rendered), `cdn.discordapp.com` (served `0.png 256×256` directly — i.e. any Discord-shared NSFW
+attachment streams unfiltered). Structurally uncovered (probe + grep): `imgbox.com`, `imx.to`,
+`vipr.im`, `ibb.co`, `imgbb.com`, `imgchest.com`, `jpg.church`/`jpg5.su`, `media.discordapp.net`.
+*(Positive control: the **stem'd / listed** neighbours `imagebam.com`, `imagevenue.com`,
+`litterbox.catbox.moe` are correctly blocked — so the gap is specifically the no-stem hosts.)*
+
+**Fix:** add the popular no-stem image/album hosts to the blacklist (`pixhost.to`, `imgbox.com`,
+`imx.to`, `vipr.im`, `ibb.co`/`imgbb.com`, `imgchest.com`, `jpg.church`+aliases). Discord CDN
+(`cdn.discordapp.com`/`media.discordapp.net`) is mixed-use (every Discord image rides it) — same
+class as the strategy doc's file-host call; treat as residual or block only on a referer/heuristic.
+
+### 13.3 🔴 NEW — Telegram-adjacent publishing / paste hosts (named ×3, finally enumerated)
+`telegra.ph` was flagged uncovered in §7.5, §9, and §12.2 but never driven; Round 6 confirms it
+**and its whole class**. All render arbitrary user HTML + inline images (Telegram CDN for
+telegra.ph), no porn stem, not listed, not whitelisted. **Live-confirmed reachable + PP-injected +
+no block:** `telegra.ph`, `justpaste.it`. Structurally uncovered: `graph.org` (telegra.ph alias),
+`teletype.in`, `rentry.co`/`rentry.org`, `write.as`, and `t.me/s/<channel>` web previews.
+
+**Fix:** blacklist the publishing/paste hosts that are predominantly abused for NSFW dumps
+(`telegra.ph`+`graph.org`, `justpaste.it`, `rentry.co/org`), or give them a graylist DOM image
+backstop. `t.me/s/` channel previews remain the long-standing un-built Telegram vector.
+
+### 13.4 🟡 Foreign search engines — uncovered Tier-2 class, but self-censor-capped
+The Round-1 `SEARCH_ENGINES` Tier-2 list omits the major **non-Western** engines. Pure Path forces
+no param and blocks no media surface on them. **Live-driven:**
+- **Baidu Images** (`image.baidu.com`, query `naked woman nude`) → **49 images rendered, not
+  blocked** — but Baidu's state-mandated censorship held them to **artistic/suggestive** (sculpture,
+  partial-nude art, lingerie), **no hardcore**. Evidence: `round6-baidu-naked.jpeg`.
+- **Naver Images** (`search.naver.com`, `naked woman`) → not blocked, but Naver's real-name adult
+  gate returned **"no results"** (`검색결과가 없습니다`). Evidence: `round6-naver-naked.jpeg`.
+- Structurally uncovered too: `pic.sogou.com`, `search.seznam.cz/obrazky`, `ask.com`.
+
+This is the **Startpage/DuckDuckGo pattern**: a real enforcement gap whose realized severity is
+capped by the engine's *own* strong self-censorship. Lower priority than §13.1–§13.3.
+**Fix:** add Baidu/Naver/Sogou/Seznam to Tier-2 (block image/video surface + NSFW query) for
+defense-in-depth; the engines that *don't* self-censor (Yandex/Brave) are already covered.
+
+### 13.5 🟡 Federated platforms — navigation-allow is by-design; the gap is SSR first-paint (§6.1)
+`lemmy.world`, `kbin.social`, `mastodon.social` are `allow` at navigation **by design** —
+`graylist-inject.js` has Lemmy/Mastodon API rules that scrub `nsfw`/`sensitive` from the JSON.
+The residual is the **known §6.1 SSR first-paint gap**: lemmy-ui is server-rendered, so a NSFW
+community's first screen lands in the DOM before any XHR the patch can see. Not a new class — it's
+the carried-forward SSR backstop. *(NSFW-permissive instances `baraag.net`/`pawoo.net` are already
+blacklisted — good.)*
+
+### 13.6 Round-6 bottom line
+The graylist machinery and the host-keyed defenses (keyword stems, the 100k blacklist, frontend
+fingerprinting, the Round-5 whitelist-path fix) **all held where they're pointed** — every control
+blocked correctly. The exposure is unchanged in *shape* from the report's own thesis and now
+enumerated concretely: **uncovered hosts that render arbitrary content with no self-censorship** —
+the whitelisted **cloud file hosts** (§13.1, the hardcore-capable one), the no-stem **image/CDN
+hosts** (§13.2), and the **paste/publishing hosts** (§13.3). Highest ROI before shipping: blacklist
+top-ups for §13.2/§13.3 (cheap, immediate) and a whitelist-semantics decision for the cloud file
+hosts in §13.1 (the only hardcore-capable leak on the board). Artifacts: `round6-probe.cjs`
+(coverage map, 34 leaks), `round6-baidu-naked.jpeg`, `round6-naver-naked.jpeg`.
+
+### 13.7 Fixes applied (enforcement pass — 2026-06-22, manifest 3.4.0)
+
+Every actionable Round-6 finding is enforced in code. Validated by `round6-probe.cjs` (now a
+**48/48** pass/fail retest with the real 100k blacklist loaded — it asserts the new blocks AND
+that normal/SFW use on the same hosts still passes) plus the full regression harness
+`test-adversarial-fixes.cjs` (**92/92**, no Round 1–5 regressions). Both run the real edited
+`background.js` in a vm, so they faithfully test `shouldBlockUrl`.
+
+| # | Finding | Fix | File |
+|---|---|---|---|
+| §13.1 | Whitelisted hosts' on-site adult **search** waved through | New `TRUSTED_HOST_SEARCH` + `checkTrustedHostSearch`, wired at **STEP 1.6 (before the whitelist)** like the Round-5 adult-path check: a porn-keyword query on `quora.com`/`amazon.com`/`ebay.com`/`crunchyroll.com` → block; every SFW search/browse on those hosts stays usable. | `background.js` |
+| §13.1 | Whitelisted **cloud file hosts** (drive/docs/dropbox/onedrive) | **Documented residual** (in code + report): core productivity tools, no enumerable adult path, can't be blacklisted — same call as the strategy doc's "file hosts slide." The architecture (STEP 1.5/1.6 before whitelist) is ready if a future enumerable surface appears. | — |
+| §13.2 | No-stem image/album hosts blind to all 3 host layers | `EXTRA_BLACKLIST_DOMAINS` += `pixhost.to`, `imgbox.com`, `imx.to`, `vipr.im`, `imagetwist.com`, `imgdrive.net`, `acidimg.cc`, `imgview.net`, `pixroute.com`, `imgadult.com`, `turboimagehost.com`, the `jpg.*`/`host.church` chevereto family, and the mixed-use `ibb.co`/`imgbb.com`/`imgchest.com` (flagged removable). Discord CDN left as a mixed-use residual. | `background.js` |
+| §13.3 | Telegram-adjacent paste/publishing hosts | `EXTRA_BLACKLIST_DOMAINS` += `telegra.ph`, `graph.org`, `justpaste.it`, `teletype.in`, `rentry.co`, `rentry.org`, `write.as`, `controlc.com`, `ctxt.io`. `t.me/s/` channel previews remain the un-built Telegram vector. | `background.js` |
+| §13.4 | Foreign engines (Baidu/Naver/Sogou/Seznam) uncovered | `SEARCH_ENGINES` Tier-2 += the four engines (narrow host regexes so `tieba.`/`baike.`/`fanyi.baidu.com`, `mail.naver.com` are untouched); `isMediaSearchSurface` made **host-aware** (`image.`/`pic.`/`video.` subdomains) + `where=`/`tn=` params + `obrazky` path → image surfaces & NSFW queries blocked, SFW web search preserved. | `background.js` |
+| (cosmetic) | reason label | STEP 3a return relabelled `blacklist_ai_platform` → `blacklist_supplemental` (the set now spans AI + image + paste hosts). | `background.js` |
+
+**Deliberately NOT changed (proportionality):** cloud file hosts (§13.1 residual), Discord CDN /
+`media.discordapp.net` (every Discord image rides it — mixed-use), `t.me/s/` previews (separate
+channel-block mechanism, still backlog), and the §13.5 federated SSR first-paint gap (the known
+§6.1 DOM-backstop work, unchanged).
+
+**Live re-verification — PASSED ✅** (2026-06-22, after extension reload to 3.4.0):
+- **Blocked live** (all were leaking before the fix): `telegra.ph` → `net::ERR_ABORTED` (§13.3);
+  `pixhost.to` → `net::ERR_ABORTED` (§13.2); `image.baidu.com/...word=naked%20woman` → routed to
+  `about:blank` (§13.4, was 49 rendered images in §13.4 above); `quora.com/search?q=porn` →
+  `net::ERR_ABORTED` (§13.1 — blocked despite Quora being whitelisted, i.e. STEP 1.6 fired).
+- **No over-block** (rendered normally): `en.wikipedia.org/wiki/Cat`,
+  `quora.com/search?q=how+to+learn+python` (SFW search stays usable),
+  `baike.baidu.com/item/猫` (the narrow Baidu regex left the encyclopedia untouched).
+
+Live behaviour matched the harness exactly. (Same harness-then-reload process as Rounds 4 & 5;
+Chrome doesn't hot-reload unpacked extensions, so the reload was required for the running service
+worker to pick up the edited `background.js`.)
+
+---
+
+## 14. Round 7 — obfuscated search queries ("type it weird, walk right through")
+
+> Run **2026-06-22**, live in the same logged-in browser (extension attached — confirmed by the
+> control `yandex.com/images/search?text=naked women` → `net::ERR_ABORTED`). After six rounds of
+> closing *host*-shaped holes, this pass went after the one normalization the **query** layer never
+> got. The hostname layer has normalized leetspeak since Batch-5 (`checkDomainKeywords` →
+> `normalizeLeet`, plus full punycode IDN decoding), so `p0rnhub.com` is blocked. But the **nuclear
+> search-keyword filter** (`matchSearchQueryPorn`) — the ground-truth-independent layer that backs
+> Tier-2 engines, every graylist search route, the trusted-host search, and Reddit/Patreon — only
+> lowercased and stripped `[_-.,]`. It **never de-obfuscated**. So the addict doesn't defeat the
+> filter; they just *spell the word funny*. Method mandate unchanged: the leak was confirmed by what
+> actually **rendered**, and the coverage map is the real `shouldBlockUrl` (`round7-probe.cjs`).
+
+### 14.1 🔴 NEW (headline) — leetspeak / separator queries bypass the nuclear keyword filter on EVERY search surface
+`matchSearchQueryPorn` (`background.js` ~L481) built one haystack:
+`' ' + q.toLowerCase().replace(/[_\-.,]+/g,' ')…`, then whole-word + `≥4`-char run-together matched
+the keyword lists. No leet map, no de-spacing. The asymmetry is the bug: **the host layer normalizes,
+the query layer doesn't.** Trivial obfuscations therefore sail through:
+
+| Obfuscation | Why it slips | Example that bypassed |
+|---|---|---|
+| **Leetspeak** (`0→o 3→e 4→a 1→i 5→s 7→t`) | keyword list is ASCII; `h3ntai ≠ hentai` | `h3ntai`, `p0rn`, `pu55y`, `b00bs`, `s3x`, `n4ked` |
+| **Separators between letters** | `replace(/[_\-.,]/)` → `"p o r n"` (4 single tokens), never reforms `porn` | `p.o.r.n`, `p o r n`, `h-e-n-t-a-i` |
+| **Metathesis / slang** | not a substitution at all — `pron` wasn't a listed term | `pron`, `pr0n` (`→pron`) |
+
+**Confirmed live (two independent surfaces):**
+- **Mojeek** (Tier-2 engine): `mojeek.com/search?q=hentai` → `net::ERR_ABORTED` (blocked), but
+  `mojeek.com/search?q=h3ntai` → **rendered**, page title *"h3ntai - Mojeek Search"*, and the web
+  results **surfaced an actual hentai-porn link** — `hentai69.hotviber.fr` *"H3ntai 69, le Sexe
+  Orientale"*. Porn hosts self-index under leet SEO, so the obfuscated query both bypasses Pure Path
+  **and** realizes content.
+- **YouTube** (graylist route): `youtube.com/results?search_query=porn` → blocked, but
+  `youtube.com/results?search_query=p0rn` → **rendered** (title *"p0rn - YouTube"*, not `about:blank`)
+  — Pure Path's nuclear search layer took no action (YouTube's own Restricted Mode still caps the
+  results, but the PP layer demonstrably failed).
+
+**Authoritative coverage** (`round7-probe.cjs`, real `shouldBlockUrl` + real 100k blacklist) — pre-fix
+the obfuscated query bypassed **12/12** surfaces while the plain keyword blocked: Tier-2 engines
+(Mojeek/Gibiru/Brave), graylist routes (YouTube/Pixiv/Tumblr), trusted-host search on whitelisted
+**Quora**, and Reddit. The same `matchSearchQueryPorn` backs ~25 graylist search routes + 4 Tier-1 +
+14 Tier-2 engines + 4 trusted hosts + Reddit/Patreon, so the gap was **board-wide** for the keyword
+layer (the image-surface deny on Tier-2 still held independently — `yandex.com/images` stayed blocked).
+
+### 14.2 🟡 Reddit media subdomains (`redd.it`) — host-keyed defenses all miss the CDN
+Every Reddit defense (`over18=0` cookie, `/r/` path block, `over_18` scrub, search-keyword filter)
+keys on `reddit.com`. The media CDNs **`i.redd.it` / `preview.redd.it` / `v.redd.it`** and `redd.it`
+short links are a **different registrable domain** with no rule, not on the blacklist — `shouldBlockUrl`
+returns `allow` for all four (probe §B). A direct NSFW Reddit-hosted image/video hotlink renders
+unfiltered. **Realized yield is low** (you must already hold the direct file URL — it's not a discovery
+surface) and the host is **mixed-use** (every SFW Reddit upload rides the same CDN, with no per-URL NSFW
+signal), so a blanket host-block would break SFW image opens. Same class as `cdn.discordapp.com` (§13.2):
+**left as a documented residual**, flagged here for the record.
+
+### 14.3 What HELD (controls re-probed)
+The image/video-surface denies, the 100k blacklist, the trusted-path block, and the whitelist-search
+block all fired correctly (`pornhub.com`, `yandex.com/images`, `/wiki/Ejaculation`, plain-keyword
+searches → all blocked). SFW searches stayed usable (`weather`, `python tutorial`, `minecraft`,
+`r/aww`). No regression in the full harness (92/92).
+
+### 14.4 Fix applied (enforcement pass — 2026-06-22, manifest 3.5.0)
+
+| # | Finding | Fix | File |
+|---|---|---|---|
+| §14.1 | Leet/separator/metathesis queries bypass the nuclear keyword filter | `matchSearchQueryPorn` rebuilt to test a small set of **de-obfuscated variants** with the *same* whole-word + `≥4`-run-together rule (so the `SUBSTRING_UNSAFE` + `len<4` Scunthorpe guards still hold): **(a)** new `deSpaceLetters()` folds runs of `≥3` single chars separated by `[\s._\-+*|/~]` back into a word (`"p o r n"`/`"p.o.r.n"`→`porn`) — requires single-char tokens so `"pen island"`/`"the rapist"` are untouched; **(b)** `normalizeLeet()` (the same map the host layer uses) applied to each base; **(c)** the **RAW** variant is always kept so digit-bearing keywords (`r34`/`rule34`/`18+`) — which leet-normalization would corrupt — still match. | `background.js` |
+| §14.1 | `pron`/`pr0n` slang (metathesis, not a substitution) | Added `pron` to `HARD_PORN_KEYWORDS` + `SUBSTRING_UNSAFE_KEYWORDS` (whole-word only, so `apron`/`prone`/`pronoun` don't trip). | `background.js` |
+| §14.2 | Reddit `redd.it` media CDN uncovered | **Documented residual** (mixed-use CDN, no per-URL NSFW signal, no discovery value) — same call as Discord CDN. | — |
+
+**Validation:** `round7-probe.cjs` → **37/37** (12 obfuscation blocks across all surface types + 11
+FP controls proving `pen island`/`the rapist`/`ps5`/`areas 51`/`apron`/`prone`/`rule34`/`18+` are
+handled correctly + the redd.it residual rows). Full regression harness `test-adversarial-fixes.cjs`
+→ **92/92** (no Round 1–6 regression). Both run the real edited `background.js` in a `vm`.
+
+**Live status:** the *bug* was confirmed live pre-fix (Mojeek `h3ntai` rendered a porn link; YouTube
+`p0rn` rendered). The *fix*'s live re-verification is pending the usual manual extension reload (Chrome
+doesn't hot-reload unpacked extensions, so the running service worker still holds the pre-edit
+`background.js` — same harness-then-reload caveat as Rounds 4–6; the harness is authoritative).
+
+### 14.5 Round-7 bottom line
+Six rounds hardened the *perimeter by host*; Round 7 found the perimeter was **phonetically porous** —
+the keyword layer that every search surface leans on read only literal ASCII. One normalization
+(`deSpaceLetters` + `normalizeLeet`, mirroring the host layer) closes leet, separator, and slang
+obfuscation board-wide in a single function, with the Scunthorpe guards intact. The only carried-forward
+residual is the mixed-use `redd.it` CDN (low-yield, no discovery value). The graylist machinery and all
+host-keyed defenses held everywhere they were re-probed.

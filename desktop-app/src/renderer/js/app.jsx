@@ -11,6 +11,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 const PAGES = {
   home: HubMenu,
   overview: OverviewPage,
+  monitor: MonitorPage,
   blocklist: BlocklistPage,
   blocking: BlockingPage,
   mentor: MentorPage,

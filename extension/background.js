@@ -457,6 +457,9 @@ const HARD_PORN_KEYWORDS = [
   'ecchi', 'ahegao', 'oppai', 'yaoi', 'yuri',
   'shotacon', 'lolicon', 'doujinshi', 'ero manga', 'eroge',
   'smut', 'erotica',
+  // 'pron' = common porn-slang metathesis (porn→pron→pr0n). Whole-word-only
+  // (SUBSTRING_UNSAFE) so it can't Scunthorpe apron/prone/pronoun (report Round 7).
+  'pron',
   // Bare unambiguous terms — safe under whole-word matching (used only in the
   // Reddit subreddit/search checks). 'xxx'/'cum' are whole-word-only (len < 4),
   // so they can't Scunthorpe; 'gonewild'/'r34'/'lewd' are long enough to substring.
@@ -476,18 +479,46 @@ const HARD_PORN_KEYWORDS = [
 //   cock→cocktail/peacock  butt→button/butter  dick→Dickens  balls→footballs
 //   rape→grape/scrape/drape  milf→Milford. Standalone use still blocks; we only
 //   give up run-together matches for these few (rare in real adult queries).
-const SUBSTRING_UNSAFE_KEYWORDS = new Set(['cock', 'butt', 'dick', 'balls', 'rape', 'milf']);
+const SUBSTRING_UNSAFE_KEYWORDS = new Set(['cock', 'butt', 'dick', 'balls', 'rape', 'milf', 'pron']);
+
+// Collapse runs of single characters separated by separators so spelled-out
+// obfuscation ("p o r n", "p.o.r.n", "h-e-n-t-a-i") folds back to the word.
+// Requires >=3 single chars in a row, so real multi-letter words are untouched
+// ("pen island", "the rapist", "j r r tolkien" → "jrr tolkien" stay safe — only
+// genuine single-letter sequences are joined).
+function deSpaceLetters(s) {
+  return s.replace(/[a-z0-9](?:[\s._\-+*|/~]+[a-z0-9]){2,}/g,
+    (m) => m.replace(/[\s._\-+*|/~]+/g, ''));
+}
 
 function matchSearchQueryPorn(searchQuery) {
   if (!searchQuery) return null;
   const queryLower = searchQuery.toLowerCase();
+  // OBFUSCATION-RESISTANT MATCHING (report Round 7 §A). The hostname layer
+  // (checkDomainKeywords) normalizes leetspeak, but this query layer never did —
+  // so h3ntai / p0rn / pu55y / b00bs / s3x and the separator forms "p.o.r.n" /
+  // "p o r n" slipped the nuclear keyword block on EVERY search surface (Tier-2
+  // engines, graylist routes, trusted-host search, Reddit/Patreon). We now test a
+  // small set of de-obfuscated variants with the SAME whole-word + >=4-run-together
+  // rule, so the Scunthorpe guards (SUBSTRING_UNSAFE + len<4 whole-word-only) still
+  // hold. The RAW variant is always included unchanged so digit-bearing keywords
+  // (r34 / rule34 / 18+) — which leet-normalization would corrupt — keep matching.
+  const bases = new Set([queryLower, deSpaceLetters(queryLower)]);
+  const variants = [];
+  for (const b of bases) {
+    variants.push(b);
+    const leet = normalizeLeet(b);
+    if (leet !== b) variants.push(leet);
+  }
   // NB: don't strip '+' — searchParams already turned URL '+' into spaces, so a
   // surviving '+' is a literal one we must keep (e.g. the "18+" keyword).
-  const qText = ' ' + queryLower.replace(/[_\-.,]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
+  const wordHays = variants.map(
+    (v) => ' ' + v.replace(/[_\-.,]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ');
   const has = (keyword) => {
-    if (qText.includes(' ' + keyword + ' ')) return true;            // whole-word
-    if (keyword.length >= 4 && !SUBSTRING_UNSAFE_KEYWORDS.has(keyword) &&
-        queryLower.includes(keyword)) return true;                   // run-together
+    for (const qText of wordHays) if (qText.includes(' ' + keyword + ' ')) return true; // whole-word
+    if (keyword.length >= 4 && !SUBSTRING_UNSAFE_KEYWORDS.has(keyword)) {
+      for (const v of variants) if (v.includes(keyword)) return true;                   // run-together
+    }
     return false;
   };
   for (const keyword of HARD_PORN_KEYWORDS) if (has(keyword)) return keyword;
@@ -597,6 +628,36 @@ function checkTrustedAdultPath(hostname, urlObj) {
   return re.test(urlObj.pathname.toLowerCase()) ? 'adult gallery path' : null;
 }
 
+// WHITELISTED-HOST ADULT SEARCH (report Round 6 §13.1) — several whitelisted hosts
+// expose an on-site SEARCH that can surface adult results the whitelist would
+// otherwise wave straight through (Quora NSFW spaces, Amazon/eBay adult listings,
+// Crunchyroll ecchi). Like checkTrustedAdultPath this runs BEFORE the whitelist
+// short-circuit, but it only kills the *adult search* (porn-keyword query) — every
+// normal search/browse on these hosts stays usable, so their (large) legit value
+// is preserved. NOTE: this closes the ENUMERABLE adult surface only. The cloud
+// FILE hosts (drive.google.com / docs.google.com / dropbox.com / onedrive.live.com)
+// stay a documented residual: they render arbitrary uploads with no enumerable
+// adult path, and they're core productivity tools that can't be blacklisted —
+// per the strategy doc's "file hosts slide" note.
+const TRUSTED_HOST_SEARCH = new Map([
+  ['quora.com',       (u) => u.searchParams.get('q')],
+  ['amazon.com',      (u) => u.searchParams.get('k') || u.searchParams.get('field-keywords')],
+  ['ebay.com',        (u) => u.searchParams.get('_nkw')],
+  ['crunchyroll.com', (u) => u.searchParams.get('q')]
+]);
+
+function checkTrustedHostSearch(hostname, urlObj) {
+  let fn = TRUSTED_HOST_SEARCH.get(hostname);
+  if (!fn) {
+    const parts = hostname.split('.');
+    for (let i = 1; i < parts.length - 1 && !fn; i++) fn = TRUSTED_HOST_SEARCH.get(parts.slice(i).join('.'));
+  }
+  if (!fn) return null;
+  let q = null;
+  try { q = fn(urlObj); } catch (_) {}
+  return matchSearchQueryPorn(q);
+}
+
 // SEARCH ENGINE SAFESEARCH ENFORCEMENT
 //
 // TIER 1 — mainstream engines whose web UI reliably honours a SafeSearch URL
@@ -635,7 +696,18 @@ const SEARCH_ENGINES = [
   { id: 'swisscows',  tier: 2, re: /^(www\.)?swisscows\.com$/,                           qkeys: ['query', 'q'] },
   { id: 'gibiru',     tier: 2, re: /^(www\.)?gibiru\.com$/,                              qkeys: ['q'] },
   { id: 'yep',        tier: 2, re: /^(www\.)?yep\.com$/,                                 qkeys: ['q'] },
-  { id: 'metager',    tier: 2, re: /^(www\.)?metager\.org$/,                             qkeys: ['eingabe', 'q'] }
+  { id: 'metager',    tier: 2, re: /^(www\.)?metager\.org$/,                             qkeys: ['eingabe', 'q'] },
+  // ── Round 6 §13.4 — major non-Western engines the Tier-2 list omitted. They
+  //    force no param and were fully uncovered. Realized payoff is capped by the
+  //    engines' OWN heavy self-censorship (Baidu→artistic, Naver→0 results), but
+  //    the enforcement gap is identical to Yandex/Brave, so we cover the class:
+  //    block image/video surfaces (incl. their image.* / pic.* subdomains, see
+  //    isMediaSearchSurface) + NSFW queries. Narrow host regexes so non-search
+  //    subdomains (tieba./baike./fanyi.baidu.com, mail.naver.com) are untouched.
+  { id: 'baidu',      tier: 2, re: /^(www\.|m\.|image\.|pic\.|v\.)?baidu\.com$/,         qkeys: ['word', 'wd', 'q'] },
+  { id: 'naver',      tier: 2, re: /^(search\.|s\.|m\.)?naver\.com$/,                    qkeys: ['query', 'q'] },
+  { id: 'sogou',      tier: 2, re: /^(www\.|pic\.|m\.|v\.)?sogou\.com$/,                 qkeys: ['query', 'q'] },
+  { id: 'seznam',     tier: 2, re: /^search\.seznam\.cz$/,                               qkeys: ['q'] }
 ];
 
 function matchSearchEngine(hostname) {
@@ -646,10 +718,16 @@ function matchSearchEngine(hostname) {
 // Does this URL look like an image / video / picture search surface? Used to deny
 // the hardcore thumbnail grids on Tier-2 engines that ignore our forced param.
 function isMediaSearchSurface(urlObj) {
+  // Host-based: a dedicated image/picture/video search SUBDOMAIN is a media
+  // surface by definition (image.baidu.com, pic.sogou.com, images.search.yahoo).
+  // Only ever reached for matched Tier-2 engines, so this can't over-match SFW.
+  if (/^(images?|imgs?|pic|pics|photo|photos|video|videos)\./.test(urlObj.hostname.toLowerCase())) return true;
   const p = urlObj.pathname.toLowerCase();
-  if (/(^|\/)(images?|imgs?|videos?|vids?|pics?|photos?|gallery)(\/|$)/.test(p)) return true;
+  // 'obrazky' = Seznam's image path (Czech for "images").
+  if (/(^|\/)(images?|imgs?|videos?|vids?|pics?|photos?|gallery|obrazky)(\/|$)/.test(p)) return true;
   const sp = urlObj.searchParams;
-  for (const k of ['t', 'tbm', 'ia', 'iax', 'iar', 'cat', 'kind', 'fmt', 'type']) {
+  // 'where' = Naver tab (where=image), 'tn' = Baidu surface (tn=baiduimage).
+  for (const k of ['t', 'tbm', 'ia', 'iax', 'iar', 'cat', 'kind', 'fmt', 'type', 'where', 'tn']) {
     const v = (sp.get(k) || '').toLowerCase();
     if (/image|isch|img|video|vid|photo|pic/.test(v)) return true;
   }
@@ -1576,7 +1654,29 @@ const EXTRA_BLACKLIST_DOMAINS = new Set([
   'mage.space',                       // self-titled "Unlimited & Uncensored AI Image & Video Generator"
   'tensor.art', 'tusiart.com',        // R-18 AI-art platforms
   'chub.ai', 'characterhub.org',      // uncensored NSFW character-card / roleplay hub (+ venus subdomain)
-  'yodayo.com', 'pixai.art', 'figgs.ai', 'sakura.fm'  // adjacent NSFW-capable AI art/companion hubs
+  'yodayo.com', 'pixai.art', 'figgs.ai', 'sakura.fm',  // adjacent NSFW-capable AI art/companion hubs
+
+  // ── Round 6 §13.2 — generic image/album hosts with NO porn stem, not on the
+  //    blacklist, so all three host layers were blind. These are the classic
+  //    forum/NSFW thumbnail-gallery hosts (predominantly adult; the canonical
+  //    SFW image host is a mainstream provider, so per the triage rule they have
+  //    no SFW value worth preserving here). pixhost confirmed live-reachable.
+  'pixhost.to', 'imgbox.com', 'imx.to', 'vipr.im', 'imgview.net', 'pixroute.com',
+  'imagetwist.com', 'imgdrive.net', 'acidimg.cc', 'imgadult.com', 'turboimagehost.com',
+  // Chevereto "img.*" / jpg.* chameleon family (heavily adult, churns TLDs)
+  'jpg.church', 'jpg.fish', 'jpg.pet', 'jpg.homes', 'jpg.fishing', 'host.church',
+  'jpg1.su', 'jpg2.su', 'jpg3.su', 'jpg4.su', 'jpg5.su', 'jpeg.pet',
+  // Mixed-use general image hosts (have real SFW use too — included for the
+  // addiction threat model; remove any of these if the collateral is unwanted).
+  'ibb.co', 'imgbb.com', 'imgchest.com',
+
+  // ── Round 6 §13.3 — Telegram-adjacent publishing / paste hosts that render
+  //    arbitrary user HTML + inline images with no self-censorship. telegra.ph
+  //    was flagged uncovered in §7.5/§9/§12.2 and is a known porn-dump vector;
+  //    telegra.ph + justpaste confirmed live-reachable. graph.org is the
+  //    telegra.ph alias.
+  'telegra.ph', 'graph.org', 'justpaste.it', 'teletype.in', 'rentry.co', 'rentry.org',
+  'write.as', 'controlc.com', 'ctxt.io'
 ]);
 
 // PRIVACY-FRONTEND INSTANCE SEED LIST (report Round 4 §11.1)
@@ -1658,6 +1758,14 @@ function shouldBlockUrl(url, depth = 0) {
       return { blocked: true, reason: 'trusted_host_adult_path', match: hostname + ' ' + trustedAdult, tier: 'blacklist', hostname };
     }
 
+    // STEP 1.6: Adult SEARCH on a whitelisted host (Quora/Amazon/eBay/Crunchyroll).
+    // Also runs before the whitelist so the porn-keyword search is killed without
+    // suppressing the host's normal use (report Round 6 §13.1).
+    const trustedSearch = checkTrustedHostSearch(hostname, urlObj);
+    if (trustedSearch) {
+      return { blocked: true, reason: 'trusted_host_search_keyword', match: hostname + ':' + trustedSearch, tier: 'blacklist', hostname };
+    }
+
     // STEP 2: Check WHITELIST (never block these)
     for (const whitelistDomain of WHITELIST_DOMAINS) {
       if (hostname === whitelistDomain || hostname.endsWith('.' + whitelistDomain)) {
@@ -1688,14 +1796,15 @@ function shouldBlockUrl(url, depth = 0) {
     }
 
     // STEP 3a: Curated supplemental blacklist — uncovered "uncensored" AI
-    // image/character platforms (report Round 4 §11.2), pure-proxy privacy-
-    // frontend instances (§11.1), and perchance AI paths.
+    // image/character platforms (report Round 4 §11.2), no-stem image/album hosts
+    // (Round 6 §13.2), Telegram-adjacent paste/publishing hosts (§13.3), pure-proxy
+    // privacy-frontend instances (§11.1), and perchance AI paths.
     {
       const parts = hostname.split('.');
       for (let i = 0; i < parts.length - 1; i++) {
         const d = parts.slice(i).join('.');
         if (EXTRA_BLACKLIST_DOMAINS.has(d)) {
-          return { blocked: true, reason: 'blacklist_ai_platform', match: d, tier: 'blacklist', hostname };
+          return { blocked: true, reason: 'blacklist_supplemental', match: d, tier: 'blacklist', hostname };
         }
         if (FRONTEND_INSTANCE_DOMAINS.has(d)) {
           return { blocked: true, reason: 'privacy_frontend_instance', match: d, tier: 'blacklist', hostname };
