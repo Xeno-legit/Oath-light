@@ -174,6 +174,45 @@ Notes:
   the reliability analysis).
 - Added **Domain-name keyword layer** to Phase 2 of `Pure_Path_Master_Plan.md`.
 - Added **Graylist V2 (API interception)** to Phase 3.
+- **Built Graylist V2 — API/network-layer interception** (`extension/graylist-inject.js`):
+  - A `world:"MAIN"` script (injected by `content.js` as an external web-accessible
+    `<script src>`, so it bypasses strict page CSP that blocks inline scripts) patches
+    `window.fetch`, reads the site's own per-item NSFW label in the JSON it downloads, and
+    **strips the flagged items before the page renders them** — we become the filter.
+  - Config-driven scrubber with per-host rules + signals: reddit `over_18`/`isNsfw`,
+    X/Twitter `possibly_sensitive`, pixiv `xRestrict`, Mastodon (any instance, matched by
+    stable REST paths) `sensitive`, Bluesky `labels`, Tumblr `is_nsfw`/`is_adult`, boorus
+    `rating`. New sites = one entry in the `RULES` table.
+  - **Depth-first removal** at the finest array level: X buries `possibly_sensitive` under
+    `instructions[] → entries[]`; cleaning `entries[]` first lets the batch (and its cursor
+    + safe tweets) survive instead of nuking the whole instruction. Validated against real
+    response shapes for all 7 sites + cursor-survival + all-safe-passthrough.
+  - Self-gates on the request URL (cheap substring pre-filter before any URL parse / body
+    read), so it's near-free on the ~99.9% of pages/requests that don't match. All-safe
+    responses are returned untouched (no rebuild). fetch-only for now (the listed SPAs all
+    use fetch); XHR-based legacy APIs are a documented follow-up.
+  - Stripped-item counts post-message to `content.js`, which relays `graylistFiltered` to
+    `background.js` → `stats.graylistFiltered` (tracked separately from navigation blocks).
+  - The old per-site CSS layer in `content.js` (`GRAYLIST_FILTERS` UI/content hiding,
+    `rawCSS`, the cheeky popup + click interception, Reddit/X/Newgrounds toggle-forcing,
+    and shadow-DOM enforcement) was **removed entirely** — V2 fetch interception is the sole
+    graylist mechanism now. Kept in `content.js`: SafeSearch UI hiding (search engines, not
+    graylist), the Newgrounds "Content Filtered" bypass-page block (a hard redirect, not
+    UI-hiding), and SPA URL monitoring (delegates to background navigation blocking).
+    *Trade-off:* DOM-label/SSR-only sites with no JSON feed (newgrounds, AO3, furaffinity)
+    are no longer content-filtered by CSS — a DOM-label pass for those is a follow-up.
+- **Added the API-intercept rules** for reddit, x/twitter, pixiv, tumblr, bluesky, Mastodon
+  (all instances, path-matched), boorus, **imgur** (`nsfw`), **nexusmods**
+  (`contains_adult_content`), **deviantart** (`is_mature`). Depth-first scrubber, fetch-only.
+- **Built the DOM-label engine** (`content.js` `DOM_LABEL_RULES`) for the SSR sites: newgrounds,
+  AO3, furaffinity, fanfiction.net (+ best-effort inkbunny/sofurry). Listing items removed by
+  their own rating marker; **content pages hard-blocked** by a page-level rating read
+  (`pageLabel`/`pagePath`) — closes the "adult preference already enabled server-side" leak that
+  item-hiding can't reach. No toggle-forcing (the rot-prone V1 mechanic) is restored.
+- **Reddit search went nuclear** (reddit-only): the `q=` param is matched against the full soft +
+  hard keyword lists (whole-word for short keywords to avoid Scunthorpe, substring for ≥4-char).
+- **Surfaced the covered-site catalog** in both UIs (`extension/graylist-sites.js` + desktop store),
+  replacing the stale placeholder list.
 
 ---
 

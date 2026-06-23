@@ -1,9 +1,51 @@
 let isExtensionEnabled = true;
-let passwordHash = null;
 let blocklistDomains = [];
 let blocklistSet = new Set(); // O(1) domain lookup
 
 let defaultDomains = [];
+
+// Blocking settings pushed down from the desktop app (the "Redirect link" target
+// and the focus-schedule reminders). Cached in memory for a zero-cost read on
+// every navigation; mirrored to chrome.storage.local under `ppBlocking` so it
+// survives a service-worker restart.
+let blockingSettings = null;
+async function loadBlockingSettings() {
+  try {
+    const { ppBlocking } = await chrome.storage.local.get(['ppBlocking']);
+    if (ppBlocking && typeof ppBlocking === 'object') blockingSettings = ppBlocking;
+  } catch (_) {}
+  return blockingSettings;
+}
+
+// Cached Set of the built-in domains, for fast "is this a default?" checks.
+let defaultSetCache = null;
+function getDefaultSet() {
+  if (!defaultSetCache || defaultSetCache.size !== defaultDomains.length) {
+    defaultSetCache = new Set(defaultDomains);
+  }
+  return defaultSetCache;
+}
+
+// On a cold/revived service worker the in-memory list can be empty; reload it
+// from storage before any mutation so we never overwrite the saved blocklist.
+// A single shared promise dedupes the cold-start bootstrap and the first
+// navigation racing to load the same 385k list.
+let blocklistLoadPromise = null;
+async function ensureBlocklistLoaded() {
+  if (blocklistSet && blocklistSet.size > 0) return;
+  if (!blocklistLoadPromise) {
+    blocklistLoadPromise = loadBlocklistsFromStorage()
+      .finally(() => { blocklistLoadPromise = null; });
+  }
+  await blocklistLoadPromise;
+}
+
+// User-added domains are tracked in their own storage key (the source of truth
+// for "my blocklist"), independent of the large merged blocklistDomains list.
+async function getCustomList() {
+  const { customDomains } = await chrome.storage.local.get(['customDomains']);
+  return Array.isArray(customDomains) ? customDomains : [];
+}
 
 // Deduplication maps: prevents multi-firing stats while allowing re-blocks
 const tabLastChecked = new Map();
@@ -28,14 +70,6 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   if (!result.stats) {
     await chrome.storage.local.set({ stats: { totalBlocks: 0, installDate: new Date().toISOString() } });
   }
-
-  // Initialize password hash if not set (blocking works without setup page)
-  const { passwordHash: storedHash } = await chrome.storage.local.get(['passwordHash']);
-  if (!storedHash) {
-    // Auto-initialize with a default hash so blocking is always active
-    const defaultHash = 'auto_initialized';
-    await chrome.storage.local.set({ passwordHash: defaultHash });
-  }
 });
 
 chrome.runtime.onStartup.addListener(async () => {
@@ -43,6 +77,15 @@ chrome.runtime.onStartup.addListener(async () => {
   await loadDefaultListsIntoMemory();
   await loadBlocklistsFromStorage();
 });
+
+// Cold-start: an idle-revived MV3 service worker re-evaluates this script but
+// fires NEITHER onInstalled NOR onStartup — so without this the blacklist Set
+// would sit empty (only the keyword layer firing) until the next browser
+// restart. Load eagerly on every worker spawn; ensureBlocklistLoaded dedupes
+// against the first navigation that also triggers a load.
+ensureBlocklistLoaded();
+loadDefaultListsIntoMemory();
+loadBlockingSettings();
 
 // Cache default lists into variables to send to Desktop app
 // Loads all 3 part files in parallel for fastest cold-start
@@ -243,9 +286,12 @@ const WHITELIST_DOMAINS = [
   'irs.gov',
 
   // Entertainment (safe)
-  'youtube.com',
-  'youtu.be',
-  'spotify.com',
+  // NOTE: youtube.com / youtu.be / spotify.com were REMOVED from the whitelist
+  // (report §1.4 + §3.1). Whitelisting short-circuited ALL content filtering, so
+  // YouTube served unrestricted suggestive content and Spotify served explicit
+  // erotica audio. They now flow through the normal pipeline: YouTube gets forced
+  // Restricted Mode (GRAYLIST_COOKIE_MAP, PREF cookie) + the nuclear search filter
+  // (GRAYLIST_SEARCH_ROUTES); Spotify gets the nuclear search filter.
   'netflix.com',
   'hulu.com',
   'disneyplus.com',
@@ -369,6 +415,10 @@ const SOFT_PORN_KEYWORDS = [
   'bikini babes', 'lingerie', 'underwear models', 'swimsuit models',
   'topless', 'bottomless', 'naked', 'nude', 'nudes',
   'sex', 'sexual',
+  // Suggestive-class terms that surface nudity on graylist/tag searches (the
+  // Tumblr "/search/bikini" leak). Soft tier: forces SafeSearch on big engines,
+  // blocks the search on graylist sites / Tier-2 engines / Reddit.
+  'thicc', 'bikini', 'swimsuit', 'cleavage', 'busty', 'thong', 'panties', 'curvy',
   'strip', 'stripping', 'stripper', 'striptease',
   'cam girl', 'camgirl', 'webcam girl', 'live cam',
   'onlyfans', 'only fans', 'patreon nsfw',
@@ -405,33 +455,228 @@ const HARD_PORN_KEYWORDS = [
   'goregasm', 'dolcett', 'guro', 'vorarephilia',
   'suicidegirls', 'babestation', 'slutwife', 'hotwife',
   'ecchi', 'ahegao', 'oppai', 'yaoi', 'yuri',
-  'shotacon', 'lolicon', 'doujinshi', 'ero manga', 'eroge'
+  'shotacon', 'lolicon', 'doujinshi', 'ero manga', 'eroge',
+  'smut', 'erotica',
+  // Bare unambiguous terms — safe under whole-word matching (used only in the
+  // Reddit subreddit/search checks). 'xxx'/'cum' are whole-word-only (len < 4),
+  // so they can't Scunthorpe; 'gonewild'/'r34'/'lewd' are long enough to substring.
+  'xxx', 'cum', 'gonewild', 'r34', 'lewd'
 ].map(k => k.toLowerCase());
 
+// NUCLEAR SEARCH-QUERY FILTER (shared by Reddit §4c and Patreon §5)
+// Returns the matched NSFW keyword if the raw search query contains ANY soft- or
+// hard-porn term, else null. Whole-word match for short keywords so we don't
+// Scunthorpe innocent queries (essex/massachusetts/document); substring for
+// ≥4-char keywords so run-together terms ("milfhunter", "hotbabes") are caught.
+// This is the ground-truth-INDEPENDENT layer: it kills the adult *search itself*,
+// catching under-tagged/suggestive content the platform never labels NSFW (the
+// "privates covered by one pixel → not 18+" leak that DOM label-hiding can't reach).
+// ≥4-char keywords that are ALSO substrings of common innocent words — these must
+// match WHOLE-WORD ONLY (never run-together), or they Scunthorpe legit searches:
+//   cock→cocktail/peacock  butt→button/butter  dick→Dickens  balls→footballs
+//   rape→grape/scrape/drape  milf→Milford. Standalone use still blocks; we only
+//   give up run-together matches for these few (rare in real adult queries).
+const SUBSTRING_UNSAFE_KEYWORDS = new Set(['cock', 'butt', 'dick', 'balls', 'rape', 'milf']);
+
+function matchSearchQueryPorn(searchQuery) {
+  if (!searchQuery) return null;
+  const queryLower = searchQuery.toLowerCase();
+  // NB: don't strip '+' — searchParams already turned URL '+' into spaces, so a
+  // surviving '+' is a literal one we must keep (e.g. the "18+" keyword).
+  const qText = ' ' + queryLower.replace(/[_\-.,]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
+  const has = (keyword) => {
+    if (qText.includes(' ' + keyword + ' ')) return true;            // whole-word
+    if (keyword.length >= 4 && !SUBSTRING_UNSAFE_KEYWORDS.has(keyword) &&
+        queryLower.includes(keyword)) return true;                   // run-together
+    return false;
+  };
+  for (const keyword of HARD_PORN_KEYWORDS) if (has(keyword)) return keyword;
+  for (const keyword of SOFT_PORN_KEYWORDS) if (has(keyword)) return keyword;
+  return null;
+}
+
+// GRAYLIST SEARCH-QUERY FILTER — extend the nuclear keyword block (used for
+// Reddit §4c + Patreon §5) to EVERY graylisted site's search endpoint. This is
+// the ground-truth-INDEPENDENT layer: it kills the adult *search itself* before
+// the page renders, which ALSO closes the SSR first-paint leak the JSON scrub
+// can't see (report §3.4 + §6.1 — Tumblr/Wattpad/Minds search is server-rendered,
+// so the fetch/XHR patch never sees it). Each extractor returns the raw search
+// string for its host, pulling it from the query string OR the path (many SPAs
+// put the term in the path, e.g. tumblr.com/search/<q>, wattpad.com/search/<q>).
+
+// URL-decoded path segment after `prefix` (e.g. '/search/'), or null.
+function pathSegmentAfter(urlObj, prefix) {
+  const p = urlObj.pathname;
+  if (!p.toLowerCase().startsWith(prefix)) return null;
+  let seg = p.slice(prefix.length).split('/')[0];
+  if (!seg) return null;
+  try { seg = decodeURIComponent(seg); } catch (_) {}
+  return seg.replace(/\+/g, ' ');
+}
+function pathStartsWith(urlObj, prefix) {
+  return urlObj.pathname.toLowerCase().startsWith(prefix);
+}
+
+const GRAYLIST_SEARCH_ROUTES = new Map([
+  ['tumblr.com',      (u) => pathSegmentAfter(u, '/search/') || pathSegmentAfter(u, '/tagged/')],
+  ['wattpad.com',     (u) => pathSegmentAfter(u, '/search/') || pathSegmentAfter(u, '/stories/') || pathSegmentAfter(u, '/list/')],
+  ['pixiv.net',       (u) => pathSegmentAfter(u, '/tags/') || u.searchParams.get('word')],
+  ['x.com',           (u) => pathStartsWith(u, '/search') ? u.searchParams.get('q') : null],
+  ['twitter.com',     (u) => pathStartsWith(u, '/search') ? u.searchParams.get('q') : null],
+  ['minds.com',       (u) => pathStartsWith(u, '/search') ? u.searchParams.get('q') : null],
+  ['youtube.com',     (u) => u.searchParams.get('search_query') || u.searchParams.get('q')],
+  ['spotify.com',     (u) => pathSegmentAfter(u, '/search/') || u.searchParams.get('q')],
+  ['vimeo.com',       (u) => pathStartsWith(u, '/search') ? u.searchParams.get('q') : null],
+  ['dailymotion.com', (u) => pathSegmentAfter(u, '/search/')],
+  ['gumroad.com',     (u) => u.searchParams.get('query') || u.searchParams.get('q')],
+  ['imgur.com',       (u) => pathStartsWith(u, '/search') ? u.searchParams.get('q') : null],
+  ['flickr.com',      (u) => pathStartsWith(u, '/search') ? u.searchParams.get('text') : null],
+  ['sketchfab.com',   (u) => pathStartsWith(u, '/search') ? u.searchParams.get('q') : null],
+  ['500px.com',       (u) => pathSegmentAfter(u, '/search/') || u.searchParams.get('q')],
+  ['artstation.com',  (u) => pathStartsWith(u, '/search') ? u.searchParams.get('query') : null],
+  ['newgrounds.com',  (u) => u.searchParams.get('terms') || u.searchParams.get('q')],
+  ['itaku.ee',        (u) => u.searchParams.get('search') || u.searchParams.get('q')],
+  ['gamebanana.com',  (u) => u.searchParams.get('_sSearchString') || u.searchParams.get('q')],
+  // "Trusted" hosts whose on-site search can surface explicit galleries (§1.3).
+  ['wikimedia.org',   (u) => u.searchParams.get('search')],
+  ['archive.org',     (u) => u.searchParams.get('query') || u.searchParams.get('q')]
+]);
+
+const GRAYLIST_SEARCH_DOMAINS = new Set(GRAYLIST_SEARCH_ROUTES.keys());
+
+function matchGraylistSearchDomain(hostname) {
+  if (GRAYLIST_SEARCH_DOMAINS.has(hostname)) return hostname;
+  const parts = hostname.split('.');
+  for (let i = 1; i < parts.length - 1; i++) {
+    const parent = parts.slice(i).join('.');
+    if (GRAYLIST_SEARCH_DOMAINS.has(parent)) return parent;
+  }
+  return null;
+}
+
+// Matched NSFW keyword if THIS url is an adult search on a graylist site, else null.
+function checkGraylistSearch(hostname, urlObj) {
+  const base = matchGraylistSearchDomain(hostname);
+  if (!base) return null;
+  let q = null;
+  try { q = GRAYLIST_SEARCH_ROUTES.get(base)(urlObj); } catch (_) {}
+  return matchSearchQueryPorn(q);
+}
+
+// TRUSTED-HOST EXPLICIT GALLERIES (report §1.3, §3.1, Round 5) — otherwise-SFW
+// hosts that also host browsable adult collections / explicit articles. We block
+// the adult SURFACES by path without nuking the whole (genuinely useful) host.
+// IMPORTANT: this check runs BEFORE the whitelist short-circuit (report §3.1
+// "whitelist grants navigation trust, NOT content-filter suppression"), so it
+// fires even on whitelisted hosts (wikipedia.org). Tokens are chosen to avoid
+// the obvious educational collisions: 'naked' (→ naked mole-rat), bare 'sexual'
+// (→ sexual reproduction) and 'breast' (→ breast cancer) are EXCLUDED.
+//   • commons.wikimedia.org — adult Category:/File:/Special: gallery surfaces.
+//   • wikipedia.org (ALL language + m. subdomains) — explicit SEX-ACT/practice
+//     articles that embed real photos & inline VIDEO of the act (report Round 5:
+//     /wiki/Ejaculation served an inline "Video of a human male ejaculating",
+//     /wiki/Oral_sex|Fellatio|Orgasm carried video, /wiki/Anal_sex 10 photos…).
+//     Scope = sex ACTS only (user decision): each slug is anchored at /wiki/ and
+//     bounded by (?![a-z]) so pure anatomy / reproduction / health / sex-ed
+//     articles (Penis, Vulva, Sexual_reproduction, Sexual_health, Sex_education,
+//     Puberty, Pregnancy …) stay ALLOWED. Slugs that would collide with SFW
+//     articles are deliberately omitted (e.g. 'squirting'→Squirting_cucumber,
+//     'golden_shower'→Golden_shower_tree, 'deep_throat'→Watergate/X-Files).
+const TRUSTED_HOST_ADULT_PATH = new Map([
+  ['commons.wikimedia.org', /\/(?:wiki\/)?(?:category|file|special):[^?]*?(?:nude|nudity|erotic|porn|pornograph|hardcore|hentai|masturbat|orgasm|ejaculat|fellatio|cunnilingus|handjob|blowjob|penis|phallus|vulva|vagina|labia|clitoris|testicl|scrotum|genitalia|genitals|coitus|copulation|sexual_(?:intercourse|activity|penetration|stimulation|arousal|positions)|bdsm|bondage|fetish)/i],
+  ['wikipedia.org', /\/wiki\/(?:(?:ejaculation|female_ejaculation|cum_shot|cumshot|creampie|oral_sex|anal_sex|group_sex|sexual_intercourse|sexual_penetration|mutual_masturbation|female_masturbation|masturbation|orgasm|fellatio|cunnilingus|anilingus|handjob|mammary_intercourse|intercrural_sex|tribadism|bukkake|gokkun|snowballing|felching|gangbang|double_penetration|list_of_sex_positions?|sex_positions?|fisting|coprophilia|urolagnia|hentai|ahegao)(?![a-z])|(?:facial|pearl_necklace|fingering)_(?:\(|%28)sex)/i]
+]);
+
+function checkTrustedAdultPath(hostname, urlObj) {
+  let re = TRUSTED_HOST_ADULT_PATH.get(hostname);
+  if (!re) {
+    const parts = hostname.split('.');
+    for (let i = 1; i < parts.length - 1 && !re; i++) re = TRUSTED_HOST_ADULT_PATH.get(parts.slice(i).join('.'));
+  }
+  if (!re) return null;
+  return re.test(urlObj.pathname.toLowerCase()) ? 'adult gallery path' : null;
+}
+
 // SEARCH ENGINE SAFESEARCH ENFORCEMENT
+//
+// TIER 1 — mainstream engines whose web UI reliably honours a SafeSearch URL
+//          param. We force the strict value across ALL regional TLDs
+//          (google.de / google.co.uk / search.yahoo.co.jp …). The old code
+//          matched only the bare `.com`, so every regional TLD bypassed
+//          SafeSearch entirely (Adversarial report §1.2). The new host regexes
+//          match the brand on any public-suffix TLD, and DON'T match unrelated
+//          sub-domains (mail./docs./news.google.com), so we no longer redirect
+//          non-search hosts.
+// TIER 2 — other engines (Yandex, Brave, Startpage, Ecosia, Mojeek, Qwant, …)
+//          that ignore URL params and/or have no reliable strict param, and were
+//          previously UNCOVERED — serving hardcore image grids with zero
+//          enforcement (report §1.1). For these we (a) force the documented param
+//          where one exists (best-effort), AND (b) hard-block their image/video
+//          search surfaces (the thumbnail grids), AND (c) hard-block any search
+//          whose query contains an NSFW keyword. General text search still works.
+//
+// NOTE: self-hosted SearXNG/Searx instances live on arbitrary domains and can't
+// be matched by host; AI answer engines (perplexity/you.com) are text and are
+// covered by the keyword layer, not here.
 
 const SEARCH_ENGINES = [
-  { domain: 'google.com', queryParam: 'q', safeParam: 'active' },
-  { domain: 'bing.com', queryParam: 'q', safeParam: 'strict' },
-  { domain: 'duckduckgo.com', queryParam: 'q', safeParam: '1' },
-  { domain: 'yahoo.com', queryParam: 'p', safeParam: 'r' }
+  // ── Tier 1 — force strict param, all TLDs ──
+  { id: 'google',     tier: 1, re: /^(www\.)?google\.[a-z]{2,3}(\.[a-z]{2})?$/,         qkeys: ['q'],          param: 'safe',       value: 'active' },
+  { id: 'bing',       tier: 1, re: /^(www\.)?(cn\.)?bing\.[a-z]{2,3}(\.[a-z]{2})?$/,     qkeys: ['q'],          param: 'adlt',       value: 'strict' },
+  { id: 'duckduckgo', tier: 1, re: /^((www|html|lite|start)\.)?duckduckgo\.com$/,        qkeys: ['q'],          param: 'kp',         value: '1' },
+  { id: 'yahoo',      tier: 1, re: /^((www|search)\.)?yahoo\.[a-z]{2,3}(\.[a-z]{2})?$/,  qkeys: ['p'],          param: 'vm',         value: 'r' },
+  // ── Tier 2 — block image/video + NSFW queries; force param where known ──
+  { id: 'yandex',     tier: 2, re: /^(www\.)?yandex\.[a-z]{2,3}(\.[a-z]{2})?$|^ya\.ru$/, qkeys: ['text', 'q'], param: 'family',     value: 'yes' },
+  { id: 'brave',      tier: 2, re: /^search\.brave\.com$/,                               qkeys: ['q'],          param: 'safesearch', value: 'strict' },
+  { id: 'qwant',      tier: 2, re: /^(www\.)?qwant\.com$/,                               qkeys: ['q'],          param: 'safesearch', value: '2' },
+  { id: 'ecosia',     tier: 2, re: /^(www\.)?ecosia\.org$/,                              qkeys: ['q'] },
+  { id: 'startpage',  tier: 2, re: /^(www\.)?startpage\.com$/,                           qkeys: ['query', 'q'] },
+  { id: 'mojeek',     tier: 2, re: /^(www\.)?mojeek\.com$/,                              qkeys: ['q'] },
+  { id: 'swisscows',  tier: 2, re: /^(www\.)?swisscows\.com$/,                           qkeys: ['query', 'q'] },
+  { id: 'gibiru',     tier: 2, re: /^(www\.)?gibiru\.com$/,                              qkeys: ['q'] },
+  { id: 'yep',        tier: 2, re: /^(www\.)?yep\.com$/,                                 qkeys: ['q'] },
+  { id: 'metager',    tier: 2, re: /^(www\.)?metager\.org$/,                             qkeys: ['eingabe', 'q'] }
 ];
+
+function matchSearchEngine(hostname) {
+  for (const se of SEARCH_ENGINES) if (se.re.test(hostname)) return se;
+  return null;
+}
+
+// Does this URL look like an image / video / picture search surface? Used to deny
+// the hardcore thumbnail grids on Tier-2 engines that ignore our forced param.
+function isMediaSearchSurface(urlObj) {
+  const p = urlObj.pathname.toLowerCase();
+  if (/(^|\/)(images?|imgs?|videos?|vids?|pics?|photos?|gallery)(\/|$)/.test(p)) return true;
+  const sp = urlObj.searchParams;
+  for (const k of ['t', 'tbm', 'ia', 'iax', 'iar', 'cat', 'kind', 'fmt', 'type']) {
+    const v = (sp.get(k) || '').toLowerCase();
+    if (/image|isch|img|video|vid|photo|pic/.test(v)) return true;
+  }
+  return false;
+}
+
+function readSearchQuery(urlObj, qkeys) {
+  for (const k of qkeys) {
+    const v = urlObj.searchParams.get(k);
+    if (v) return v;
+  }
+  return null;
+}
 
 // SAFESEARCH ENFORCEMENT (always-on)
 
 function checkSearchEngineSafeSearch(url, hostname) {
-  const searchEngine = SEARCH_ENGINES.find(se =>
-    hostname === se.domain || hostname.endsWith('.' + se.domain)
-  );
-
-  if (!searchEngine) return null;
+  const se = matchSearchEngine(hostname);
+  if (!se) return null;
 
   try {
     const urlObj = new URL(url);
 
-    // Block attempts to disable SafeSearch
-    const hasSafeSearchOff = url.includes('safe=off') || url.includes('safesearch=off') || url.includes('safe=0');
-    if (hasSafeSearchOff) {
+    // Block attempts to disable SafeSearch on ANY recognised engine.
+    const low = url.toLowerCase();
+    if (low.includes('safe=off') || low.includes('safesearch=off') || low.includes('safe=0') ||
+        low.includes('safesearch=0') || low.includes('adlt=off') || low.includes('family=no')) {
       console.log('SafeSearch disabled - blocking bypass attempt');
       return {
         blocked: true,
@@ -441,20 +686,26 @@ function checkSearchEngineSafeSearch(url, hostname) {
       };
     }
 
-    // ALWAYS enforce SafeSearch on search engines (regardless of query)
-    const currentUrl = new URL(url);
-    let paramName = 'safe';
-    if (searchEngine.domain.includes('bing.com')) paramName = 'adlt';
-    if (searchEngine.domain.includes('duckduckgo.com')) paramName = 'kp';
-    if (searchEngine.domain.includes('yahoo.com')) paramName = 'vm';
+    // TIER 2 hard blocks: image/video grids and NSFW queries leak even when the
+    // engine ignores our forced param, so deny those surfaces outright.
+    if (se.tier === 2) {
+      if (isMediaSearchSurface(urlObj)) {
+        return { blocked: true, reason: 'search_media_uncovered', match: se.id + ' image/video search', tier: 'blacklist', hostname };
+      }
+      const hit = matchSearchQueryPorn(readSearchQuery(urlObj, se.qkeys));
+      if (hit) {
+        return { blocked: true, reason: 'search_query_keyword', match: se.id + ':' + hit, tier: 'blacklist', hostname };
+      }
+    }
 
-    if (currentUrl.searchParams.get(paramName) !== searchEngine.safeParam) {
-      currentUrl.searchParams.set(paramName, searchEngine.safeParam);
+    // Force the strict SafeSearch param (Tier 1 always; Tier 2 where we know one).
+    if (se.param && urlObj.searchParams.get(se.param) !== se.value) {
+      urlObj.searchParams.set(se.param, se.value);
       return {
         safesearch: true,
-        redirectUrl: currentUrl.toString(),
+        redirectUrl: urlObj.toString(),
         reason: 'safesearch_always_on',
-        match: 'SafeSearch enforced'
+        match: se.id + ' SafeSearch enforced'
       };
     }
   } catch (error) {
@@ -484,6 +735,13 @@ const GRAYLIST_COOKIE_MAP = new Map([
   ['x.com', [
     { domain: 'x.com',  name: 'sensitive_content_flag', value: 'false', path: '/' },
     { domain: '.x.com', name: 'sensitive_content_flag', value: 'false', path: '/' }
+  ]],
+  // YouTube Restricted Mode (report §1.4). PREF cookie field f2=8000000 is the
+  // user-level Restricted Mode bit YouTube reads to filter mature/suggestive
+  // videos. Set on both the bare and dot domain so www/m/music subdomains inherit.
+  ['youtube.com', [
+    { domain: 'youtube.com',  name: 'PREF', value: 'f2=8000000', path: '/' },
+    { domain: '.youtube.com', name: 'PREF', value: 'f2=8000000', path: '/' }
   ]]
 ]);
 
@@ -1184,7 +1442,12 @@ const BYPASS_PROXY_DOMAINS = new Set([
   'unblockit.id', '12ft.io', '1ft.io',
   // archive viewers (Wayback is unwrapped instead — see unwrapBypassUrl)
   'archive.today', 'archive.ph', 'archive.is', 'archive.li', 'archive.md',
-  'archive.vn', 'archive.fo'
+  'archive.vn', 'archive.fo',
+  // reader / CORS proxies (report §3.2 + §11.4) — unwrapBypassUrl pulls the real
+  // target out first when present; a BARE visit (no target) lands here and is blocked.
+  'r.jina.ai', 's.jina.ai', 'corsproxy.io', 'allorigins.win',
+  'thingproxy.freeboard.io', 'cors-anywhere.herokuapp.com',
+  'api.codetabs.com', 'corsproxy.org', 'proxy.cors.sh', 'whateverorigin.org'
 ]);
 
 function matchesBypassProxy(hostname) {
@@ -1221,20 +1484,140 @@ function unwrapBypassUrl(urlObj) {
     if (m) return m[1];
   }
 
+  // Bing translator (report §3.2): translatetheweb.com/?...&a=<target>
+  if (host === 'translatetheweb.com' || host.endsWith('.translatetheweb.com') ||
+      host === 'microsofttranslator.com' || host.endsWith('.microsofttranslator.com')) {
+    const a = urlObj.searchParams.get('a') || urlObj.searchParams.get('u');
+    if (a) return a;
+  }
+
+  // Yandex translate: translate.yandex.*/translate?...&url=<target>
+  if (host === 'translate.yandex.com' || host === 'translate.yandex.ru' || host === 'translate.yandex.net') {
+    const u = urlObj.searchParams.get('url') || urlObj.searchParams.get('text');
+    if (u && /^https?:\/\//i.test(u)) return u;
+  }
+
+  // CORS / reader proxies that take the target in a query param. Param name varies
+  // by service: allorigins/corsproxy use `url`, codetabs uses `quest`, others `u`
+  // (report §11.4 — codetabs slipped because only url/u were read).
+  if (host === 'corsproxy.io' || host.endsWith('.corsproxy.io') ||
+      host === 'corsproxy.org' || host === 'proxy.cors.sh' || host === 'whateverorigin.org' ||
+      host === 'api.allorigins.win' || host === 'allorigins.win' || host.endsWith('.allorigins.win') ||
+      host === 'api.codetabs.com' || host === 'cors-anywhere.herokuapp.com') {
+    const u = urlObj.searchParams.get('url') || urlObj.searchParams.get('u') ||
+              urlObj.searchParams.get('quest');
+    if (u) { try { return decodeURIComponent(u); } catch (_) { return u; } }
+  }
+
+  // r.jina.ai / thingproxy: the target URL is appended to the path.
+  //   https://r.jina.ai/https://target/…   ·   https://thingproxy.freeboard.io/fetch/https://target/…
+  if (host === 'r.jina.ai' || host === 's.jina.ai' ||
+      host === 'thingproxy.freeboard.io' || host.endsWith('.thingproxy.freeboard.io')) {
+    const m = (urlObj.pathname + urlObj.search).match(/(https?:(?:\/\/|%2f%2f).+)/i);
+    if (m) { try { return decodeURIComponent(m[1]); } catch (_) { return m[1]; } }
+  }
+
   return null;
 }
 
-// Raw public-IP host? (private / loopback / link-local ranges are exempt.)
-function isPublicIpHost(host) {
-  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!m) return false;
-  const o = [m[1], m[2], m[3], m[4]].map(Number);
-  if (o.some(n => n > 255)) return false;
+// Are these 4 octets a routable PUBLIC IPv4? (private/loopback/link-local exempt.)
+function octetsArePublic(o) {
+  if (o.some(n => !Number.isInteger(n) || n > 255 || n < 0)) return false;
   if (o[0] === 0 || o[0] === 10 || o[0] === 127) return false;   // this-net / private / loopback
   if (o[0] === 192 && o[1] === 168) return false;                // private
   if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return false;    // private
   if (o[0] === 169 && o[1] === 254) return false;                // link-local
+  if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return false;   // CGNAT
+  if (o[0] >= 224) return false;                                  // multicast / reserved (not a site)
   return true;
+}
+
+// Raw public-IP host in ANY notation — dotted-quad, a single decimal/hex/octal
+// integer (http://1090052999/, http://0x7f…/), or IPv6 (http://[2606:4700::]/).
+// A classic blocklist bypass; the old code matched ONLY dotted-quad (report
+// §9.1#3). Private / loopback / link-local stay exempt so localhost dev works.
+function isPublicIpHost(host) {
+  if (!host) return false;
+  host = host.toLowerCase();
+
+  // IPv6 (new URL() keeps the [brackets] on .hostname). Strip them + any zone id.
+  if (host.indexOf(':') !== -1) {
+    const h = host.replace(/^\[/, '').replace(/\]$/, '').split('%')[0];
+    if (h === '' || h === '::' || h === '::1') return false;      // unspecified / loopback
+    if (/^fe[89ab]/.test(h)) return false;                       // fe80::/10 link-local
+    if (/^f[cd]/.test(h)) return false;                          // fc00::/7 unique-local
+    return true;                                                  // any other global IPv6
+  }
+
+  // Dotted IPv4.
+  const dq = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (dq) return octetsArePublic([dq[1], dq[2], dq[3], dq[4]].map(Number));
+
+  // Single-number host: decimal, hex (0x…) or octal (0…) → 32-bit IPv4.
+  let n = null;
+  if (/^\d+$/.test(host)) n = parseInt(host, 10);
+  else if (/^0x[0-9a-f]+$/.test(host)) n = parseInt(host, 16);
+  else if (/^0[0-7]+$/.test(host)) n = parseInt(host, 8);
+  if (n !== null && Number.isFinite(n) && n >= 0 && n <= 0xFFFFFFFF) {
+    return octetsArePublic([(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]);
+  }
+
+  return false;
+}
+
+// CURATED SUPPLEMENTAL BLACKLIST (report Round 4 §11.2)
+// "Uncensored" AI image/character platforms that the 500k list AND the domain-
+// keyword stems both miss: the stems match the registrable LABEL only, and
+// "mage"/"tensor"/"chub"/"perchance" aren't stems (and a bare stem would
+// over-match SFW words). The brand-name AI *companions* (candy.ai, crushon.ai,
+// seaart.ai) are already on the main blacklist — these are the general-purpose
+// generators / character hubs that were left open.
+const EXTRA_BLACKLIST_DOMAINS = new Set([
+  'mage.space',                       // self-titled "Unlimited & Uncensored AI Image & Video Generator"
+  'tensor.art', 'tusiart.com',        // R-18 AI-art platforms
+  'chub.ai', 'characterhub.org',      // uncensored NSFW character-card / roleplay hub (+ venus subdomain)
+  'yodayo.com', 'pixai.art', 'figgs.ai', 'sakura.fm'  // adjacent NSFW-capable AI art/companion hubs
+]);
+
+// PRIVACY-FRONTEND INSTANCE SEED LIST (report Round 4 §11.1)
+// redlib/libreddit (Reddit), invidious/piped (YouTube), nitter (X) and rimgo
+// (Imgur) are pure PROXIES of platforms Pure Path already restricts on the
+// canonical host — they re-serve the same content UNFILTERED on arbitrary
+// community domains, so every host-keyed defense misses them. They have no SFW
+// value to preserve (the canonical platform IS the legit path), so per the
+// "leaking + no legit use case → blacklist" rule we hard-block the popular,
+// stable instances at the navigation layer (clean ERR_ABORTED, fires BEFORE the
+// instance's anti-bot challenge even loads). This is the belt; the content.js
+// fingerprint detector is the suspenders for instances not on this list.
+// (SearXNG instances are deliberately NOT here — they have legit private text
+//  search; content.js scope-blocks only their image/SafeSearch-off surfaces.)
+const FRONTEND_INSTANCE_DOMAINS = new Set([
+  // redlib / libreddit (Reddit)
+  'redlib.catsarch.com', 'safereddit.com', 'redlib.privacyredirect.com',
+  'reddit.nerdvpn.de', 'l.opnxng.com', 'redlib.perennialte.ch', 'libreddit.kavin.rocks',
+  'redlib.tux.pizza', 'rl.bloat.cat', 'redlib.r4fo.com', 'redlib.4o1x5.dev',
+  'redlib.kittywa.ves', 'red.ngn.tf', 'redlib.freedit.eu', 'redlib.privacy.com.de',
+  // invidious (YouTube)
+  'yewtu.be', 'inv.nadeko.net', 'invidious.nerdvpn.de', 'iv.ggtyler.dev',
+  'yt.artemislena.eu', 'invidious.jing.rocks', 'inv.tux.pizza', 'invidious.fdn.fr',
+  'invidious.privacyredirect.com', 'iv.melmac.space',
+  // piped (YouTube)
+  'piped.video', 'piped.kavin.rocks', 'piped.privacydev.net', 'piped.reallyaweso.me',
+  // nitter (X)
+  'xcancel.com', 'nitter.poast.org', 'nitter.privacyredirect.com', 'nitter.net',
+  'lightbrd.com', 'nitter.tiekoetter.com', 'nitter.kavin.rocks',
+  // rimgo (Imgur)
+  'rimgo.totaldarkness.net', 'rimgo.bus-hit.me', 'rimgo.privacydev.net', 'rimgo.pussthecat.org'
+]);
+
+// perchance.org hosts BOTH innocuous generators (names, dice, lists…) AND the
+// notorious uncensored AI image + character-chat generators. Block only the AI
+// generator/chat paths so the SFW generators keep working (report §11.2).
+function isBlockedPerchancePath(hostname, urlObj) {
+  if (hostname !== 'perchance.org' && !hostname.endsWith('.perchance.org')) return false;
+  const p = urlObj.pathname.toLowerCase();
+  return /^\/ai[-/]/.test(p) || p.includes('image-generator') ||
+         p.includes('character-chat') || p.includes('-chat') || p.includes('nsfw');
 }
 
 // URL BLOCKING LOGIC — blocklist + keyword layer + bypass-vector
@@ -1262,6 +1645,17 @@ function shouldBlockUrl(url, depth = 0) {
     const searchCheck = checkSearchEngineSafeSearch(url, hostname);
     if (searchCheck && (searchCheck.blocked || searchCheck.safesearch)) {
       return searchCheck;
+    }
+
+    // STEP 1.5: "Trusted" hosts with explicit galleries / sex-act articles —
+    // block the adult SURFACES by path (Wikimedia Commons, Wikipedia sex-act
+    // articles). Runs BEFORE the whitelist so a whitelisted host (wikipedia.org)
+    // can no longer suppress this content check (report §3.1 architectural fix /
+    // Round 5). For non-adult paths it returns null and the host proceeds
+    // normally (e.g. en.wikipedia.org/wiki/Cat → whitelist allow).
+    const trustedAdult = checkTrustedAdultPath(hostname, urlObj);
+    if (trustedAdult) {
+      return { blocked: true, reason: 'trusted_host_adult_path', match: hostname + ' ' + trustedAdult, tier: 'blacklist', hostname };
     }
 
     // STEP 2: Check WHITELIST (never block these)
@@ -1293,6 +1687,25 @@ function shouldBlockUrl(url, depth = 0) {
       }
     }
 
+    // STEP 3a: Curated supplemental blacklist — uncovered "uncensored" AI
+    // image/character platforms (report Round 4 §11.2), pure-proxy privacy-
+    // frontend instances (§11.1), and perchance AI paths.
+    {
+      const parts = hostname.split('.');
+      for (let i = 0; i < parts.length - 1; i++) {
+        const d = parts.slice(i).join('.');
+        if (EXTRA_BLACKLIST_DOMAINS.has(d)) {
+          return { blocked: true, reason: 'blacklist_ai_platform', match: d, tier: 'blacklist', hostname };
+        }
+        if (FRONTEND_INSTANCE_DOMAINS.has(d)) {
+          return { blocked: true, reason: 'privacy_frontend_instance', match: d, tier: 'blacklist', hostname };
+        }
+      }
+    }
+    if (isBlockedPerchancePath(hostname, urlObj)) {
+      return { blocked: true, reason: 'perchance_ai_path', match: 'perchance.org AI generator', tier: 'blacklist', hostname };
+    }
+
     // STEP 3b: DOMAIN-NAME KEYWORD LAYER — catches unlisted porn domains
     // (e.g. sex4arabs.com). Hostname-only; runs even if the blocklist is empty.
     const kw = checkDomainKeywords(hostname);
@@ -1302,8 +1715,10 @@ function shouldBlockUrl(url, depth = 0) {
 
     // STEP 4: REDDIT-SPECIFIC CONTENT FILTERING (Paths and Keywords)
     if (hostname === 'reddit.com' || hostname.endsWith('.reddit.com')) {
-      const pathname = urlObj.pathname.toLowerCase();
-      
+      // Normalise data-feed suffixes off the path so /r/RealGirls.json (and .rss/
+      // .xml/.embed) can't slip past the exact-path block (report §7.3).
+      const pathname = urlObj.pathname.toLowerCase().replace(/\.(json|rss|xml|embed|compact|mobile)$/, '');
+
       // 4a. Check explicit NSFW paths FIRST (exact, no false positives)
       for (const path of GRAYLIST_EXPLICIT_PATHS) {
          if (pathname === path || pathname.startsWith(path + '/')) {
@@ -1346,17 +1761,47 @@ function shouldBlockUrl(url, depth = 0) {
         }
       }
 
-      // 4c. Check Reddit SEARCH queries for NSFW keywords
-      const searchQuery = urlObj.searchParams.get('q');
-      if (searchQuery) {
-        const queryLower = searchQuery.toLowerCase();
-        for (const keyword of HARD_PORN_KEYWORDS) {
-          if (keyword.length >= 4 && queryLower.includes(keyword)) {
-            return { blocked: true, reason: 'reddit_search_keyword', match: keyword, tier: 'blacklist', hostname };
-          }
+      // 4c. NUCLEAR Reddit SEARCH filtering — block the search outright if the
+      //     query contains ANY NSFW keyword, soft OR hard. Reddit stays usable
+      //     for legit purposes, but every adult search dies. Whole-word match for
+      //     short keywords (ass/sex/cum…) so we don't Scunthorpe innocent queries
+      //     (essex/massachusetts/document); substring for ≥4-char keywords so
+      //     run-together terms ("milfhunter", "hotbabes") are still caught.
+      const redditSearchHit = matchSearchQueryPorn(urlObj.searchParams.get('q'));
+      if (redditSearchHit) {
+        return { blocked: true, reason: 'reddit_search_keyword', match: redditSearchHit, tier: 'blacklist', hostname };
+      }
+    }
+
+    // STEP 5: PATREON SEARCH — NUCLEAR keyword filter (mirrors Reddit §4c).
+    //   Patreon labels its adult creators/posts well (the DOM scrub in content.js
+    //   hides every 18+-chipped card), but SEARCH still surfaces suggestive content
+    //   the platform leaves UNLABELLED — under-tagging the ground-truth filter is
+    //   blind to. So we kill the adult search outright. Patreon stays fully usable
+    //   for legit creators; only NSFW-keyword searches die. Search lives at
+    //   /explore/search?query=… (a typed /search?q=… redirects there) — handle both.
+    if (hostname === 'patreon.com' || hostname.endsWith('.patreon.com')) {
+      const p = urlObj.pathname.toLowerCase();
+      if (p === '/search' || p === '/explore/search' || p.startsWith('/explore/search/')) {
+        const patreonSearchHit = matchSearchQueryPorn(
+          urlObj.searchParams.get('query') || urlObj.searchParams.get('q')
+        );
+        if (patreonSearchHit) {
+          return { blocked: true, reason: 'patreon_search_keyword', match: patreonSearchHit, tier: 'blacklist', hostname };
         }
       }
     }
+
+    // STEP 6: GRAYLIST SEARCH — nuclear keyword filter on every OTHER graylisted
+    // site's search endpoint (report §3.4 + §6.1). Kills the adult search before
+    // the SSR first paint the JSON scrub can't reach (Tumblr/Wattpad/Minds/…).
+    const graylistSearchHit = checkGraylistSearch(hostname, urlObj);
+    if (graylistSearchHit) {
+      return { blocked: true, reason: 'graylist_search_keyword', match: graylistSearchHit, tier: 'blacklist', hostname };
+    }
+
+    // (Trusted-host adult-path check moved to STEP 1.5 — see above — so it
+    // applies to whitelisted hosts too.)
 
     return { blocked: false, tier: 'unknown', hostname };
 
@@ -1403,25 +1848,70 @@ async function recordBlockAndRedirect(tabId, url, reason, match, skipTabUpdate =
   const blockedPrefix = chrome.runtime.getURL('blocked.html');
   if (url.startsWith(blockedPrefix)) return null;
 
-  const blockedUrl = blockedPrefix + `?reason=${reason}&match=${encodeURIComponent(match)}`;
-  
+  // TEMP (testing): both block destinations — blocked.html AND the user-configured
+  // "Redirect link" — are PAUSED here, because navigating to either can crash/hang
+  // the Playwright automation bridge. While PP_TESTING is true, every block routes
+  // to a light about:blank instead. Set PP_TESTING=false to restore BOTH the normal
+  // block screen and the redirect-link behaviour.
+  const PP_TESTING = true;
+  const blockedUrl = PP_TESTING
+    ? 'about:blank'
+    : blockedPrefix + `?reason=${reason}&match=${encodeURIComponent(match)}`;
+  if (PP_TESTING) console.log('[PurePath][TEST] BLOCK', { reason, match, url });
+
+  // Desktop "Redirect link": send the user to the configured URL instead of the
+  // block screen. The loop guard (the url isn't already the target) stops an
+  // infinite bounce if the redirect destination ever resolves as blocked itself.
+  // (Suppressed entirely while PP_TESTING — see above.)
+  const redirectTarget = PP_TESTING ? null : getRedirectTarget();
+  const targetUrl = (redirectTarget && !url.startsWith(redirectTarget)) ? redirectTarget : blockedUrl;
+  if (redirectTarget) {
+    console.log('[PurePath] block →', targetUrl === redirectTarget ? 'redirecting to ' + redirectTarget : 'block screen (loop guard)');
+  } else if (!blockingSettings) {
+    console.log('[PurePath] block → block screen (no settings from desktop app yet)');
+  }
+
   if (!skipTabUpdate) {
     try {
       const tab = await chrome.tabs.get(tabId);
       if (tab && !tab.url.startsWith(blockedPrefix)) {
-        await chrome.tabs.update(tabId, { url: blockedUrl });
+        await chrome.tabs.update(tabId, { url: targetUrl });
       }
     } catch (e) {
-      chrome.tabs.update(tabId, { url: blockedUrl }).catch(() => {});
+      chrome.tabs.update(tabId, { url: targetUrl }).catch(() => {});
     }
   }
 
-  return blockedUrl;
+  return targetUrl;
+}
+
+// The active "Redirect link" destination, or null when the setting is off /
+// blank / unusable. Tolerates a scheme-less entry ("youtube.com/watch?v=…") by
+// assuming https, so the user doesn't have to type the protocol.
+function getRedirectTarget() {
+  const b = blockingSettings;
+  if (!b || !b.redirectLinkOn) return null;
+  let u = (b.redirectUrl || '').trim();
+  if (!u) return null;
+  if (!/^https?:\/\//i.test(u)) {
+    // Only auto-prefix things that look like a host (has a dot, no spaces).
+    if (!/^[^\s/]+\.[^\s/]+/.test(u)) return null;
+    u = 'https://' + u;
+  }
+  try {
+    const p = new URL(u);
+    if (p.protocol !== 'http:' && p.protocol !== 'https:') return null;
+  } catch (_) {
+    return null;
+  }
+  return u;
 }
 
 async function handleBlock(tabId, url, skipTabUpdate = false) {
-  const { passwordHash: storedHash } = await chrome.storage.local.get(['passwordHash']);
-  if (!storedHash) return; // Not set up yet
+  // Make sure the blacklist is loaded (cold-revived worker). Returns instantly
+  // once warm, so this adds no per-navigation cost — and removes the previous
+  // per-navigation chrome.storage round-trip that gated every check.
+  await ensureBlocklistLoaded();
 
   const result = shouldBlockUrl(url);
 
@@ -1429,7 +1919,10 @@ async function handleBlock(tabId, url, skipTabUpdate = false) {
   if (result && result.safesearch) {
     if (url !== result.redirectUrl) {
       console.log(`Forcing SafeSearch: ${result.match}`);
-      chrome.tabs.update(tabId, { url: result.redirectUrl });
+      // Fire-and-forget: Firefox rejects tabs.update with "Navigation rejected"
+      // when the navigation has already moved on. Swallow it — the redirect just
+      // didn't apply, which is harmless.
+      chrome.tabs.update(tabId, { url: result.redirectUrl }).catch(() => {});
     }
     return;
   }
@@ -1447,7 +1940,9 @@ async function handleBlock(tabId, url, skipTabUpdate = false) {
         const rewrittenUrl = enforceGraylistUrlRewrite(url, baseDomain);
         if (rewrittenUrl && rewrittenUrl !== url) {
           console.log(`Graylist URL rewrite: ${baseDomain}`);
-          chrome.tabs.update(tabId, { url: rewrittenUrl });
+          // Fire-and-forget: see SafeSearch redirect above — swallow Firefox's
+          // "Navigation rejected" rejection when the navigation already changed.
+          chrome.tabs.update(tabId, { url: rewrittenUrl }).catch(() => {});
         }
       }
     }
@@ -1494,35 +1989,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === 'setPassword') {
-    // Store hash and salt together for PBKDF2
-    const updates = { passwordHash: request.hash };
-    if (request.salt) updates.passwordSalt = request.salt;
-    chrome.storage.local.set(updates, () => {
-      if (chrome.runtime.lastError) {
-        sendResponse({ success: false, error: chrome.runtime.lastError.message });
-      } else {
-        sendResponse({ success: true });
-      }
-    });
-    return true;
-  }
-
-  if (request.action === 'verifyPassword') {
-    // Compare provided hash with stored hash
-    chrome.storage.local.get(['passwordHash', 'passwordSalt'], (result) => {
-      if (chrome.runtime.lastError) {
-        sendResponse({ valid: false, error: chrome.runtime.lastError.message });
-      } else {
-        sendResponse({
-          valid: result.passwordHash === request.hash,
-          salt: result.passwordSalt || null
-        });
-      }
-    });
-    return true;
-  }
-
   if (request.action === 'getBlocklists') {
     sendResponse({
       domains: blocklistDomains
@@ -1551,6 +2017,72 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
       }
     });
+    return true;
+  }
+
+  if (request.action === 'getCustomDomains') {
+    // The user's own list (small) + the built-in count for display.
+    (async () => {
+      if (!defaultDomains || !defaultDomains.length) await loadDefaultListsIntoMemory();
+      sendResponse({ custom: await getCustomList(), builtIn: getDefaultSet().size });
+    })();
+    return true;
+  }
+
+  if (request.action === 'checkDomainBlocked') {
+    // Yes/no check against the built-in blacklist (exact or parent-domain match).
+    (async () => {
+      if (!defaultDomains || !defaultDomains.length) await loadDefaultListsIntoMemory();
+      const d = (request.domain || '').trim().toLowerCase()
+        .replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+      const dset = getDefaultSet();
+      let blocked = dset.has(d);
+      if (!blocked && d.includes('.')) {
+        // also match if a parent registrable domain is blocked (sub.x.com -> x.com)
+        const parts = d.split('.');
+        for (let i = 1; i < parts.length - 1 && !blocked; i++) {
+          if (dset.has(parts.slice(i).join('.'))) blocked = true;
+        }
+      }
+      sendResponse({ domain: d, blocked });
+    })();
+    return true;
+  }
+
+  if (request.action === 'addCustomDomain') {
+    (async () => {
+      const domain = (request.domain || '').trim().toLowerCase()
+        .replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+      if (!domain) { sendResponse({ success: false, reason: 'empty' }); return; }
+      if (!defaultDomains || !defaultDomains.length) await loadDefaultListsIntoMemory();
+      if (getDefaultSet().has(domain)) { sendResponse({ success: false, reason: 'default' }); return; }
+      const custom = await getCustomList();
+      if (custom.includes(domain)) { sendResponse({ success: false, reason: 'exists' }); return; }
+      await ensureBlocklistLoaded();
+      const nextCustom = [...custom, domain];
+      if (!blocklistSet.has(domain)) { blocklistDomains = [...blocklistDomains, domain]; blocklistSet.add(domain); }
+      chrome.storage.local.set({ customDomains: nextCustom, blocklistDomains }, () => {
+        if (chrome.runtime.lastError) { sendResponse({ success: false, reason: 'storage' }); return; }
+        if (typeof NativeMessagingBridge !== 'undefined') NativeMessagingBridge.sendBlocklistUpdate();
+        sendResponse({ success: true });
+      });
+    })();
+    return true;
+  }
+
+  if (request.action === 'removeCustomDomain') {
+    (async () => {
+      const domain = (request.domain || '').trim().toLowerCase();
+      await ensureBlocklistLoaded();
+      const nextCustom = (await getCustomList()).filter((d) => d !== domain);
+      blocklistDomains = blocklistDomains.filter((d) => d !== domain);
+      blocklistSet.delete(domain);
+      chrome.storage.local.set({ customDomains: nextCustom, blocklistDomains }, () => {
+        if (chrome.runtime.lastError) { sendResponse({ success: false }); return; }
+        if (typeof NativeMessagingBridge !== 'undefined') NativeMessagingBridge.sendBlocklistUpdate();
+        sendResponse({ success: true });
+      });
+    })();
     return true;
   }
 
@@ -1598,6 +2130,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'graylistFiltered') {
+    // Graylist V2 stripped N site-labelled NSFW items from a JSON response.
+    // Track it separately from navigation blocks (it's filtering, not a redirect).
+    const n = Number(request.count) || 0;
+    if (n > 0) {
+      (async () => {
+        const { stats } = await chrome.storage.local.get(['stats']);
+        const s = stats || { totalBlocks: 0, installDate: new Date().toISOString() };
+        s.graylistFiltered = (s.graylistFiltered || 0) + n;
+        await chrome.storage.local.set({ stats: s });
+        if (typeof NativeMessagingBridge !== 'undefined') {
+          NativeMessagingBridge.sendStatsUpdate();
+        }
+      })();
+    }
+    return false;
+  }
+
   if (request.action === 'isDomainSafe') {
     // Unified whitelist check — single source of truth
     const hostname = (request.hostname || '').toLowerCase();
@@ -1630,6 +2180,26 @@ const NativeMessagingBridge = (function () {
   let reconnectDelay = 250;
   let reconnectTimer = null;
   let isConnected = false;
+  let profileId = null;
+
+  // ─ Stable per-profile id ───────────────────────────────────
+  // Each Chrome profile has its own extension storage, so a value stored here
+  // is unique to (and stable for) this profile. The desktop app uses it to tell
+  // multiple connected profiles of the same browser apart.
+  async function ensureProfileId() {
+    if (profileId) return profileId;
+    try {
+      const { ppProfileId } = await chrome.storage.local.get(['ppProfileId']);
+      if (ppProfileId) { profileId = ppProfileId; return profileId; }
+      profileId = (self.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : 'p-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      await chrome.storage.local.set({ ppProfileId: profileId });
+    } catch (e) {
+      profileId = profileId || ('p-' + Math.random().toString(36).slice(2, 10));
+    }
+    return profileId;
+  }
 
   // ─ Connect to desktop app ──────────────────────────────────
   function connect() {
@@ -1694,9 +2264,11 @@ const NativeMessagingBridge = (function () {
 
   // ─ Handshake ───────────────────────────────────────────────
   async function sendHandshake() {
+    await ensureProfileId();
     const { stats } = await chrome.storage.local.get(['stats']);
     send({
       type: 'handshake',
+      profileId,
       extensionVersion: chrome.runtime.getManifest().version,
       installDate: stats?.installDate || new Date().toISOString()
     });
@@ -1708,6 +2280,7 @@ const NativeMessagingBridge = (function () {
   function sendHeartbeat() {
     send({
       type: 'heartbeat',
+      profileId,
       timestamp: Date.now()
     });
   }
@@ -1783,9 +2356,62 @@ const NativeMessagingBridge = (function () {
         handleBlocklistUpdate(msg);
         break;
 
+      case 'set_theme':
+        // Desktop app pushed its selected theme/palette — mirror it so every
+        // extension page matches (theme-sync.js / blocked.js read this).
+        handleSetTheme(msg);
+        break;
+
+      case 'set_app_data':
+        // Desktop app pushed the canonical day-streak + global block total
+        // (summed across every browser/profile). Pages read `ppAppData`.
+        handleSetAppData(msg);
+        break;
+
+      case 'set_blocking':
+        // Desktop app pushed the blocking settings (redirect target + reminder
+        // schedule). Cache them and re-arm the reminder loop.
+        handleSetBlocking(msg);
+        break;
+
       default:
         console.log('Unknown message from desktop:', msg.type);
     }
+  }
+
+  // ─ Mirror the app's day streak + global block total into storage ──
+  async function handleSetAppData(msg) {
+    const data = {};
+    if (typeof msg.streak === 'number') data.streak = msg.streak;
+    if (typeof msg.globalBlocks === 'number') data.globalBlocks = msg.globalBlocks;
+    if (Object.keys(data).length === 0) return;
+    const { ppAppData } = await chrome.storage.local.get(['ppAppData']);
+    await chrome.storage.local.set({ ppAppData: Object.assign({}, ppAppData, data) });
+  }
+
+  // ─ Cache the desktop app's blocking settings ───────────────
+  async function handleSetBlocking(msg) {
+    const settings = (msg.settings && typeof msg.settings === 'object') ? msg.settings : null;
+    if (!settings) return;
+    blockingSettings = settings;
+    console.log('[PurePath] blocking settings received — redirect:',
+      settings.redirectLinkOn ? (settings.redirectUrl || '(blank)') : 'off');
+    try { await chrome.storage.local.set({ ppBlocking: settings }); } catch (_) {}
+    // Re-arm the reminder loop to reflect the new schedule immediately.
+    if (typeof armReminderAlarm === 'function') armReminderAlarm();
+  }
+
+  // ─ Mirror the desktop app's theme into storage ─────────────
+  async function handleSetTheme(msg) {
+    const d = (msg.display && typeof msg.display === 'object') ? msg.display : msg;
+    const display = {};
+    if (d.theme) display.theme = d.theme;
+    if (d.style) display.style = d.style;
+    if (d.bg) display.bg = d.bg;
+    if (typeof d.intensity !== 'undefined') display.intensity = d.intensity;
+    if (Object.keys(display).length === 0) return;
+    // Store the object plus mirrored top-level keys (blocked.js reads either).
+    await chrome.storage.local.set({ display, ...display });
   }
 
   // ─ Handle blocklist updates from desktop ───────────────────
@@ -1823,3 +2449,100 @@ chrome.runtime.onInstalled.addListener(() => {
   // This ensures the native bridge connects after setup.
   setTimeout(() => NativeMessagingBridge.connect(), 500);
 });
+
+// REMINDER POP-UPS — Focus-schedule nudges
+// During the desktop app's "Vulnerable hours" window, fire a gentle in-page
+// pop-up (rendered by content.js) for whichever reminder types are enabled.
+// A single persistent alarm drives this — it survives the MV3 service worker
+// sleeping and wakes it to fire. The schedule (window + which alerts) is
+// evaluated at fire time from the cached settings, so the alarm itself never
+// needs rebuilding when settings change.
+
+const REMINDER_ALARM = 'pp-reminder';
+const REMINDER_PERIOD_MIN = 30; // roughly twice an hour while inside the window
+
+// A small rotating pool for the "Motivational reminder" type.
+const REMINDER_QUOTES = [
+  'The man who moves a mountain begins by carrying away small stones.',
+  'You are not your urges. You are the one who notices them — and chooses.',
+  'Discipline is choosing between what you want now and what you want most.',
+  'Every time you say no, the next no gets easier. You are rewiring yourself.',
+  'The urge always passes. Outlast it — ride the wave, don’t feed it.',
+  'Who you become is built from the moments you refuse to give in.',
+  'Fall seven times, stand up eight. The streak is the man, not the number.',
+  'Close the tab. Take a walk. Future-you is already grateful.',
+];
+
+function buildReminder(kind) {
+  if (kind === 'checkin') {
+    return {
+      title: 'Still with you',
+      body: 'Take a slow breath. You’re stronger than this moment — it will pass.',
+    };
+  }
+  // 'quote' (and any future text type) → a short line.
+  const q = REMINDER_QUOTES[Math.floor(Math.random() * REMINDER_QUOTES.length)];
+  return { title: 'Remember your why', body: q };
+}
+
+// Is the current local time inside [start, end)? Handles overnight windows
+// (e.g. 22:00 → 06:00) and a full-day window (start === end).
+function isWithinWindow(start, end) {
+  const toMin = (s) => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec((s || '').trim());
+    return m ? (Math.min(23, +m[1]) * 60 + Math.min(59, +m[2])) : null;
+  };
+  const a = toMin(start), z = toMin(end);
+  if (a == null || z == null) return false;
+  if (a === z) return true;
+  const now = new Date();
+  const cur = now.getHours() * 60 + now.getMinutes();
+  return a < z ? (cur >= a && cur < z) : (cur >= a || cur < z);
+}
+
+// Ensure the reminder alarm exists (idempotent — never resets a live timer).
+async function armReminderAlarm() {
+  try {
+    const existing = await chrome.alarms.get(REMINDER_ALARM);
+    if (existing && existing.periodInMinutes === REMINDER_PERIOD_MIN) return;
+    chrome.alarms.create(REMINDER_ALARM, {
+      periodInMinutes: REMINDER_PERIOD_MIN,
+      delayInMinutes: REMINDER_PERIOD_MIN,
+    });
+  } catch (_) {}
+}
+
+async function maybeShowReminder() {
+  if (!blockingSettings) await loadBlockingSettings();
+  const b = blockingSettings;
+  if (!b) return;
+  const v = b.vulnerable || {};
+  if (!v.on || !isWithinWindow(v.start, v.end)) return;
+  const enabled = Array.isArray(b.alerts) ? b.alerts.filter((a) => a && a.on) : [];
+  if (!enabled.length) return;
+
+  const pick = enabled[Math.floor(Math.random() * enabled.length)];
+  const content = buildReminder(pick.id);
+
+  // Show on whatever tab the user is currently looking at.
+  let tabs = [];
+  try { tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); } catch (_) {}
+  const tab = tabs && tabs[0];
+  if (!tab || tab.id == null || isIgnoredUrl(tab.url || '')) return;
+
+  try {
+    await chrome.tabs.sendMessage(tab.id, {
+      action: 'showReminder', kind: pick.id, title: content.title, body: content.body,
+    });
+  } catch (_) {
+    // No content script in this tab yet (or a page we don't run on) — skip silently.
+  }
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === REMINDER_ALARM) maybeShowReminder();
+});
+
+chrome.runtime.onInstalled.addListener(armReminderAlarm);
+chrome.runtime.onStartup.addListener(armReminderAlarm);
+armReminderAlarm();

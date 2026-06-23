@@ -85,577 +85,6 @@
     (document.head || document.documentElement).appendChild(style);
   }
   
-  // GRAYLIST FILTER ENFORCEMENT
-  // Hides NSFW settings UI and force-blocks NSFW content on gray-area domains.
-  // Users cannot re-enable NSFW content; clicking hidden areas shows a popup.
-
-  // Shared CSS blocks (DRY) ───────────────────────────────────
-  const MASTODON_HIDE_UI = `
-    label:has(input[name*="sensitive"]), [class*="sensitive-toggle"],
-    div[class*="setting"]:has([class*="media"]):has([class*="sensitive"]),
-    label:has(input[name*="display_media"]),
-    .column-settings__row:has([name*="other"]),
-    button[class*="show-filter"]
-  `;
-  const MASTODON_HIDE_CONTENT = `
-    [class*="sensitive-content"],
-    div[class*="media-gallery"]:has([class*="sensitive"]),
-    div[class*="spoiler-button"]
-  `;
-  const DISCORD_DIR_UI = `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"], input[name*="nsfw"]`;
-  const DISCORD_DIR_CONTENT = `[class*="nsfw-server"], div:has([class*="nsfw-badge"])`;
-
-  // Domain → { hideUI, hideContent, rawCSS (optional — injected verbatim) }
-  // Only entries that actually DO something are included.
-  const GRAYLIST_FILTERS = {
-    // RELIABLE FILTERS ──────────────────────────────────────────
-    'reddit.com': {
-      hideUI: `
-        label:has(input[name*="mature"]), label:has(input[name*="over18"]),
-        [data-testid="feed-settings-mature"], [class*="nsfw-toggle"],
-        div[class*="Setting"]:has([class*="nsfw"]),
-        [data-testid="is-nsfw-shown"], [data-testid="safe-browsing-mode"],
-        [data-testid="nsfw-posts-and-comments"], [data-testid="is-nsfw"],
-        settings-profile-nsfw-modal, settings-preferences-nsfw-modal,
-        rpl-modal-card#nsfw-rpl-modal-card
-      `,
-      hideContent: `
-        .nsfw-image, .prompt-18plus,
-        shreddit-post[is-nsfw], shreddit-post[is-over-18],
-        shreddit-post[nsfw], shreddit-post[over18],
-        div[data-testid="post-container"]:has(.nsfw-stamp),
-        .thing.over18, .listing-item:has(.nsfw-icon)
-      `
-    },
-    'twitter.com': {
-      hideUI: `
-        section[aria-label="Section details"]:has(input[aria-describedby="CHECKBOX_2_LABEL"]),
-        label:has(input[type="checkbox"][aria-describedby="CHECKBOX_2_LABEL"]),
-        a[href="/settings/content_you_see"], a[href*="content_you_see"],
-        a[href="/settings/explore"][data-testid="pivot"],
-        a[href="/settings/search"][data-testid="pivot"],
-        dialog:has(input[type="checkbox"]):has([class*="r-"]),
-        [data-testid="settingsContentYouSee"]
-      `,
-      hideContent: `[data-testid="sensitiveMediaInterstitial"]`
-    },
-    'x.com': {
-      hideUI: `
-        section[aria-label="Section details"]:has(input[aria-describedby="CHECKBOX_2_LABEL"]),
-        label:has(input[type="checkbox"][aria-describedby="CHECKBOX_2_LABEL"]),
-        a[href="/settings/content_you_see"], a[href*="content_you_see"],
-        a[href="/settings/explore"][data-testid="pivot"],
-        a[href="/settings/search"][data-testid="pivot"],
-        dialog:has(input[type="checkbox"]):has([class*="r-"]),
-        [data-testid="settingsContentYouSee"]
-      `,
-      hideContent: `[data-testid="sensitiveMediaInterstitial"]`
-    },
-    'bsky.app': {
-      hideUI: `
-        a[href="/settings/moderation"],
-        div[data-testid*="content-filter"], div[data-testid*="ContentFilter"],
-        [class*="contentFilter"], [class*="moderation-setting"],
-        button:has([class*="filter-toggle"])
-      `,
-      hideContent: `
-        [data-testid*="content-warning"], [class*="contentWarning"],
-        div[class*="adult-content"], div[class*="suggestive"]
-      `
-    },
-    'bluesky.social': {
-      hideUI: `
-        a[href="/settings/moderation"],
-        div[data-testid*="content-filter"], div[data-testid*="ContentFilter"],
-        [class*="contentFilter"], [class*="moderation-setting"]
-      `,
-      hideContent: `[data-testid*="content-warning"], [class*="contentWarning"]`
-    },
-    'pixiv.net': {
-      hideUI: `
-        label:has(input[name*="r18"]), label:has(input[name*="R18"]),
-        div:has(> input[name*="restrict"]):has(label),
-        [class*="r18-toggle"], [class*="R18Toggle"],
-        .settings-section:has([name*="r18"])
-      `,
-      hideContent: `
-        .rp, [class*="r-18"], a[href*="mode=r18"],
-        div[data-gtm-value*="R-18"], div[class*="mature-content"]
-      `
-    },
-    'deviantart.com': {
-      hideUI: `
-        label:has(input[name*="mature"]), [class*="mature-toggle"],
-        div[class*="_setting"]:has([class*="mature"]),
-        a[href*="/settings/browsing"]
-      `,
-      hideContent: `
-        [class*="mature-tag"], [data-mature="true"],
-        div[class*="_deviation"]:has([class*="mature"])
-      `
-    },
-    'newgrounds.com': {
-      hideUI: `
-        label:has(input[name*="rating"]):has(input[value="a"]),
-        label:has(input[name*="rating_a"]),
-        [class*="content-setting"]:has([class*="rating"]),
-        input[name*="rating_a"], input[name*="rating"][value="a"],
-        li:has(input.suitable-a),
-        li:has(input[value="a"][name*="suitabilit"]),
-        #ignore-filter-link, #ignore-warning
-      `,
-      hideContent: `
-        .rating-a, .item-A, [class*="rated-a"], a[class*="rated-a"], div:has(> .rating-a),
-        .item-portalsubmission:has(.rating-a),
-        .portalsubmission-cell:has([data-rating="a"]),
-        .pod-body .item-portalsubmission[data-rating="a"],
-        a.item-audiosubmission[data-rating="a"],
-        .browse-body .item-portalsubmission:has(img[data-rating="a"]),
-        div[class*="submission"]:has([class*="mature"]),
-        div.pod-body .item-portalsubmission:has(span.rating-a)
-      `,
-      rawCSS: `
-        /* Nuke the A rating icon everywhere: search sidebar, browse filters, settings */
-        .suitable-a, label[for*="_a"].suitable-a,
-        li:has(> input.suitable-a),
-        li:has(> input[value="a"][name*="suitabilit"]),
-        [role="listitem"]:has(.suitable-a),
-        .checkboxes li:last-child:has(input[value="a"]),
-        /* Hide the entire content settings row on the settings page */
-        #settings_content, .settings-content,
-        form[action*="settings"] .content-ratings,
-        form[action*="settings"] fieldset:has(input.suitable-a) {
-          display: none !important;
-          visibility: hidden !important;
-          width: 0 !important; height: 0 !important;
-          overflow: hidden !important;
-          position: absolute !important;
-          clip: rect(0,0,0,0) !important;
-        }
-      `
-    },
-    'nexusmods.com': {
-      hideUI: `
-        label:has(input[name*="adult"]), [class*="adult-toggle"],
-        div[class*="setting"]:has([class*="adult-content"]),
-        a[href*="content+blocking"]
-      `,
-      hideContent: `[class*="adult-content"], div[class*="mod-tile"]:has([class*="adult"])`
-    },
-    'patreon.com': {
-      hideUI: `
-        label:has(input[name*="nsfw"]), label:has(input[name*="18plus"]),
-        [class*="nsfw-toggle"], [data-tag*="nsfw-setting"],
-        div[class*="setting"]:has([class*="nsfw"])
-      `,
-      hideContent: `[class*="nsfw-label"], div[class*="post"]:has([class*="nsfw-warning"])`
-    },
-    'vimeo.com': {
-      hideUI: `
-        label:has(input[name*="mature"]), [class*="mature-filter"],
-        div[class*="setting"]:has([class*="mature"])
-      `
-    },
-    'tumblr.com': {
-      hideUI: `
-        label:has(input[name*="filtering"]), label:has(input[name*="sensitive"]),
-        [class*="content-filter-toggle"], [class*="sensitive-toggle"],
-        div[class*="setting"]:has([class*="filtering"]),
-        a[href*="/settings/account"]:has([class*="filter"])
-      `,
-      hideContent: `
-        [class*="sensitive-media"],
-        div[class*="post"]:has([class*="mature-content"]),
-        [data-has-cw="true"]
-      `
-    },
-    'furaffinity.net': {
-      hideUI: `
-        select[name*="rating"], input[name*="rating"],
-        label:has(input[name*="sfw"]), label:has(input[name*="mature"]),
-        label:has(input[name*="adult"]),
-        [class*="content-filter"], #rating-selector,
-        form[action*="controls/settings"]:has([name*="rating"])
-      `,
-      hideContent: `
-        [class*="rating-adult"], [class*="rating-mature"],
-        figure:has(img[class*="mature"]), figure:has(img[class*="adult"])
-      `
-    },
-    'dailymotion.com': {
-      hideUI: `
-        [class*="family-filter"], [class*="FamilyFilter"],
-        button[class*="family"], label:has(input[name*="family_filter"]),
-        div[class*="setting"]:has([class*="family"])
-      `
-    },
-    'archiveofourown.org': {
-      // AO3 needs rawCSS because the selectors already contain their own declaration blocks
-      rawCSS: `
-        .blurb:has(.rating-explicit)  { display: none !important; }
-        .blurb:has(.rating-mature)    { display: none !important; }
-        .blurb:has(.rating-notrated)  { display: none !important; }
-        li.work:has(.rating-explicit) { display: none !important; }
-        li.work:has(.rating-mature)   { display: none !important; }
-        li.work:has(.rating-notrated) { display: none !important; }
-      `
-    },
-    'gumroad.com': {
-      hideUI: `label:has(input[name*="adult"]), [class*="adult-toggle"], div[class*="setting"]:has([class*="adult"])`
-    },
-
-    // NOT SO RELIABLE FILTERS ───────────────────────────────────
-    'bitchute.com': {
-      hideUI: `select[name*="sensitivity"], [class*="sensitivity-dropdown"], div[class*="setting"]:has([name*="sensitivity"])`
-    },
-    'discord.com': {
-      hideUI: `
-        div[class*="sensitiveContent"], [class*="explicit-filter"],
-        label:has(input[name*="explicit_content_filter"]),
-        div[class*="setting"]:has([class*="nsfw"]),
-        div[class*="setting"]:has([class*="sensitive"]),
-        [class*="contentFilterOption"]
-      `
-    },
-    'disboard.org': {
-      hideUI: `${DISCORD_DIR_UI}, [class*="nsfw-filter"]`,
-      hideContent: `[class*="nsfw-server"], div[class*="server-card"]:has([class*="nsfw"])`
-    },
-    'discadia.com': {
-      hideUI: DISCORD_DIR_UI,
-      hideContent: DISCORD_DIR_CONTENT
-    },
-    'discord.me': {
-      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"]`,
-      hideContent: `[class*="nsfw-server"]`
-    },
-    'discordlist.io': {
-      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"]`,
-      hideContent: `[class*="nsfw-server"], [class*="nsfw-content"]`
-    },
-    'top.gg': {
-      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-filter"]`,
-      hideContent: `[class*="nsfw-tag"], div:has([class*="nsfw-badge"])`
-    },
-    'fanfiction.net': {
-      hideUI: `select[name*="rating"], option[value="M"], [class*="rating-filter"]`,
-      hideContent: `[class*="rating-M"], div:has([class*="mature-rating"])`
-    },
-    'snapchat.com': {
-      hideUI: `label:has(input[name*="sensitive"]), [class*="sensitive-toggle"], div[class*="setting"]:has([class*="restrict"])`
-    },
-    'gab.com': {
-      hideUI: `[class*="keyword-filter"], form:has(input[name*="filter"]), a[href*="/settings/filters"]`
-    },
-    'telegram.org': {
-      hideUI: `label:has(input[name*="sensitive"]), [class*="sensitive-toggle"], div[class*="setting"]:has([class*="filtering"])`
-    },
-    'odysee.com': {
-      hideUI: `label:has(input[name*="mature"]), [class*="mature-toggle"], div[class*="setting"]:has([class*="mature"]), [class*="show-mature"]`,
-      hideContent: `[class*="mature-content"], div:has([class*="mature-tag"])`
-    },
-    'mewe.com': {
-      hideUI: `label:has(input[name*="content-filter"]), [class*="content-filter"], div[class*="setting"]:has([class*="filtering"])`
-    },
-    'minds.com': {
-      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"], div[class*="setting"]:has([class*="nsfw"])`,
-      hideContent: `[class*="nsfw-content"], div:has([class*="nsfw-overlay"])`
-    },
-    'inkbunny.net': {
-      hideUI: `label:has(input[name*="adult"]), [class*="adult-toggle"], select[name*="rating"], input[name*="rating"], div[class*="setting"]:has([class*="adult"])`,
-      hideContent: `[class*="adult-content"], [class*="rating-adult"]`
-    },
-    'itaku.ee': {
-      hideUI: `label:has(input[name*="mature"]), label:has(input[name*="explicit"]), [class*="content-visibility"], [class*="nsfw-toggle"], div[class*="setting"]:has([class*="mature"])`,
-      hideContent: `[class*="mature-content"], [class*="explicit-content"]`
-    },
-    'sofurry.com': {
-      hideUI: `select[name*="contentlevel"], [class*="content-pref"], label:has(input[name*="adult"]), label:has(input[name*="mature"]), div[class*="setting"]:has([class*="content"])`,
-      hideContent: `[class*="adult-content"], [class*="mature-content"]`
-    },
-    'pillowfort.io': {
-      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"], div[class*="setting"]:has([class*="nsfw"])`,
-      hideContent: `[class*="nsfw-post"], div[class*="post"]:has([class*="nsfw"])`
-    },
-    'speakbits.com': {
-      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"], div[class*="setting"]:has([class*="nsfw"])`,
-      hideContent: `[class*="nsfw-content"], div:has([class*="nsfw-flag"])`
-    },
-    'gamebanana.com': {
-      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"]`,
-      hideContent: `[class*="nsfw-content"], [class*="mature-content"]`
-    },
-    'ko-fi.com': {
-      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"]`
-    },
-    'buymeacoffee.com': {
-      hideUI: `label:has(input[name*="nsfw"]), [class*="nsfw-toggle"]`
-    },
-    'subscribestar.com': {
-      hideUI: `label:has(input[name*="18"]), [class*="age-toggle"], div[class*="setting"]:has([class*="adult"])`
-    },
-
-    // MASTODON / FEDIVERSE (shared CSS) ─────────────────────────
-    'mastodon.social': { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT },
-    'mastodon.online':  { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT },
-    'fosstodon.org':    { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT },
-    'mas.to':           { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT },
-    'mstdn.social':     { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT },
-    'techhub.social':   { hideUI: MASTODON_HIDE_UI, hideContent: MASTODON_HIDE_CONTENT }
-  };
-
-  // FAST DOMAIN LOOKUP ────────────────────────────────────────
-  // Pre-build a Set for O(1) "is this a graylist site?" check so that
-  // content.js exits immediately on the ~99.9% of pages that aren't graylist.
-  const GRAYLIST_DOMAIN_SET = new Set(Object.keys(GRAYLIST_FILTERS));
-
-  function matchGraylistDomain() {
-    if (GRAYLIST_DOMAIN_SET.has(hostname)) return hostname;
-    // Check parent domains (e.g., "www.reddit.com" → "reddit.com")
-    const parts = hostname.split('.');
-    for (let i = 1; i < parts.length - 1; i++) {
-      const parent = parts.slice(i).join('.');
-      if (GRAYLIST_DOMAIN_SET.has(parent)) return parent;
-    }
-    return null;
-  }
-
-  // CHEEKY POPUP ──────────────────────────────────────────────
-  const CHEEKY_MESSAGES = [
-    "Oh, Looking for the NSFW filter? pfff... You thought we didn't think of that....? 😏",
-    "Nice try! The NSFW filter settings have left the building 🚪👋",
-    "Looking for something? Whatever it was, it's gone now 🕳️",
-    "NSFW toggle? Never heard of her 💅",
-    "404: NSFW Settings Not Found (and never will be) 🔒",
-    "Pure Path says: No touchy the filter! 🛡️",
-    "You really thought you could sneak past us? Cute. 😊",
-    "The filter toggle has been... ✨ vaporized ✨",
-    "Womp womp..."
-  ];
-
-  let cheekyCooldown = false;
-
-  function showCheekyPopup() {
-    if (cheekyCooldown) return;
-    cheekyCooldown = true;
-    setTimeout(() => { cheekyCooldown = false; }, 5000);
-
-    const msg = CHEEKY_MESSAGES[Math.floor(Math.random() * CHEEKY_MESSAGES.length)];
-
-    // Remove any existing popup
-    const existing = document.getElementById('pure-path-cheeky-popup');
-    if (existing) existing.remove();
-
-    const popup = document.createElement('div');
-    popup.id = 'pure-path-cheeky-popup';
-    let iconHtml = '';
-    try {
-      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
-        const iconUrl = chrome.runtime.getURL('icons/icon48.png');
-        iconHtml = `<img src="${iconUrl}" style="width: 42px; height: 42px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background: rgba(255,255,255,0.2); padding: 3px;" alt="Pure Path Logo">`;
-      }
-    } catch (e) {
-      // If extension context is invalidated, fallback to an emoji
-      iconHtml = `<div style="font-size: 36px; line-height: 1;">🛡️</div>`;
-    }
-    
-    popup.innerHTML = `
-      <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center;">
-        ${iconHtml}
-        <div>${msg}</div>
-      </div>
-    `;
-
-    popup.style.cssText = `
-      position: fixed; top: 20px; right: 20px; z-index: 2147483647;
-      width: 240px; padding: 16px 20px;
-      background: linear-gradient(135deg, #818cf8, #6366f1);
-      color: #fff; font-family: 'Inter', 'Segoe UI', sans-serif;
-      font-size: 14px; font-weight: 600; line-height: 1.4;
-      border-radius: 16px;
-      box-shadow: 0 12px 40px rgba(99,102,241,0.4), 0 4px 12px rgba(0,0,0,0.15);
-      opacity: 0; transform: translateX(80px) scale(0.9);
-      transition: all 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-      pointer-events: none;
-    `;
-
-    document.body.appendChild(popup);
-
-    requestAnimationFrame(() => {
-      popup.style.opacity = '1';
-      popup.style.transform = 'translateX(0) scale(1)';
-    });
-
-    setTimeout(() => {
-      popup.style.opacity = '0';
-      popup.style.transform = 'translateX(80px) scale(0.9)';
-      setTimeout(() => popup.remove(), 500);
-    }, 4000);
-  }
-
-  // CSS INJECTION ─────────────────────────────────────────────
-  const NUKE_DECL = `
-    display: none !important;
-    visibility: hidden !important;
-    pointer-events: none !important;
-    opacity: 0 !important;
-    width: 0 !important;
-    height: 0 !important;
-    overflow: hidden !important;
-    position: absolute !important;
-    clip: rect(0,0,0,0) !important;
-  `;
-
-  function injectGraylistFilterCSS() {
-    if (document.getElementById('pure-path-graylist-lock')) return;
-
-    const matchedKey = matchGraylistDomain();
-    if (!matchedKey) return;
-
-    const config = GRAYLIST_FILTERS[matchedKey];
-    let css = `/* ═══ Pure Path: Graylist enforcement for ${matchedKey} ═══ */\n`;
-
-    if (config.hideUI) {
-      css += `${config.hideUI} { ${NUKE_DECL} }\n`;
-    }
-    if (config.hideContent) {
-      css += `${config.hideContent} { ${NUKE_DECL} }\n`;
-    }
-    if (config.rawCSS) {
-      css += config.rawCSS + '\n';
-    }
-
-    if (css.length < 80) return; // Only the comment — nothing to inject
-
-    const style = document.createElement('style');
-    style.id = 'pure-path-graylist-lock';
-    style.textContent = css;
-    (document.head || document.documentElement).appendChild(style);
-
-    if (config.hideUI) {
-      setupCheekyClickDetection(config.hideUI);
-    }
-
-    console.log(`Pure Path: Graylist filters enforced on ${matchedKey}`);
-  }
-
-  // SHARED DOM UTILITIES ───────────────────────────────────────
-  function querySelectorAllDeep(selector, root = document) {
-    const results = Array.from(root.querySelectorAll(selector));
-    const allEls = root.querySelectorAll('*');
-    for (const el of allEls) {
-      if (el.shadowRoot) {
-        results.push(...querySelectorAllDeep(selector, el.shadowRoot));
-      }
-    }
-    return results;
-  }
-
-  function isElementNuked(el) {
-    try {
-      const style = window.getComputedStyle(el);
-      if (style.display === 'none') return true;
-      if (style.visibility === 'hidden') return true;
-      if (style.opacity === '0') return true;
-      if (style.clip === 'rect(0px, 0px, 0px, 0px)') return true;
-      if (parseInt(style.width) === 0 && parseInt(style.height) === 0) return true;
-      if (el.offsetWidth === 0 && el.offsetHeight === 0) return true;
-    } catch (_) {}
-    return false;
-  }
-
-  function getAllShadowRoots(root = document) {
-    const roots = [];
-    const allEls = root.querySelectorAll('*');
-    for (const el of allEls) {
-      if (el.shadowRoot) {
-        roots.push(el.shadowRoot);
-        roots.push(...getAllShadowRoots(el.shadowRoot));
-      }
-    }
-    return roots;
-  }
-
-  // CHEEKY CLICK DETECTION ────────────────────────────────────
-  function setupCheekyClickDetection(uiSelectors) {
-    const selectorList = uiSelectors
-      .split(',')
-      .map(s => s.trim())
-      .filter(s => s.length > 0 && !s.startsWith('/*'));
-
-    const validSelectors = [];
-    for (const sel of selectorList) {
-      try { document.querySelector(sel); validSelectors.push(sel); } catch (_) {}
-    }
-    if (validSelectors.length === 0) return;
-
-    function scanAndIntercept() {
-      for (const sel of validSelectors) {
-        try {
-          const elements = querySelectorAllDeep(sel);
-          for (const el of elements) {
-            if (el.dataset.purePathIntercepted) continue;
-            el.dataset.purePathIntercepted = 'true';
-
-            const parent = el.parentElement;
-            if (parent && !parent.dataset.purePathWatch) {
-              parent.dataset.purePathWatch = 'true';
-              parent.addEventListener('click', (e) => {
-                if (!e.isTrusted) return;
-                if (isElementNuked(el)) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  showCheekyPopup();
-                  return;
-                }
-                if (el.contains(e.target) || e.target === el) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  showCheekyPopup();
-                }
-              }, true);
-            }
-          }
-        } catch (_) {}
-      }
-    }
-
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', scanAndIntercept);
-    } else {
-      scanAndIntercept();
-    }
-
-    setInterval(scanAndIntercept, 800);
-
-    document.addEventListener('click', (e) => {
-      const currentPath = window.location.pathname.toLowerCase();
-      const isSettingsPage = ['settings', 'preferences', 'filter', 'privacy', 'safety', 'moderation']
-        .some(s => currentPath.includes(s));
-      if (!isSettingsPage) return;
-
-      let clickedText = '';
-      let target = e.target;
-      if (target.shadowRoot) {
-        clickedText += (target.shadowRoot.textContent || '');
-      }
-      clickedText += (target.textContent || '');
-      const labelParent = target.closest('label, [role="button"], button, a, [data-testid]');
-      if (labelParent) {
-        clickedText += ' ' + (labelParent.textContent || '');
-        if (labelParent.shadowRoot) {
-          clickedText += ' ' + (labelParent.shadowRoot.textContent || '');
-        }
-      }
-      clickedText = clickedText.toLowerCase();
-
-      const filterKeywords = ['nsfw', 'mature', 'adult', 'explicit', 'sensitive', 'r-18', 'r18', '18+', 'content filter', 'family filter', 'safe browsing', 'blur'];
-      if (filterKeywords.some(kw => clickedText.includes(kw))) {
-        showCheekyPopup();
-      }
-    }, true);
-  }
-
   // SPA URL MONITORING (delegates URL checking to background.js)
   
   let lastUrl = window.location.href;
@@ -681,10 +110,6 @@
   
   function onSpaNavigation() {
     checkCurrentUrl();
-    // Re-inject if the style was removed (SPA full re-render)
-    if (!document.getElementById('pure-path-graylist-lock')) {
-      injectGraylistFilterCSS();
-    }
   }
   
   async function checkCurrentUrl() {
@@ -702,189 +127,6 @@
     }
   }
   
-  // SHADOW DOM ENFORCEMENT + SITE-SPECIFIC TOGGLE ENFORCEMENT
-  // Runs independently of click detection — ensures CSS is injected into all
-  // shadow roots and that NSFW toggles are always forced to safe state.
-
-  function enforceShadowDOM() {
-    const cssElement = document.getElementById('pure-path-graylist-lock');
-    if (cssElement) {
-      const cssText = cssElement.textContent;
-
-      // Create a reusable stylesheet for shadow DOMs
-      if (!window._purePathSheet) {
-        try {
-          window._purePathSheet = new CSSStyleSheet();
-          window._purePathSheet.replaceSync(cssText);
-        } catch (e) {
-          window._purePathSheet = 'fallback'; // For very old browsers
-        }
-      }
-
-      const shadowRoots = getAllShadowRoots();
-      for (const sr of shadowRoots) {
-        if (!sr._purePathInjected) {
-          sr._purePathInjected = true;
-          if (window._purePathSheet !== 'fallback') {
-            sr.adoptedStyleSheets = [...sr.adoptedStyleSheets, window._purePathSheet];
-          } else if (!sr.getElementById('pure-path-graylist-lock')) {
-            const style = document.createElement('style');
-            style.id = 'pure-path-graylist-lock';
-            style.textContent = cssText;
-            sr.appendChild(style);
-          }
-        }
-      }
-    }
-
-    // REDDIT TOGGLE ENFORCEMENT ────────────────────────────────────
-    if (matchGraylistDomain() === 'reddit.com') {
-      enforceRedditToggles();
-    }
-
-    // X / TWITTER TOGGLE ENFORCEMENT ───────────────────────────────
-    const xDomain = matchGraylistDomain();
-    if (xDomain === 'x.com' || xDomain === 'twitter.com') {
-      enforceTwitterToggles();
-    }
-
-    // NEWGROUNDS RATING ENFORCEMENT ────────────────────────────────
-    if (matchGraylistDomain() === 'newgrounds.com') {
-      enforceNewgroundsRatings();
-    }
-  }
-
-  // REDDIT: Force all NSFW toggles to safe state ────────────────
-  function enforceRedditToggles() {
-    // Auto-confirm the "Mark as safe" modal
-    const nsfwModals = querySelectorAllDeep('rpl-modal-card#nsfw-rpl-modal-card');
-    for (const modalWrapper of nsfwModals) {
-      const checkbox = querySelectorAllDeep('faceplate-checkbox-input', modalWrapper)[0];
-      if (checkbox && !checkbox.hasAttribute('checked') && checkbox.getAttribute('aria-checked') !== 'true') {
-        checkbox.click();
-      }
-      const confirmBtn = querySelectorAllDeep('button[slot="primary-button"]', modalWrapper)[0];
-      if (confirmBtn && !confirmBtn.hasAttribute('disabled')) {
-        confirmBtn.click();
-      }
-    }
-
-    // Force NSFW toggles OFF — check actual state every cycle, not a flag
-    const togglesToDisable = [
-      '[data-testid="is-nsfw-shown"] faceplate-switch-input',
-      '[data-testid="nsfw-posts-and-comments"] faceplate-switch-input',
-      '[data-testid="is-nsfw"] faceplate-switch-input',
-      '[data-testid="feed-settings-mature"] input',
-      'input[name*="mature"]'
-    ];
-    for (const sel of togglesToDisable) {
-      const els = querySelectorAllDeep(sel);
-      for (const el of els) {
-        if (el.hasAttribute('checked') || el.getAttribute('aria-checked') === 'true' || el.checked) {
-          console.log("Pure Path: Forcing filter off.");
-          el.click();
-        }
-      }
-    }
-
-    // Safe browsing mode (Blur images) should be ON
-    const blurToggles = querySelectorAllDeep('[data-testid="safe-browsing-mode"] faceplate-switch-input');
-    for (const el of blurToggles) {
-      if (!el.hasAttribute('checked') && el.getAttribute('aria-checked') !== 'true') {
-        console.log("Pure Path: Forcing blur on.");
-        el.click();
-      }
-    }
-  }
-
-  // X/TWITTER: Force sensitive content toggles to safe state ────
-  function enforceTwitterToggles() {
-    // 1. Force-UNCHECK "Display media that may contain sensitive content"
-    const sensitiveCheckbox = document.querySelector('input[type="checkbox"][aria-describedby="CHECKBOX_2_LABEL"]');
-    if (sensitiveCheckbox && sensitiveCheckbox.checked) {
-      console.log('Pure Path: Forcing X "Display sensitive media" OFF.');
-      sensitiveCheckbox.click();
-    }
-
-    // 2. Force-CHECK "Hide sensitive content" in Search Settings dialog
-    const searchDialogs = document.querySelectorAll('div[role="dialog"]');
-    for (const dialog of searchDialogs) {
-      const heading = dialog.querySelector('h2');
-      if (!heading || !heading.textContent.includes('Search settings')) continue;
-      const checkboxes = dialog.querySelectorAll('input[type="checkbox"]');
-      for (const cb of checkboxes) {
-        const labelText = cb.closest('label')?.textContent || '';
-        if (labelText.includes('Hide sensitive content') && !cb.checked) {
-          console.log('Pure Path: Forcing X "Hide sensitive content" ON.');
-          cb.click();
-        }
-      }
-    }
-
-    // 3. Force-close any open Search/Explore settings dialogs
-    for (const dialog of searchDialogs) {
-      const closeBtn = dialog.querySelector('button[aria-label="Close"]') || dialog.querySelector('[data-testid="app-bar-close"]');
-      if (closeBtn && !dialog.dataset.purePathClosed) {
-        dialog.dataset.purePathClosed = 'true';
-        setTimeout(() => closeBtn.click(), 200);
-      }
-    }
-  }
-
-  // NEWGROUNDS: Force A-rating checkbox to unchecked AND submit ──
-  function enforceNewgroundsRatings() {
-    let changed = false;
-
-    // Uncheck any "A" rating checkboxes that are checked
-    const aRatingInputs = document.querySelectorAll(
-      'input.suitable-a, input[value="a"][name*="suitabilit"], input[name*="rating_a"], input[name*="rating"][value="a"], input[name*="content_rating"][value="a"], input.suitable_a'
-    );
-    for (const input of aRatingInputs) {
-      if (input.checked) {
-        console.log('Pure Path: Forcing Newgrounds A-rating OFF.');
-        // Use click() to trigger Newgrounds' internal handlers
-        input.click();
-        // Also force the property in case click was intercepted
-        input.checked = false;
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        changed = true;
-      }
-    }
-
-    // After unchecking, submit the settings form to persist the change server-side
-    if (changed) {
-      const form = document.querySelector(
-        'form[action*="settings"], form[action*="preferences"], form:has(input.suitable-a), form:has(input[name*="rating"])'
-      );
-      if (form) {
-        const saveBtn = form.querySelector(
-          'input[type="submit"], button[type="submit"], button:has(span), .settings-save, [class*="save"], [class*="submit"]'
-        );
-        if (saveBtn && !saveBtn.dataset.purePathSubmitted) {
-          saveBtn.dataset.purePathSubmitted = 'true';
-          console.log('Pure Path: Submitting Newgrounds settings form to persist A-rating OFF.');
-          setTimeout(() => saveBtn.click(), 100);
-        }
-      }
-    }
-
-    // NUCLEAR: If the page meta tag declares adult/mature rating, block it
-    const metaRating = document.querySelector('meta[name="rating"]');
-    const ratingValue = metaRating ? metaRating.getAttribute('content') : '';
-    if (ratingValue === 'adult' || ratingValue === 'mature') {
-      console.log('Pure Path: Newgrounds page rated adult — blocking.');
-      try {
-        chrome.runtime.sendMessage({
-          action: 'notifyBlock',
-          url: window.location.href,
-          reason: 'newgrounds_adult_page',
-          match: 'Adult-rated content'
-        });
-      } catch (_) {}
-    }
-  }
-
   // INITIALIZATION
   
   // NEWGROUNDS "CONTENT FILTERED" BYPASS BLOCKER
@@ -892,7 +134,7 @@
   // Runs at the TOP LEVEL so it fires before anything else on the page.
 
   function blockNewgroundsBypassPage() {
-    if (matchGraylistDomain() !== 'newgrounds.com') return;
+    if (hostname !== 'newgrounds.com' && !hostname.endsWith('.newgrounds.com')) return;
     if (window._purePathBlockedNG) return;
 
     function doBlock() {
@@ -906,7 +148,9 @@
       // Hide everything immediately
       document.documentElement.style.display = 'none';
       try {
-        window.location.replace(chrome.runtime.getURL('blocked.html'));
+        // TEMP (testing): blocked.html hangs Playwright; route to a light page.
+        console.log('[PurePath][TEST] BLOCK newgrounds bypass page', window.location.href);
+        window.location.replace('about:blank');
       } catch (e) {
         // Fallback: nuke the page entirely
         document.documentElement.innerHTML = '<html><body style="background:#0f172a;"></body></html>';
@@ -930,7 +174,771 @@
     }, 200);
   }
 
+  // GRAYLIST V2 — MAIN-world API interception
+  // Injects graylist-inject.js into the page's MAIN world so it can patch fetch
+  // and strip the items the SITE ITSELF labelled NSFW (over_18, possibly_sensitive,
+  // xRestrict, sensitive, bsky labels, booru rating…) before they ever render.
+  // Runs on every page (Mastodon instances can't be enumerated by host); the
+  // injected script self-gates on the request URL, so it's near-free elsewhere.
+  // External WAR <script> is required: it bypasses strict page CSP that would
+  // block an inline script (reddit/x both ship such CSP).
+  // (This is the sole graylist mechanism now — the old per-site CSS UI/content
+  // hiding + toggle-forcing + cheeky popup were removed in favour of it.)
+  function injectGraylistInterceptor() {
+    if (window.__purePathGraylistInjected) return;
+    window.__purePathGraylistInjected = true;
+    try {
+      const s = document.createElement('script');
+      s.src = chrome.runtime.getURL('graylist-inject.js');
+      s.dataset.mode = 'standard';
+      s.async = false;
+      (document.head || document.documentElement).appendChild(s);
+      s.onload = () => s.remove();
+    } catch (_) {
+      // Extension context invalidated or CSP-blocked — nothing else to fall back to.
+    }
+  }
+
+  // Relay the MAIN-world script's "I stripped N items" notice to the background
+  // worker (the MAIN world can't reach chrome.storage itself).
+  function setupGraylistStatsRelay() {
+    window.addEventListener('message', (e) => {
+      if (e.source !== window) return;
+      const d = e.data;
+      if (!d || d.__purePath !== 'graylist-filter' || typeof d.count !== 'number') return;
+      try {
+        chrome.runtime.sendMessage({ action: 'graylistFiltered', count: d.count, site: d.site });
+      } catch (_) {}
+    });
+  }
+
+  // GRAYLIST V2 — DOM-LABEL FILTERING (server-rendered sites with no JSON feed)
+  // Some graylist sites render their feed as HTML on the server, so there's no
+  // fetched JSON for the MAIN-world interceptor to clean. But these sites stamp
+  // each item with their OWN rating marker (a class / data-attr) — the SSR
+  // equivalent of an API NSFW field, and just as stable. We read that marker and
+  // remove the flagged item. This is NOT the V1 "hide the settings UI" approach
+  // (that rotted); it keys on the per-ITEM rating label, the site's ground truth.
+  //
+  // Each rule:
+  //   markers / item  — find every `markers` element, hide the nearest `item`
+  //                     ancestor (or the marker itself). Cleans LISTINGS.
+  //   textScan        — for sites that print the rating as text with no class.
+  //   pagePath/pageLabel — CONTENT-PAGE guard. Item-hiding only filters feeds;
+  //                     if the user opens an adult item directly (e.g. their
+  //                     "show adult" preference is already enabled server-side,
+  //                     so nothing is hidden and no interstitial appears), the
+  //                     page just renders. `pageLabel()` reads the page's OWN
+  //                     rating declaration on a content URL (`pagePath`) and, if
+  //                     adult, hard-blocks the whole tab via blocked.html. This
+  //                     is the ground-truth fix for the "preference already on"
+  //                     leak — we don't touch their toggle, we kill the page.
+  // Patreon helpers (used by the 'patreon.com' rule's pageLabel). Reserved
+  // top-level routes that must never be treated as a creator vanity slug.
+  const PATREON_NON_CREATOR = new Set([
+    'home', 'explore', 'search', 'messages', 'settings', 'notifications',
+    'login', 'signup', 'logout', 'posts', 'post', 'dashboard', 'c', 'cw',
+    'checkout', 'create', 'about', 'careers', 'press', 'apps', 'app', 'api',
+    'sitemap', 'collection', 'collections', 'feature', 'privacy', 'policy',
+    'terms', 'support', 'help', 'pricing', 'product', 'creators', 'media'
+  ]);
+  // Memoise the (potentially large) SSR scan per-URL so the MutationObserver's
+  // re-scans during scroll don't re-parse the payload every burst.
+  let _ppPatreonMemo = { url: '', val: false };
+
+  const DOM_LABEL_RULES = {
+    'newgrounds.com': {
+      // Newgrounds rates work E/T/M/A. Adult ("a") and Mature ("m") cards carry a
+      // rating marker whose class TOKEN ends in `rated-a` / `rated-m`, but the
+      // prefix differs by page type — front page uses `background-color-rated-a`
+      // + `<span class="rated-a">`; the browse grid uses an icon
+      // `nohue-ngicon-small-rated-a`. A substring match on `rated-a`/`rated-m`
+      // covers every variant (rated-t / rated-e stay untouched). Hiding a+m
+      // matches the page-block, which blocks both.
+      markers: '[class*="rated-a"], [class*="rated-m"], [data-rating="a"], [data-rating="A"], [data-rating="m"], [data-rating="M"]',
+      item: 'a[href*="/view/"], .item-portalsubmission, .portalsubmission-cell, .item-audiosubmission, [class*="submission"], li',
+      // Submission pages stamp the content's own rating in <meta name="rating">.
+      pagePath: /^\/(portal\/view|art\/view|audio\/listen)\//i,
+      pageLabel: () => {
+        const m = document.querySelector('meta[name="rating"]');
+        const v = m ? (m.getAttribute('content') || '').trim().toLowerCase() : '';
+        return v === 'adult' || v === 'mature';
+      }
+    },
+    'archiveofourown.org': {
+      // AO3 ratings live as a class on the work blurb.
+      markers: '.rating-explicit, .rating-mature, .rating-notrated',
+      item: 'li.work, li.blurb, .blurb',
+      // A work page carries its rating in dd.rating.tags.
+      pagePath: /^\/works\/\d+/i,
+      pageLabel: () => {
+        const tags = document.querySelectorAll('dd.rating.tags a.tag, dd.rating a.tag');
+        for (const t of tags) if (/\b(explicit|mature)\b/i.test(t.textContent || '')) return true;
+        return false;
+      }
+    },
+    // NOTE: furaffinity.net / inkbunny.net / sofurry.com / weasyl.com were moved to
+    // the curated BLACKLIST (blocked outright) — too unreliable to DOM-filter.
+    'fanfiction.net': {
+      // FF.net prints "Rated: Fiction M" as text in the gray meta bar — no class.
+      textScan: { item: '.z-list, .z-list.zhover', re: /Rated:\s*(?:Fiction\s*)?(?:M|MA)\b/i },
+      // Story pages repeat the rating in the #profile_top header.
+      pagePath: /^\/s\/\d+/i,
+      pageLabel: () => {
+        const top = document.getElementById('profile_top');
+        return top ? /Rated:\s*(?:Fiction\s*)?(?:M|MA)\b/i.test(top.textContent || '') : false;
+      }
+    },
+    'scribblehub.com': {
+      // ScribbleHub openly hosts explicit web-fiction. Its OWN genre tags are the
+      // ground truth: every series/card links its genres to /genre/<slug>/. We key
+      // on the unambiguously-adult genre anchors (smut/adult/ecchi/mature/hentai/
+      // lolicon/shotacon) — present identically on listing cards AND series pages —
+      // so one selector drives both layers. Matching the href (not free text)
+      // avoids false-hiding a card whose description merely says "mature".
+      markers: 'a.fic_genre[href*="/genre/smut/"], a.fic_genre[href*="/genre/adult/"], a.fic_genre[href*="/genre/ecchi/"], a.fic_genre[href*="/genre/mature/"], a.fic_genre[href*="/genre/hentai/"], a.fic_genre[href*="/genre/lolicon/"], a.fic_genre[href*="/genre/shotacon/"]',
+      item: '.search_main_box',
+      pageLabel: () => {
+        const p = (window.location.pathname || '').toLowerCase();
+        // (a) Whole adult-genre browse pages (the entire grid is explicit) —
+        //     hard-block like itch.io /games/nsfw. ('mature' is intentionally
+        //     excluded here: it's broad enough to include non-sexual dark themes;
+        //     its explicit cards are still removed by item-hiding above.)
+        if (/^\/genre\/(smut|adult|ecchi|hentai|lolicon|shotacon)\//.test(p)) return true;
+        // (b) A series page tagged with an explicit genre → block the whole tab
+        //     (covers users who opened an adult series directly / have mature on).
+        if (/^\/series\/\d+/.test(p)) {
+          return !!document.querySelector('a.fic_genre[href*="/genre/smut/"], a.fic_genre[href*="/genre/adult/"], a.fic_genre[href*="/genre/ecchi/"], a.fic_genre[href*="/genre/hentai/"], a.fic_genre[href*="/genre/lolicon/"], a.fic_genre[href*="/genre/shotacon/"]');
+        }
+        return false;
+      }
+    },
+    'itch.io': {
+      // Adult games show a content-warning gate before the page; browse grids tag
+      // adult cells. Best-effort selectors — verify on live DOM.
+      markers: '.game_cell.nsfw, [data-nsfw="true"]',
+      item: '.game_cell',
+      pageLabel: () => {
+        // (a) Adult BROWSE listings have NO per-cell DOM marker (the whole grid is
+        //     adult), so item-hiding can't touch them — hard-block the page by path.
+        //     Covers /games/nsfw and adult tag/genre browse (tag-nsfw, tag-adult,
+        //     tag-hentai, tag-eroge, tag-porn, tag-erotic, tag-lewd, tag-sex, r18…).
+        const p = (window.location.pathname || '').toLowerCase();
+        if (/^\/games\/nsfw(?:\/|$)/.test(p)) return true;
+        const m = p.match(/^\/games\/(?:tag|genre)-([a-z0-9-]+)/);
+        if (m && /(?:^|-)(?:nsfw|adult|adults?-only|hentai|eroge|porn|porno|erotic|erotica|lewd|sex|sexual|r18|18-?plus|futanari)(?:$|-)/.test(m[1])) return true;
+        // (b) Individual adult game page: itch's own content-warning gate.
+        const w = document.querySelector('.content_warning, .content_warning_inner, .game_warning');
+        return w ? /adult|nsfw|explicit|sexual|mature/i.test(w.textContent || '') : false;
+      }
+    },
+    'patreon.com': {
+      // Patreon labels adult content cleanly (the OPPOSITE of the under-tagged
+      // blacklist sites) — but it's a Next.js app that SERVER-RENDERS the first
+      // paint, so the MAIN-world JSON interceptor (graylist-inject.js) only ever
+      // sees subsequent client fetches; the initial explore/feed/creator HTML
+      // slips past it. We close that transport gap here at the DOM, keyed on
+      // Patreon's OWN ground-truth markers:
+      //   LISTINGS — every adult creator/post card carries data-tag="nsfw-chip"
+      //     (verified 1:1 with cards on /explore and /home). Hide the card.
+      //   CREATOR PAGE — a direct visit to an adult creator (/<vanity> →
+      //     redirects to /cw/<vanity>) renders NO chip; the campaign's is_nsfw
+      //     flag lives only in the SSR payload. We scope it to THIS creator —
+      //     recommended adult creators ALSO embed is_nsfw:true on a SFW page —
+      //     by tying the flag to the campaign whose checkout/vanity URL is the
+      //     current slug, then hard-block the tab (pageLabel below).
+      // Class names are CSS-Modules (`Component-module__hash__local`): the
+      // component PREFIX is stable across builds, the hash is not — so we
+      // substring-match the prefix, never the hash, never the `sc-*` styled
+      // component names.
+      markers: '[data-tag="nsfw-chip"]',
+      item: '[class*="CreatorTile-module__"], [class*="ClickArea-module__"], [class*="PostCard"], [class*="-module__card"], li, [role="listitem"]',
+      pageLabel: () => {
+        const path = window.location.pathname || '';
+        const m = path.match(/^\/(?:cw\/)?([^\/?#]+)/);
+        if (!m) return false;
+        const slug = m[1].toLowerCase();
+        if (PATREON_NON_CREATOR.has(slug)) return false;
+        const href = window.location.href;
+        if (_ppPatreonMemo.url === href) return _ppPatreonMemo.val;
+        let blob = '';
+        const sc = document.querySelectorAll('script');
+        for (const s of sc) { const t = s.textContent; if (t && t.indexOf('is_nsfw') !== -1) blob += t + '\n'; }
+        let val = false;
+        if (blob) {
+          const low = blob.toLowerCase();
+          // The current creator's campaign object pairs is_nsfw with its
+          // checkout/vanity URL; look back a short window from that URL for an
+          // is_nsfw:true (escaped JSON: is_nsfw\":true). Scoping to the slug
+          // excludes recommended adult creators elsewhere on the page.
+          const needles = ['checkout/' + slug + '\\"', 'checkout/' + slug + '"', 'patreon.com/' + slug + '\\"'];
+          for (const n of needles) {
+            let i = low.indexOf(n.toLowerCase());
+            while (i !== -1 && !val) {
+              if (/is_nsfw\\?"\s*:\s*true/.test(blob.slice(Math.max(0, i - 700), i))) val = true;
+              i = low.indexOf(n.toLowerCase(), i + 1);
+            }
+            if (val) break;
+          }
+        }
+        _ppPatreonMemo = { url: href, val: val };
+        return val;
+      }
+    },
+    // Steam — page-level block only (no JSON feed; mostly age-gated SSR pages).
+    'steampowered.com': {
+      pagePath: /^\/(agecheck|app|sub|bundle)\//i,
+      pageLabel: () => {
+        // The age-check interstitial only appears for mature titles.
+        if (/\/agecheck\//i.test(window.location.pathname)) return true;
+        if (document.querySelector('#app_agegate, .agegate_birthday_selector, #agegate_box, #app_agegate_btn')) return true;
+        const m = document.querySelector('#game_area_mature_content, .mature_content_notice, .agegate_text_container');
+        return m ? /adult|mature|sexual|nudity|not be appropriate/i.test(m.textContent || '') : false;
+      }
+    },
+    'steamcommunity.com': {
+      // Mature-content overlay on screenshots/artwork/workshop (best-effort).
+      pageLabel: () => !!document.querySelector('.mature_content, .maturecontent, #BlurNSFWImage')
+    },
+    'tapas.io': {
+      // Tapas gates mature series/episodes with a `.filter--mature` interstitial
+      // ("This content is intended for mature audiences" — reasons include Sexual
+      // Content, so Tapas DOES host sexual content) and badges mature items with
+      // `.ico--mature`/`.sp-ico-mature*` icons. Both are ABSENT on SFW series
+      // (verified). Hide badged items in listings; hard-block any series/episode
+      // page that is mature — keyed on the gate OR the series' own mature icon,
+      // which persists even after a user has age-confirmed (so confirmed users
+      // who no longer see the gate are still blocked).
+      markers: 'i[class*="ico--mature"], i[class*="sp-ico-mature"]',
+      item: 'li, [class*="item"], a[href*="/series/"]',
+      pageLabel: () => {
+        const p = (window.location.pathname || '').toLowerCase();
+        if (p.indexOf('/series/') === -1 && p.indexOf('/episode/') === -1) return false;
+        return !!document.querySelector('.filter--mature, [class*="filter--mature"], i[class*="sp-ico-mature"], i[class*="ico--mature"]');
+      }
+    },
+    'webtoons.com': {
+      // Webtoons (incl. user-made Canvas) flags mature titles with an
+      // `ico_mature_15`/`ico_mature_18` tier icon on the series page (verified:
+      // present on a mature title, ABSENT on a SFW one like Tower of God).
+      // Listings carry no per-card marker, so we page-block the series-list & viewer
+      // pages of mature titles. Scoped to title_no= pages so the genre/canvas BROWSE
+      // grid (no title_no) is never blocked. NOTE: Webtoons policy bars explicit
+      // pornography, so this gates suggestive/mature (BL/violence) content.
+      pageLabel: () => {
+        if ((window.location.search || '').indexOf('title_no=') === -1) return false;
+        return !!document.querySelector('span[class*="ico_mature_"]');
+      }
+    },
+    'ko-fi.com': {
+      // Ko-fi creators flag an adult page with the "Nsfw" page-category, rendered
+      // as a server-side pill <span class="label-tag">Nsfw</span> inside the
+      // profile's `.tag-container`, and gate it with an "Agree and Continue"
+      // SweetAlert interstitial for un-age-confirmed visitors. The interstitial is
+      // transient (skipped once age-confirmed / logged in), but the label-tag
+      // PERSISTS regardless of viewer state (verified live: present on an NSFW
+      // creator page while logged-in & age-confirmed; ABSENT on SFW pages like the
+      // feed and supportkofi). So we key on the tag, not the gate, and hard-block
+      // the whole creator page. (Ko-fi policy bars explicit pornography, so this
+      // gates suggestive/mature art — same tier as Webtoons.)
+      pageLabel: () => {
+        const tags = document.querySelectorAll('.tag-container .label-tag, .label-tag');
+        for (const t of tags) if ((t.textContent || '').trim().toLowerCase() === 'nsfw') return true;
+        return false;
+      }
+    },
+    'writing.com': {
+      // Writing.Com rates every item E / ASR / 13+ / 18+ / GC / XGC. The rating renders as
+      //   <a class="blue2roll" href="javascript:LaunchPop('…pop_rhelp&crating=<CODE>'…)">TEXT</a>
+      // and the crating CODE is the ground truth (visible text can vary; the code can't):
+      //   10=E  20=ASR  30=13+  40=18+  50=GC  60=XGC   → adult = code >= 40.
+      //   (40=18+ and 60=XGC confirmed against Writing.Com's OWN rating-help pages;
+      //    10/20/30 confirmed off live listings.)
+      //
+      // LISTINGS & FEED: every item card is its own `table.norm` holding exactly ONE item + ONE
+      // rating badge (verified 27/27 on the /list_items Adult genre; newsfeed items too). Hide any
+      // card whose badge is 18+/GC/XGC.
+      markers: 'a.blue2roll[href*="crating=40"], a.blue2roll[href*="crating=50"], a.blue2roll[href*="crating=60"]',
+      item: 'table.norm',
+      // ITEM PAGES (any type — /view_item/, /books/→/profile/blog/, /forums/, interactives…):
+      // the item's OWN rating is the badge whose immediately-preceding text node is exactly
+      // "Rated:" (the header line "Rated: <r> · <Type> · … · #<id>") AND which is NOT inside a
+      // `table.norm`. That excludes (a) the preview's "Intro Rated:" badge and (b) every
+      // listing/feed row (those badges sit inside a table.norm). So it fires on exactly one adult
+      // item page and never on a listing. URL-agnostic on purpose (item URLs vary wildly).
+      pageLabel: () => {
+        const links = document.querySelectorAll('a.blue2roll[href*="crating="]');
+        for (const a of links) {
+          const prev = a.previousSibling ? (a.previousSibling.textContent || '').trim() : '';
+          if (prev !== 'Rated:') continue;          // the item's own rating (excludes "Intro Rated:")
+          if (a.closest('table.norm')) continue;     // exclude listing/feed rows
+          const m = (a.getAttribute('href') || '').match(/crating=(\d+)/);
+          if (m && parseInt(m[1], 10) >= 40) return true;   // 40=18+, 50=GC, 60=XGC
+        }
+        return false;
+      }
+    },
+    'tumblr.com': {
+      // SSR first-paint backstop (report §6.1). Tumblr search/tag/blog pages are
+      // server-rendered, so the MAIN-world JSON scrub never sees them — and with a
+      // logged-in account that has sensitive content enabled, flagged posts render
+      // in full. Tumblr stamps every community-labelled post with a cover whose
+      // text is "Potentially mature content" / "may contain content not suitable
+      // for all audiences" (verified live on /search + /tagged). We HIDE each such
+      // post everywhere (dashboard/blog/search); and on a SEARCH/TAG surface we
+      // hard-block the whole page once ≥2 mature posts appear — an adult-surfacing
+      // search, same threshold logic as the Discord-server rule. (Under-tagged
+      // nude posts carrying NO cover are the documented image-scanner frontier.)
+      textScan: { item: 'article, [data-testid="post"]', re: /potentially mature content|may contain content not suitable|community label/i },
+      pageLabel: () => {
+        const p = (window.location.pathname || '').toLowerCase();
+        if (p.indexOf('/search/') === -1 && p.indexOf('/tagged/') === -1) return false;
+        const re = /potentially mature content|may contain content not suitable/i;
+        let n = 0;
+        for (const a of document.querySelectorAll('article, [data-testid="post"]')) {
+          if (re.test(a.textContent || '')) { if (++n >= 2) return true; }
+        }
+        return false;
+      }
+    },
+    'wattpad.com': {
+      // SSR first-paint backstop (report §6.1). The S.wattpad JSON scrub covers
+      // story-LIST endpoints, but a single story landing/reader page SSRs its own
+      // content unscrubbed. Wattpad renders the story's OWN rating in
+      // [data-testid="story-meta"] as a leaf node whose exact text is "Mature"
+      // (verified live). The user TAG "mature" lives in [data-testid="tags"]
+      // instead, so scoping to story-meta avoids false-blocking a clean story that
+      // merely carries a "mature" tag. Hard-block the whole tab on a mature story.
+      pageLabel: () => {
+        const meta = document.querySelector('[data-testid="story-meta"]');
+        if (!meta) return false;
+        for (const el of meta.querySelectorAll('*')) {
+          if (el.children.length === 0 && (el.textContent || '').trim() === 'Mature') return true;
+        }
+        return false;
+      }
+    }
+  };
+
+  const DOM_LABEL_DOMAIN_SET = new Set(Object.keys(DOM_LABEL_RULES));
+
+  function matchDomLabelDomain() {
+    if (DOM_LABEL_DOMAIN_SET.has(hostname)) return hostname;
+    const parts = hostname.split('.');
+    for (let i = 1; i < parts.length - 1; i++) {
+      const parent = parts.slice(i).join('.');
+      if (DOM_LABEL_DOMAIN_SET.has(parent)) return parent;
+    }
+    return null;
+  }
+
+  function hideItem(el) {
+    if (!el || el.dataset.purePathHidden) return false;
+    el.dataset.purePathHidden = '1';
+    el.style.setProperty('display', 'none', 'important');
+    return true;
+  }
+
+  function applyDomLabel(rule) {
+    let removed = 0;
+    if (rule.markers) {
+      let marks;
+      try { marks = document.querySelectorAll(rule.markers); } catch (_) { marks = []; }
+      for (const m of marks) {
+        const item = (rule.item && m.closest(rule.item)) || m;
+        if (hideItem(item)) removed++;
+      }
+    }
+    if (rule.textScan) {
+      let items;
+      try { items = document.querySelectorAll(rule.textScan.item); } catch (_) { items = []; }
+      for (const it of items) {
+        if (it.dataset.purePathHidden) continue;
+        if (rule.textScan.re.test(it.textContent || '')) {
+          if (hideItem(it)) removed++;
+        }
+      }
+    }
+    if (removed > 0) {
+      try {
+        chrome.runtime.sendMessage({ action: 'graylistFiltered', count: removed, site: 'dom:' + hostname });
+      } catch (_) {}
+    }
+  }
+
+  // Page-level ground-truth block: if we're on a content page whose own rating
+  // declares it adult, hard-block the whole tab (closes the "preference already
+  // enabled server-side" leak that item-hiding can't reach).
+  let pageLabelBlocked = false;
+  function checkPageLabel(key, rule) {
+    if (pageLabelBlocked || !rule.pageLabel) return;
+    if (rule.pagePath && !rule.pagePath.test(window.location.pathname)) return;
+    let hit = false;
+    try { hit = !!rule.pageLabel(); } catch (_) {}
+    if (!hit) return;
+    pageLabelBlocked = true;
+    // Hide instantly in case the redirect lags a frame.
+    try { document.documentElement.style.display = 'none'; } catch (_) {}
+    try {
+      chrome.runtime.sendMessage({
+        action: 'notifyBlock',
+        url: window.location.href,
+        reason: 'graylist_page_label',
+        match: key + ' adult-rated page'
+      });
+    } catch (_) {}
+  }
+
+  function setupDomLabelFiltering() {
+    const key = matchDomLabelDomain();
+    if (!key) return;
+    const rule = DOM_LABEL_RULES[key];
+
+    const run = () => { checkPageLabel(key, rule); applyDomLabel(rule); };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', run);
+    } else {
+      run();
+    }
+
+    // Catch lazy-load / infinite scroll / SPA pagination. Debounced so a burst of
+    // mutations triggers a single re-scan.
+    let pending = false;
+    const observer = new MutationObserver(() => {
+      if (pending) return;
+      pending = true;
+      setTimeout(() => { pending = false; run(); }, 250);
+    });
+    const start = () => {
+      if (document.body) observer.observe(document.body, { childList: true, subtree: true });
+    };
+    if (document.body) start();
+    else document.addEventListener('DOMContentLoaded', start);
+  }
+
+  // DISCORD — block NSFW channels/servers, keep the platform.
+  // Discord is a SPA driven by a WebSocket gateway (not fetch), so the JSON
+  // interceptor can't reach its data. Instead we work at the DOM:
+  //   1. Age-gate block — when an age-restricted channel/server is opened, Discord
+  //      renders its OWN gate ("This channel is marked as age-restricted…"). We
+  //      detect that ground-truth text and hard-block the tab before the user can
+  //      click through. This is the reliable enforcement point.
+  //   2. Sidebar hiding (best-effort) — hide channels Discord tags NSFW so they're
+  //      not one click away.
+  // KNOWN GAP: a user who has already enabled "Display age-restricted content"
+  // sees NSFW channels with no gate; catching that needs the (hashed, fragile)
+  // header NSFW marker — deferred. Verify selectors against live DOM.
+  function setupDiscordFiltering() {
+    if (!(hostname === 'discord.com' || hostname.endsWith('.discord.com'))) return;
+
+    // Gate-specific phrasing (NOT the Settings "Display age-restricted content"
+    // toggle, so the settings page is never falsely blocked).
+    const GATE_RE = /marked as age[- ]restricted|age[- ]restricted (?:channel|community|server)|must be (?:18|over 18|eighteen)\b/i;
+    let blocked = false;
+
+    function scan() {
+      if (blocked) return;
+
+      function hardBlock(match) {
+        blocked = true;
+        try { document.documentElement.style.display = 'none'; } catch (_) {}
+        try {
+          chrome.runtime.sendMessage({
+            action: 'notifyBlock', url: window.location.href,
+            reason: 'discord_nsfw', match: match
+          });
+        } catch (_) {}
+      }
+
+      // 0) WHOLE-SERVER block. A server with several age-restricted channels is an
+      //    NSFW server — block every page in it. This is the only thing that also
+      //    neutralises channels the server left UNFLAGGED (non-compliant with
+      //    Discord policy): once the server is known-NSFW we don't rely on per-
+      //    channel signals at all. Threshold is intentionally low (anti-addiction
+      //    bias); a normal server with one 18+ corner stays channel-filtered.
+      const NSFW_SERVER_THRESHOLD = 2; // block the server at 2+ age-restricted channels (more than one)
+      const guild = window.location.pathname.match(/^\/channels\/(\d+)\b/);
+      if (guild) {
+        const rows = new Set();
+        document.querySelectorAll('[aria-label*="age-restricted" i]').forEach(ic => {
+          rows.add(ic.closest('li, [class*="containerDefault"]') || ic);
+        });
+        if (rows.size >= NSFW_SERVER_THRESHOLD) {
+          hardBlock('NSFW Discord server (' + rows.size + ' age-restricted channels)');
+          return;
+        }
+      }
+
+      // 1a) Age-gate TEXT → block. Covers users who have NOT enabled "Display
+      //     age-restricted content" (Discord renders its own gate then).
+      const nodes = document.querySelectorAll('[class*="nsfw" i], [class*="gate" i], [class*="ageGate" i], section, main');
+      for (const el of nodes) {
+        if (GATE_RE.test(el.textContent || '')) { hardBlock('Discord age-restricted channel/server'); return; }
+      }
+
+      // 1b) OPEN channel is age-restricted → block even when the user HAS opted in
+      //     and Discord shows no gate (the documented opt-in leak). Discord tags
+      //     every age-restricted channel row with an icon whose aria-label is
+      //     "Text (Age-Restricted) icon" — a <div>, not an <a>. Map the open
+      //     channel id (URL) to its sidebar row and check for that icon.
+      const open = window.location.pathname.match(/\/channels\/\d+\/(\d+)/);
+      if (open) {
+        const a = document.querySelector('a[href$="/' + open[1] + '"]');
+        const row = a && a.closest('li, [class*="containerDefault"]');
+        if (row && row.querySelector('[aria-label*="age-restricted" i]')) {
+          hardBlock('Discord age-restricted channel (opted-in)');
+          return;
+        }
+      }
+
+      // 2) Hide age-restricted channels in the sidebar. The marker is the icon
+      //    <div aria-label="… (Age-Restricted) …"> (NOT an <a>), so match ANY
+      //    element carrying it; keep the literal-"nsfw" name as a fallback.
+      let marks;
+      try { marks = document.querySelectorAll('[aria-label*="age-restricted" i], a[aria-label*="nsfw" i], [class*="nsfw" i] a'); }
+      catch (_) { marks = []; }
+      for (const mk of marks) {
+        const item = mk.closest('li, [class*="containerDefault"], [class*="wrapper"]') || mk;
+        hideItem(item);
+      }
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scan);
+    else scan();
+
+    let pending = false;
+    const observer = new MutationObserver(() => {
+      if (pending) return;
+      pending = true;
+      setTimeout(() => { pending = false; scan(); }, 300);
+    });
+    const start = () => { if (document.body) observer.observe(document.body, { childList: true, subtree: true }); };
+    if (document.body) start();
+    else document.addEventListener('DOMContentLoaded', start);
+  }
+
+  // FOCUS-SCHEDULE REMINDER POP-UPS
+  // The background worker fires these during the user's "vulnerable hours". We
+  // render a small, self-contained card inside a shadow root (so page CSS can't
+  // touch it) anchored bottom-right of the TOP frame only.
+  const PP_REMINDER_HOST_ID = 'pure-path-reminder';
+
+  function setupReminderListener() {
+    if (window.top !== window) return; // top frame only — avoid one card per iframe
+    if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.onMessage) return;
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (msg && msg.action === 'showReminder') {
+        try { showReminderOverlay(msg); } catch (_) {}
+        if (sendResponse) sendResponse({ ok: true });
+      }
+      return false;
+    });
+  }
+
+  function showReminderOverlay(msg) {
+    const render = (dark) => renderReminderCard(msg, dark);
+    try {
+      chrome.storage.local.get(['display', 'theme'], (r) => {
+        const d = (r && r.display && typeof r.display === 'object') ? r.display : (r || {});
+        render((d.theme || 'dark') !== 'light');
+      });
+    } catch (_) {
+      render(true);
+    }
+  }
+
+  function renderReminderCard({ title, body, kind }, dark) {
+    if (!document.body && !document.documentElement) return;
+    // Replace any existing card so reminders never stack.
+    const prev = document.getElementById(PP_REMINDER_HOST_ID);
+    if (prev) prev.remove();
+
+    const host = document.createElement('div');
+    host.id = PP_REMINDER_HOST_ID;
+    host.style.cssText = 'all: initial; position: fixed; z-index: 2147483647; right: 20px; bottom: 20px;';
+    const root = host.attachShadow({ mode: 'open' });
+
+    const bg = dark ? 'rgba(17,24,39,0.92)' : 'rgba(255,255,255,0.94)';
+    const fg = dark ? '#f3f4f6' : '#111827';
+    const sub = dark ? '#9ca3af' : '#4b5563';
+    const border = dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
+    const accent = kind === 'checkin' ? '#34d399' : '#818cf8';
+
+    root.innerHTML = `
+      <style>
+        :host { all: initial; }
+        .card {
+          position: relative;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+          width: 320px; max-width: calc(100vw - 40px);
+          background: ${bg}; color: ${fg};
+          border: 1px solid ${border}; border-radius: 16px;
+          box-shadow: 0 18px 50px rgba(0,0,0,0.35);
+          backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+          overflow: hidden; transform: translateY(16px); opacity: 0;
+          transition: transform .42s cubic-bezier(.16,1,.3,1), opacity .42s ease;
+        }
+        .card.in { transform: translateY(0); opacity: 1; }
+        .accent { height: 4px; background: linear-gradient(90deg, ${accent}, transparent); }
+        .body { padding: 16px 18px; display: flex; gap: 12px; }
+        .dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; background: ${accent}; box-shadow: 0 0 0 4px ${accent}22; }
+        .txt { flex: 1; min-width: 0; }
+        .brand { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: ${accent}; font-weight: 700; }
+        .title { font-size: 15px; font-weight: 700; margin: 3px 0 4px; }
+        .msg { font-size: 13.5px; line-height: 1.5; color: ${sub}; }
+        .close { position: absolute; top: 10px; right: 10px; width: 24px; height: 24px; border: 0; background: transparent; color: ${sub}; font-size: 18px; line-height: 1; cursor: pointer; border-radius: 8px; }
+        .close:hover { background: ${border}; color: ${fg}; }
+      </style>
+      <div class="card">
+        <div class="accent"></div>
+        <button class="close" aria-label="Dismiss">&times;</button>
+        <div class="body">
+          <div class="dot"></div>
+          <div class="txt">
+            <div class="brand">Pure Path</div>
+            <div class="title"></div>
+            <div class="msg"></div>
+          </div>
+        </div>
+      </div>`;
+    // Inject text via textContent — never interpolate the message into HTML.
+    root.querySelector('.title').textContent = title || 'Pure Path';
+    root.querySelector('.msg').textContent = body || '';
+
+    (document.body || document.documentElement).appendChild(host);
+    const card = root.querySelector('.card');
+    requestAnimationFrame(() => card.classList.add('in'));
+
+    let removed = false;
+    const dismiss = () => {
+      if (removed) return;
+      removed = true;
+      card.classList.remove('in');
+      setTimeout(() => host.remove(), 450);
+    };
+    root.querySelector('.close').addEventListener('click', dismiss);
+    setTimeout(dismiss, 12000);
+  }
+
+  // PRIVACY-FRONTEND / SEARXNG FINGERPRINT BLOCK (report Round 4 §11.1, §11.3)
+  // Reddit / YouTube / X / Imgur / Quora / TikTok all have open-source "frontends"
+  // (redlib, libreddit, invidious, piped, nitter, rimgo, quetre, proxitok…) that
+  // re-serve the SAME content on ARBITRARY, ever-rotating community domains. Every
+  // host-keyed defense — the over18 cookie, the /r/ path block, the forced
+  // Restricted-Mode cookie, the X possibly_sensitive scrub — misses them because it
+  // keys on the canonical hostname. Likewise self-hosted SearXNG instances aggregate
+  // Google/Bing IMAGE results with SafeSearch stripped, on unbounded domains the
+  // SEARCH_ENGINES host-list can never enumerate.
+  //
+  // We can't list the hostnames — but the SOFTWARE is fingerprintable and stable
+  // across every instance & redesign: each instance footer links its own AGPL source
+  // repo, and SearXNG/Nitter stamp a <meta name="generator">. Detect that, then
+  // hard-block — these mirrors exist precisely to view a platform WITHOUT the
+  // filtering Pure Path already enforces on the canonical host. (Same label-over-host
+  // philosophy as the graylist; it survives the domain churn a hostlist loses to.)
+  function setupFrontendSoftwareBlock() {
+    if (window.top !== window.self) return;          // top frame only — avoids iframe FPs
+    // Don't fire on code-hosting sites (the repo pages themselves link these repos).
+    if (/(^|\.)(github\.com|gitlab\.com|codeberg\.org|bitbucket\.org|sourceforge\.net)$/.test(hostname)) return;
+
+    // Source-repo links = the near-zero-FP signal. A normal site never links these
+    // repos; an instance of the software always does (AGPL attribution in the footer).
+    const REPO_SELECTOR = [
+      'a[href*="github.com/redlib-org"]', 'a[href*="github.com/libreddit"]',
+      'a[href*="/iridium/redlib"]', 'a[href*="github.com/iv-org/invidious"]',
+      'a[href*="github.com/TeamPiped"]', 'a[href*="github.com/zedeus/nitter"]',
+      'a[href*="github.com/PrivacyDevel/nitter"]', 'a[href*="codeberg.org/rimgo"]',
+      'a[href*="github.com/rimgo"]', 'a[href*="codeberg.org/teddit"]',
+      'a[href*="github.com/teddit"]', 'a[href*="github.com/zyachel/quetre"]',
+      'a[href*="github.com/edwardloveall/scribe"]', 'a[href*="github.com/pablouser1/ProxiTok"]',
+      'a[href*="git.sr.ht/~edwardloveall/scribe"]'
+    ].join(',');
+
+    const metaContent = (sel) => { const m = document.querySelector(sel); return (m && (m.content || m.getAttribute('content'))) || ''; };
+
+    let blocked = false;
+    function detect() {
+      const genLow = metaContent('meta[name="generator"]').toLowerCase();
+      const descLow = (metaContent('meta[name="description"]') + ' ' + metaContent('meta[property="og:description"]')).toLowerCase();
+      const title = document.title || '';
+
+      // SearXNG / Searx — block ONLY the leak surfaces (image/video media grid or a
+      // weakened SafeSearch). General text search on a Searx instance stays usable.
+      const isSearx = /searx/.test(genLow) ||
+        document.querySelector('a[href*="docs.searxng.org"], a[href*="github.com/searxng"], a[href*="github.com/searx/searx"]') ||
+        document.querySelector('img[src*="/image_proxy"]');
+      if (isSearx) {
+        const sp = new URLSearchParams(window.location.search);
+        const ss = sp.get('safesearch');
+        // Block ONLY the dedicated image/video media grid, or an explicit
+        // SafeSearch-off. SearXNG expresses an image/video search either as
+        // categories=images / categories=videos OR the checkbox params
+        // category_images / category_videos (any value). Gate on the URL, NOT on
+        // rendered /image_proxy thumbnails — general TEXT search proxies favicons &
+        // infobox images through image_proxy too and must stay usable (that
+        // over-trigger blocked legit text search in testing).
+        const mediaSearch = /\b(image|video|pic)/i.test(sp.get('categories') || '') ||
+                            sp.has('category_images') || sp.has('category_videos');
+        if (mediaSearch || ss === '0' || ss === '1') {
+          return 'SearXNG media/SafeSearch-off';
+        }
+        return null;   // legit text search on a Searx instance — leave it alone
+      }
+
+      // Redlib / Libreddit (Reddit) — every page carries the same stable meta
+      // description regardless of instance ("View on Redlib/Libreddit, an
+      // alternative private front-end to Reddit"). Instance-independent, near-zero FP.
+      if (/\bredlib\b|\blibreddit\b|front-?end to reddit/.test(descLow)) return 'Redlib/Libreddit (Reddit frontend)';
+
+      // Invidious (YouTube) stamps "- Invidious" into every page title.
+      if (/(?:^|[\-|]\s*)invidious\b/i.test(title)) return 'Invidious (YouTube frontend)';
+
+      // Nitter stamps its own generator meta.
+      if (/nitter/.test(genLow)) return 'Nitter (X frontend)';
+
+      // Any FOSS-frontend source repo linked on the page → this is an instance.
+      const repo = document.querySelector(REPO_SELECTOR);
+      if (repo) {
+        const h = (repo.getAttribute('href') || '').replace(/^https?:\/\//, '').split('/').slice(0, 2).join('/');
+        return 'privacy frontend (' + h + ')';
+      }
+      return null;
+    }
+
+    function run() {
+      if (blocked) return;
+      let match = null;
+      try { match = detect(); } catch (_) {}
+      if (!match) return;
+      blocked = true;
+      try { document.documentElement.style.display = 'none'; } catch (_) {}
+      try {
+        chrome.runtime.sendMessage({
+          action: 'notifyBlock', url: window.location.href,
+          reason: 'privacy_frontend', match: match
+        });
+      } catch (_) {}
+    }
+
+    if (document.readyState !== 'loading') run();
+    document.addEventListener('DOMContentLoaded', run);
+    // SPA frontends (Piped) hydrate their footer late, and anti-bot challenge pages
+    // (Anubis/Cloudflare) render the real content a beat later — poll a short burst.
+    let n = 0;
+    const iv = setInterval(() => { if (blocked || n++ > 20) { clearInterval(iv); return; } run(); }, 300);
+  }
+
   function initContentScript() {
+    // Inject the MAIN-world interceptor as early as possible — before page scripts
+    // boot their data fetches.
+    injectGraylistInterceptor();
+    setupGraylistStatsRelay();
+    setupDomLabelFiltering();
+    setupDiscordFiltering();
+    setupFrontendSoftwareBlock();
+    setupReminderListener();
+
     // FIRST: check for Newgrounds bypass page before doing anything else
     blockNewgroundsBypassPage();
 
@@ -942,26 +950,6 @@
       }
     }
 
-    // Only run graylist logic if this domain is actually in the map
-    if (matchGraylistDomain()) {
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', injectGraylistFilterCSS);
-      } else {
-        injectGraylistFilterCSS();
-      }
-
-      // Start the enforcement loop for shadow DOM + toggle enforcement
-      // Runs independently of cheeky click detection
-      const startEnforcement = () => {
-        enforceShadowDOM();
-        setInterval(enforceShadowDOM, 800);
-      };
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', startEnforcement);
-      } else {
-        startEnforcement();
-      }
-    }
     
     setupSpaMonitoring();
   }

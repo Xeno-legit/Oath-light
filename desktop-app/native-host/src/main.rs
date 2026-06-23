@@ -22,6 +22,75 @@ const TAURI_ADDR: &str = "127.0.0.1";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const READ_TIMEOUT: Duration = Duration::from_millis(100);
 
+/// (process-image-substring, browser-key) — kept in sync with the desktop app's
+/// `browsers.rs` table. Used to label which browser spawned this host so the
+/// desktop app can monitor each browser independently.
+const BROWSER_PROCESSES: &[(&str, &str)] = &[
+    ("msedge", "edge"),
+    ("brave", "brave"),
+    ("opera", "opera"),
+    ("vivaldi", "vivaldi"),
+    ("chromium", "chromium"),
+    ("firefox", "firefox"),
+    // chrome must be last: "chrome" is a substring of nothing above, but keep it
+    // after the more specific Chromium forks just in case of odd image names.
+    ("chrome", "chrome"),
+];
+
+/// Walk up the parent-process chain from this host. Returns the known browser
+/// key if recognized, plus the immediate parent's process image name (used to
+/// surface *custom* browsers the table doesn't know about). Chrome spawns the
+/// host as a direct child; we walk a few levels for intermediate launchers.
+fn detect_parent_browser() -> (Option<&'static str>, String) {
+    use sysinfo::System;
+    let mut sys = System::new();
+    sys.refresh_processes();
+
+    let cur = match sysinfo::get_current_pid() {
+        Ok(p) => p,
+        Err(_) => return (None, String::new()),
+    };
+    let mut pid = sys.process(cur).and_then(|p| p.parent());
+    let mut immediate = String::new();
+
+    for _ in 0..6 {
+        let p = match pid {
+            Some(p) => p,
+            None => break,
+        };
+        let proc_ = match sys.process(p) {
+            Some(p) => p,
+            None => break,
+        };
+        let name = proc_.name().to_lowercase();
+        if immediate.is_empty() {
+            immediate = name.clone();
+        }
+        for (needle, key) in BROWSER_PROCESSES {
+            if name.contains(needle) {
+                return (Some(key), name);
+            }
+        }
+        pid = proc_.parent();
+    }
+    (None, immediate)
+}
+
+/// "zen.exe" -> "zen" (a stable key for a custom browser).
+fn custom_key(proc: &str) -> String {
+    proc.strip_suffix(".exe").unwrap_or(proc).to_string()
+}
+
+/// "zen.exe" -> "Zen" (a friendly display name).
+fn friendly_name(proc: &str) -> String {
+    let base = proc.strip_suffix(".exe").unwrap_or(proc);
+    let mut chars = base.chars();
+    match chars.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
+        None => base.to_string(),
+    }
+}
+
 /// Read a single Chrome Native Messaging message from stdin.
 /// Format: 4 bytes (u32 LE) length, then `length` bytes of UTF-8 JSON.
 fn read_native_message(reader: &mut impl Read) -> io::Result<Value> {
@@ -141,6 +210,30 @@ fn main() {
     };
 
     let mut tcp_write_stream = tcp_stream;
+
+    // Announce which browser spawned us (+ the calling extension origin, passed
+    // by Chromium as argv[1]) so the desktop app can track this browser
+    // independently. Sent before any extension traffic is relayed.
+    let (known, proc_name) = detect_parent_browser();
+    let browser_key = match known {
+        Some(k) => k.to_string(),
+        None if !proc_name.is_empty() => custom_key(&proc_name),
+        None => "unknown".to_string(),
+    };
+    // Friendly name only for custom browsers; the desktop app already names the known ones.
+    let browser_name = if known.is_some() { String::new() } else { friendly_name(&proc_name) };
+    let ext_origin = std::env::args().nth(1).unwrap_or_default();
+    eprintln!("[pure-path-host] Parent browser: {} ({}) origin: {}", browser_key, proc_name, ext_origin);
+    let hello = serde_json::json!({
+        "type": "host_hello",
+        "browser": browser_key,
+        "browserName": browser_name,
+        "browserProcess": proc_name,
+        "extOrigin": ext_origin,
+    });
+    if let Err(e) = send_tcp_message(&mut tcp_write_stream, &hello) {
+        eprintln!("[pure-path-host] Failed to send host_hello: {}", e);
+    }
 
     // Channel for messages from TCP reader → stdout writer
     let (tx, rx) = mpsc::channel::<Value>();

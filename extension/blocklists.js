@@ -469,11 +469,37 @@ document.addEventListener('click', (e) => {
   }
 });
 
-if (typeof chrome !== 'undefined' && chrome.storage) {
-  chrome.storage.local.get(['theme'], (result) => {
-    if (result.theme) {
-      document.documentElement.setAttribute('data-theme', result.theme);
-    }
-  });
+// Theme/palette is applied by theme-sync.js (kept in lockstep with the desktop app).
+
+// GRAYLIST — render the canonical filtered-site list (graylist-sites.js)
+function renderGraylist() {
+  const host = document.getElementById('graylistList');
+  if (!host || typeof GRAYLIST_SITES === 'undefined') return;
+  host.textContent = '';
+  for (const site of GRAYLIST_SITES) {
+    const row = document.createElement('div');
+    row.className = 'graylist-row';
+
+    const txt = document.createElement('div');
+    txt.className = 'gl-txt';
+    const url = document.createElement('span');
+    url.className = 'gl-url';
+    url.textContent = site.url;          // textContent — no HTML injection
+    const desc = document.createElement('span');
+    desc.className = 'gl-desc';
+    desc.textContent = site.desc;
+    txt.appendChild(url);
+    txt.appendChild(desc);
+
+    const badge = document.createElement('span');
+    const k = site.kind;
+    badge.className = 'gl-badge ' + (k === 'dom' ? 'dom' : k === 'discord' ? 'discord' : 'api');
+    badge.textContent = k === 'discord' ? 'Channel block' : k === 'dom' ? 'Page filter' : 'Feed filter';
+
+    row.appendChild(txt);
+    row.appendChild(badge);
+    host.appendChild(row);
+  }
 }
+renderGraylist();
 

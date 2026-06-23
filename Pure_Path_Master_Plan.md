@@ -34,23 +34,33 @@ Until every stage is complete or before it by one stage.
    blocked site viewed through them is still caught. Private IP ranges exempt. DNS/DoH bypass
    deferred — not doing DNS yet.)
 
-## Phase 3: (In Progress)
+## Phase 3: (Almost Complete)
 
 ▶ Phase 3 should focus more on the vibe and establishing proper cross browser integration.
 
-* Theme unison
-* Desktop app UI, UX remake
-* Fixing cross browser issues.
-* Blocking speed optimization.
-* Useful advices and protocols
-* Graylist V2 — API/network-layer interception (replaces fragile CSS UI-hiding)
+* Theme unison (Done)
+* Desktop app UI, UX remake (Done)
+* Fixing cross browser issues. (Done)
+* Blocking speed optimization. (Done)
+* Useful advices and protocols (Done)
+* Graylist V2 — API/network-layer interception (Almost Done — `extension/graylist-inject.js`)
   (Instead of hiding each site's filter UI, intercept the JSON the site fetches and strip the items
    the SITE ITSELF already labelled NSFW — reddit over_18, X possibly_sensitive, pixiv xRestrict,
    mastodon sensitive, bluesky labels, booru rating, etc. Ground-truth, not a heuristic; survives UI
    redesigns because API fields stay stable. Needs a MAIN-world injected script to patch fetch/XHR.
    Sites with no per-item label — file hosts, chat, video-chat, shorteners — get whole-site block instead.)
+  - JSON-scrub + a DOM-layer (`content.js` `DOM_LABEL_RULES`, page-block) now cover ~24 API + ~10 DOM
+    sites. Build/test logs: `GRAYLIST_HANDOFF.md`, `GRAYLIST_V2_TEST_REPORT.md`,
+    `GRAYLIST_SESSION3_HANDOFF.md`, `extra_graylisted_sites.md`. Latest: ko-fi built; writing.com
+    unbanned + recon-complete (rule pending). Manifest at 3.1.8.
+  - **PRE-SHIP BLOCKER (before Open Beta):** `PP_TESTING=true` in `background.js` routes all blocks
+    to `about:blank` (disables the block screen + redirect-link), and the Newgrounds bypass in
+    `content.js` likewise → both MUST be reverted. See `GRAYLIST_SESSION3_HANDOFF.md` §5.
 
-## Phase 4:
+* Open Beta (6/21/2026)
+
+
+## Phase 4: (In Progress)
 
 ▶ Phase 4 is undeniably the most important, Because it focuses more on The Friction systems and the watchdog system.
 
@@ -59,6 +69,9 @@ Until every stage is complete or before it by one stage.
 * Watchdog system (a secondary app will be present and it will monitor the main app, making sure the app stays working and the main app will be monitoring it).
 * extension monitoring
 * optional Ai monitoring
+* Pre-Alpha launch test. (Testing everything again at full scale, pushing the app to its absolute limits.)
+* Blocking certain desktop versions of apps (Discord, etc.)
+* Desktop Alpha launch.
 
 ## Phase 5:
 
@@ -67,7 +80,7 @@ Until every stage is complete or before it by one stage.
 * Phone support
 * built-in ai scanner
 * Access to permissions to prevent app deletion at weak moments
-* Alpha launch.
+* Phone Alpha launch
 
 ## Phase 6:
 
@@ -77,6 +90,7 @@ Until every stage is complete or before it by one stage.
 * Multi-language support
 * Pure path unique website.
 * Donation booth
+* Full launch
 
 ## Phase 7:
 

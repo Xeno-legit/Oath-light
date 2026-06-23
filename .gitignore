@@ -28,6 +28,7 @@ yarn-error.log*
 # Build outputs (if you add build process)
 dist/
 build/
+**/target/
 *.crx
 *.pem
 *.zip
@@ -82,3 +83,6 @@ Error/
 /Bugs and issues/
 
 # Other stuff
+.agents/
+.claude/
+skills-lock.json

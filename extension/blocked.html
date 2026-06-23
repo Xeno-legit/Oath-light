@@ -1,192 +1,191 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="breeze">
+<html lang="en" data-theme="dark" data-style="aurora" data-bg="both">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Content Blocked - Pure Path</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <title>Content Blocked — Pure Path</title>
+  <!-- shared design system: theme tokens (6 palettes × light/dark), glass primitives, animated bg -->
+  <link rel="stylesheet" href="blocklist_assets/desktop.css">
   <style>
-    :root {
-      --bg-color: #f8fafc;
-      --card-bg: rgba(255, 255, 255, 0.75);
-      --card-border: rgba(255, 255, 255, 0.5);
-      --text-main: #1e293b;
-      --text-muted: #64748b;
-      --primary: #818cf8;
-      --primary-hover: #6366f1;
-      --gradient-1: #818cf8;
-      --gradient-2: #38bdf8;
-      --orb-1: rgba(129, 140, 248, 0.5);
-      --orb-2: rgba(56, 189, 248, 0.4);
-      --glass-shadow: 0 16px 40px 0 rgba(31, 38, 135, 0.1);
-      --safe-color: #10b981;
-      --safe-hover: #059669;
-    }
-
-    [data-theme="lavender"] {
-      --bg-color: #faf5ff; --card-bg: rgba(255, 255, 255, 0.8);
-      --text-main: #4a044e; --text-muted: #86198f;
-      --primary: #c084fc; --primary-hover: #a855f7;
-      --gradient-1: #c084fc; --gradient-2: #f472b6;
-      --orb-1: rgba(192, 132, 252, 0.5); --orb-2: rgba(244, 114, 182, 0.4);
-      --glass-shadow: 0 16px 40px 0 rgba(134, 25, 143, 0.1);
-      --safe-color: #d946ef; --safe-hover: #c026d3;
-    }
-
-    [data-theme="forest"] {
-      --bg-color: #f0fdf4; --card-bg: rgba(255, 255, 255, 0.8);
-      --text-main: #064e3b; --text-muted: #047857;
-      --primary: #34d399; --primary-hover: #10b981;
-      --gradient-1: #34d399; --gradient-2: #2dd4bf;
-      --orb-1: rgba(52, 211, 153, 0.5); --orb-2: rgba(45, 212, 191, 0.4);
-      --glass-shadow: 0 16px 40px 0 rgba(4, 120, 87, 0.1);
-      --safe-color: #10b981; --safe-hover: #059669;
-    }
-
-    [data-theme="midnight"] {
-      --bg-color: #0f172a; --card-bg: rgba(30, 41, 59, 0.8);
-      --card-border: rgba(51, 65, 85, 0.5);
-      --text-main: #f8fafc; --text-muted: #cbd5e1;
-      --primary: #3b82f6; --primary-hover: #60a5fa;
-      --gradient-1: #3b82f6; --gradient-2: #6366f1;
-      --orb-1: rgba(59, 130, 246, 0.4); --orb-2: rgba(99, 102, 241, 0.3);
-      --glass-shadow: 0 16px 40px 0 rgba(0, 0, 0, 0.4);
-      --safe-color: #38bdf8; --safe-hover: #0ea5e9;
-    }
-
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    
+    /* ---- blocked page layout (page-specific; tokens come from desktop.css) ---- */
+    html, body { height: 100%; }
     body {
-      font-family: 'Inter', sans-serif;
-      background-color: var(--bg-color);
-      color: var(--text-main);
-      min-height: 100vh;
       display: flex; align-items: center; justify-content: center;
-      padding: 24px; overflow-x: hidden;
+      padding: 24px; overflow: hidden;
+      background: var(--desktop);
     }
 
+    /* full-viewport background canvas (desktop.css .bg is absolute → make it fixed here) */
+    .bg { position: fixed; inset: 0; z-index: 0; }
+    svg.svgi { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
-
-    .container {
-      position: relative; z-index: 10;
-      background: var(--card-bg);
-      backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
-      border: 1px solid var(--card-border); border-radius: 32px;
-      padding: 56px 48px; max-width: 600px; width: 100%;
-      box-shadow: var(--glass-shadow); text-align: center;
-      animation: slideUpFade 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    .blocked-card {
+      position: relative; z-index: 2;
+      width: 100%; max-width: 560px;
+      padding: 48px 46px 44px;
+      text-align: center;
+      background: var(--glass);
+      border: 1px solid var(--glass-brd);
+      border-radius: var(--r-xl);
+      box-shadow: var(--shadow);
+      -webkit-backdrop-filter: blur(28px); backdrop-filter: blur(28px);
+      animation: slideUpFade .7s var(--ease) both;
     }
+    @keyframes slideUpFade { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: none; } }
 
-    @keyframes slideUpFade {
-      from { opacity: 0; transform: translateY(30px); }
-      to { opacity: 1; transform: translateY(0); }
+    /* status pill — mirrors the desktop titlebar .tl-status */
+    .status {
+      display: inline-flex; align-items: center; gap: 8px;
+      margin: 0 auto 26px;
+      font-size: 12px; font-weight: 700; letter-spacing: .04em;
+      color: var(--text-2);
+      padding: 6px 14px; border-radius: 999px;
+      background: var(--glass-2); border: 1px solid var(--glass-brd);
     }
-
-    .shield-icon {
-      width: 100px; height: 100px; margin: 0 auto 32px;
-      display: block; border-radius: 24px;
-      background: var(--bg-color); padding: 16px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.05);
-      animation: gentlePulse 4s ease-in-out infinite;
+    .status .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent-2);
+      box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent-2) 70%, transparent);
+      animation: statusPulse 2.6s var(--ease-soft) infinite;
     }
+    @keyframes statusPulse { 0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent-2) 55%, transparent); } 70% { box-shadow: 0 0 0 8px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
-    @keyframes gentlePulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.05); }
+    .shield {
+      width: 92px; height: 92px; margin: 0 auto 26px;
+      border-radius: 26px; display: grid; place-items: center;
+      background: color-mix(in oklab, var(--accent) 16%, transparent);
+      color: var(--accent);
+      box-shadow: inset 0 0 0 1px var(--glass-brd), 0 18px 40px -22px color-mix(in oklab, var(--accent) 90%, transparent);
+      animation: gentlePulse 4.5s var(--ease-soft) infinite;
     }
+    .shield img { width: 54px; height: 54px; display: block; }
+    @keyframes gentlePulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
 
-    h1 { font-size: 36px; font-weight: 700; margin-bottom: 16px; letter-spacing: -0.02em; }
-    
+    h1 { font-size: 38px; font-weight: 800; letter-spacing: -.03em; line-height: 1.05; margin-bottom: 12px; }
+
     .reason {
-      color: var(--text-muted); font-size: 16px; font-weight: 500;
-      margin-bottom: 32px; line-height: 1.5;
+      color: var(--text-2); font-size: 16px; font-weight: 600;
+      margin-bottom: 26px; line-height: 1.5;
     }
 
-    .quote-box {
-      background: rgba(var(--primary), 0.03);
-      border: 1px solid var(--card-border);
-      border-left: 4px solid var(--primary);
-      padding: 24px; margin: 32px 0; border-radius: 16px;
-      font-style: italic; color: var(--text-main); font-weight: 500;
-      font-size: 15px; line-height: 1.6;
+    /* quote — mirrors the popup quote (serif mark + text + author) */
+    .quote {
+      position: relative;
+      background: var(--glass-2);
+      border: 1px solid var(--glass-brd);
+      border-left: 4px solid var(--accent);
+      padding: 22px 24px 22px 56px; margin: 26px 0;
+      border-radius: var(--r-md);
+      text-align: left; cursor: pointer; overflow: hidden;
+      transition: border-color .25s, background .25s, transform .2s var(--ease);
+    }
+    .quote:hover { border-color: var(--glass-brd-strong); background: color-mix(in oklab, var(--accent) 7%, var(--glass-2)); }
+    .quote:active { transform: scale(.99); }
+    .quote-mark {
+      font-family: var(--font-display); font-size: 60px; line-height: .6;
+      color: color-mix(in oklab, var(--accent) 55%, transparent);
+      position: absolute; top: 26px; left: 18px; pointer-events: none;
+    }
+    .quote-text {
+      color: var(--text); font-size: 15.5px; font-weight: 500; line-height: 1.6;
+      text-wrap: pretty; transition: opacity .3s var(--ease);
+    }
+    .quote-author {
+      font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+      color: var(--accent); margin-top: 12px; transition: opacity .3s var(--ease);
     }
 
     .stats {
-      display: flex; justify-content: space-around; gap: 16px;
-      margin: 32px 0; padding: 24px;
-      background: rgba(var(--primary), 0.02);
-      border: 1px solid var(--card-border); border-radius: 20px;
+      display: flex; gap: 14px;
+      margin: 26px 0; padding: 22px;
+      background: var(--glass-2);
+      border: 1px solid var(--glass-brd);
+      border-radius: var(--r-lg);
     }
-    
-    .stat { display: flex; flex-direction: column; gap: 8px; }
-    
+    .stat { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .stat + .stat { border-left: 1px solid var(--glass-brd); }
+    .stat-ico {
+      width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center;
+      background: color-mix(in oklab, var(--accent) 15%, transparent); color: var(--accent);
+      margin-bottom: 2px;
+    }
+    .stat-ico svg { width: 20px; height: 20px; }
     .stat-value {
-      font-size: 36px; font-weight: 700;
-      background: linear-gradient(135deg, var(--gradient-1), var(--gradient-2));
-      -webkit-background-clip: text;
-      background-clip: text;
+      font-size: 38px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      -webkit-background-clip: text; background-clip: text;
       -webkit-text-fill-color: transparent;
     }
-    
-    .stat-label { font-size: 13px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-
-    .message {
-      color: var(--text-muted); line-height: 1.6; font-size: 15px;
-      margin-bottom: 40px; font-weight: 500;
+    .stat-label {
+      font-size: 12px; color: var(--muted); font-weight: 700;
+      text-transform: uppercase; letter-spacing: .08em;
     }
 
-    .safe-btn {
-      background: var(--safe-color); color: white;
-      border: none; padding: 18px 40px; border-radius: 16px;
-      font-size: 16px; font-weight: 600; font-family: inherit;
-      cursor: pointer; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-      display: inline-flex; align-items: center; gap: 12px;
-    }
-    
-    .safe-btn:hover {
-      background: var(--safe-hover);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(16, 185, 129, 0.4);
+    .message { color: var(--muted); line-height: 1.6; font-size: 15px; font-weight: 500; margin-bottom: 34px; }
+
+    .safe-btn { padding: 16px 36px; font-size: 16px; border-radius: var(--r-md); }
+    .safe-btn svg { width: 20px; height: 20px; }
+
+    @media (max-width: 520px) {
+      .blocked-card { padding: 38px 24px 34px; }
+      h1 { font-size: 30px; }
+      .stat-value { font-size: 30px; }
+      .stats { flex-direction: column; gap: 18px; }
+      .stat + .stat { border-left: none; border-top: 1px solid var(--glass-brd); padding-top: 18px; }
     }
   </style>
 </head>
 <body>
-  <canvas id="fluidCanvas" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0; pointer-events: none;"></canvas>
+  <!-- animated background (orbs / waves / particles / stars / ripple / smoke) — built by blocked.js -->
+  <div class="bg" aria-hidden="true">
+    <div class="bg-veil"></div>
+  </div>
 
-  <div class="container">
-    <img src="icons/icon48.png" alt="Pure Path Shield" class="shield-icon">
+  <div class="blocked-card">
+    <div class="status">
+      <span class="dot" aria-hidden="true"></span>
+      Protection Active
+    </div>
+
+    <div class="shield">
+      <img src="icons/icon128.png" alt="Pure Path">
+    </div>
     <h1>Take a deep breath</h1>
     <div class="reason" id="reason">This page was blocked to help you stay focused on your goals.</div>
-    
-    <div class="quote-box" id="quote">
-      "The only person you are destined to become is the person you decide to be." - Ralph Waldo Emerson
+
+    <div class="quote" id="quote" title="Tap for another">
+      <div class="quote-mark" aria-hidden="true">&ldquo;</div>
+      <div class="quote-text" id="quoteText"></div>
+      <div class="quote-author" id="quoteAuthor"></div>
     </div>
-    
+
     <div class="stats">
       <div class="stat">
+        <div class="stat-ico">
+          <svg class="svgi" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
+        </div>
         <div class="stat-value" id="totalBlocks">0</div>
         <div class="stat-label">Sites Blocked</div>
       </div>
       <div class="stat">
+        <div class="stat-ico">
+          <svg class="svgi" viewBox="0 0 24 24"><path d="M12 3c1 3-1.5 4.5-1.5 7a1.5 1.5 0 003 0c0-.8-.3-1.4-.3-1.4 2 1.4 3.3 3.6 3.3 6.1a6.5 6.5 0 11-13 0C3.5 11 7 9 7.5 5.5 9.5 7 10 4.5 12 3z"/></svg>
+        </div>
         <div class="stat-value" id="daysClean">0</div>
         <div class="stat-label">Days Protected</div>
       </div>
     </div>
-    
+
     <div class="message">
-      You're making progress! Every time you see this page, you're choosing growth over impulse.
+      You're making progress. Every time you see this page, you're choosing growth over impulse.
     </div>
-    
-    <button class="safe-btn" id="goBackBtn">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M19 12H5M12 19l-7-7 7-7"/>
-      </svg>
+
+    <button class="btn btn-primary safe-btn" id="goBackBtn">
+      <svg class="svgi" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
       Return to Safety
     </button>
   </div>
-  
-  <script src="gsap.min.js"></script>
+
   <script src="blocked.js"></script>
 </body>
 </html>
