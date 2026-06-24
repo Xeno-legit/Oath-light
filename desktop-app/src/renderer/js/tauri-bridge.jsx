@@ -53,6 +53,16 @@
       if (!available) return Promise.resolve(() => {});
       return T.event.listen('nsfw-scan', (evt) => { if (evt && evt.payload) cb(evt.payload); });
     },
+
+    // 48-hour uninstall request (Phase 4 friction). The backend owns the timer
+    // (persisted to disk); these just read/drive it. State shape:
+    //   { requested, requested_at, delay_secs, elapsed_secs, remaining_secs, ready }
+    getUninstallState() { return invoke('get_uninstall_state'); },
+    requestUninstall() { return invoke('request_uninstall'); },
+    resetUninstallTimer() { return invoke('reset_uninstall_timer'); },
+    cancelUninstall() { return invoke('cancel_uninstall'); },
+    // Resolves to "launched" (uninstaller started, app will close) or "manual".
+    completeUninstall() { return invoke('complete_uninstall'); },
   };
 
   // React hook — live aggregate stats (total blocks across every extension).

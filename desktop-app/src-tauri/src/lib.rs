@@ -1,7 +1,10 @@
 mod browsers;
 pub mod nsfw;
+pub mod nudenet;
 mod profiles;
 pub mod screen;
+mod uninstall;
+mod watchdog;
 
 use browsers::{BrowserDef, Engine, EnforceOutcome, BROWSERS};
 use serde::{Deserialize, Serialize};
@@ -153,11 +156,15 @@ pub struct AppState {
     app_streak: u64,
 }
 
-/// Lazily-loaded NSFW image classifier (Phase 4 optional AI monitoring). The
-/// model (~340MB) is only loaded on first use, then shared across calls.
+/// Lazily-loaded NSFW models (Phase 4 optional AI monitoring). Both are loaded
+/// on first use, then shared across calls:
+/// - `classifier`: SigLIP `image-guard` (~340MB) — owns drawn / hentai.
+/// - `detector`: NudeNet (~12MB) — owns photographic nudity. The monitor ORs
+///   the two into one ensemble verdict (see [`run_monitor`]).
 #[derive(Default)]
 pub struct NsfwState {
     classifier: Mutex<Option<Arc<nsfw::NsfwClassifier>>>,
+    detector: Mutex<Option<Arc<nudenet::NudeNetDetector>>>,
 }
 
 /// Controls the background screen-scanning monitor thread.
@@ -172,6 +179,11 @@ const SCAN_FP_SIZE: u32 = 32;
 const SCAN_CHANGE_THRESH: f32 = 6.0; // mean abs luma diff (0..255)
 const SCAN_MIN_GAP: Duration = Duration::from_millis(800);
 
+// Ensemble block thresholds (see desktop-app/ml/AI_PLAN.md). BLOCK when the
+// SigLIP drawn/hentai signal OR the NudeNet photographic signal fires.
+const ENSEMBLE_SIGLIP_NSFW: f32 = 0.50;
+const ENSEMBLE_NUDENET_EXPLICIT: f32 = 0.30;
+
 /// One scan result pushed to the UI (`nsfw-scan` event).
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanEvent {
@@ -182,6 +194,10 @@ pub struct ScanEvent {
     pub labels: Vec<String>,
     #[serde(flatten)]
     pub classification: nsfw::Classification,
+    /// NudeNet photographic-nudity scores (None if the detector isn't loaded).
+    pub nudenet: Option<nudenet::NudeResult>,
+    /// Ensemble verdict: SigLIP nsfw_score OR NudeNet explicit crossed threshold.
+    pub blocked: bool,
     /// Downscaled JPEG of the captured frame as a data URL ("what it sees").
     pub thumb: String,
     pub width: u32,
@@ -202,8 +218,13 @@ fn make_thumb(img: &image::DynamicImage, max_side: u32) -> String {
 
 /// The monitor loop: poll the screen, classify only on a major change, and emit
 /// a `nsfw-scan` event (with timing + a thumbnail) each time it does.
-fn run_monitor(app: AppHandle, clf: Arc<nsfw::NsfwClassifier>, running: Arc<AtomicBool>) {
-    log::info!("nsfw screen monitor started");
+fn run_monitor(
+    app: AppHandle,
+    clf: Arc<nsfw::NsfwClassifier>,
+    nude: Option<Arc<nudenet::NudeNetDetector>>,
+    running: Arc<AtomicBool>,
+) {
+    log::info!("nsfw screen monitor started (nudenet: {})", nude.is_some());
     let mut prev_fp: Vec<u8> = Vec::new();
     let mut last_scan = Instant::now().checked_sub(SCAN_MIN_GAP).unwrap_or_else(Instant::now);
 
@@ -229,7 +250,18 @@ fn run_monitor(app: AppHandle, clf: Arc<nsfw::NsfwClassifier>, running: Arc<Atom
             let t_inf = Instant::now();
             match clf.classify_image(&dynimg) {
                 Ok(classification) => {
+                    // Second model: NudeNet for photographic nudity (best-effort).
+                    let nudenet = nude.as_ref().and_then(|d| match d.detect_image(&dynimg) {
+                        Ok(r) => Some(r),
+                        Err(e) => {
+                            log::warn!("nudenet detect failed: {e}");
+                            None
+                        }
+                    });
                     let infer_ms = t_inf.elapsed().as_secs_f64() * 1000.0;
+                    // Ensemble: drawn/hentai (SigLIP) OR photographic nudity (NudeNet).
+                    let blocked = classification.nsfw_score >= ENSEMBLE_SIGLIP_NSFW
+                        || nudenet.map_or(false, |r| r.explicit >= ENSEMBLE_NUDENET_EXPLICIT);
                     let payload = ScanEvent {
                         ts: now_unix_ms(),
                         change,
@@ -237,6 +269,8 @@ fn run_monitor(app: AppHandle, clf: Arc<nsfw::NsfwClassifier>, running: Arc<Atom
                         infer_ms,
                         labels: nsfw::LABELS.iter().map(|s| s.to_string()).collect(),
                         classification,
+                        nudenet,
+                        blocked,
                         thumb: make_thumb(&dynimg, 384),
                         width,
                         height,
@@ -1054,10 +1088,28 @@ fn start_nsfw_monitor(
         }
         guard.as_ref().unwrap().clone()
     };
+    // Second ensemble model: NudeNet (photographic nudity). Best-effort — if its
+    // model is missing or fails to load, the monitor still runs SigLIP-only.
+    let detector = {
+        let mut guard = nsfw_state.detector.lock().map_err(|e| e.to_string())?;
+        if guard.is_none() {
+            match nudenet::resolve_model_path() {
+                Some(model) => {
+                    log::info!("Loading NudeNet model from {}", model.display());
+                    match nudenet::NudeNetDetector::load(&model) {
+                        Ok(d) => *guard = Some(Arc::new(d)),
+                        Err(e) => log::warn!("NudeNet load failed (SigLIP-only): {e}"),
+                    }
+                }
+                None => log::warn!("NudeNet model not found (SigLIP-only) — place nudenet-320n.onnx next to the app"),
+            }
+        }
+        guard.as_ref().cloned()
+    };
     monitor.running.store(true, Ordering::SeqCst);
     let running = monitor.running.clone();
     let app_handle = app.clone();
-    std::thread::spawn(move || run_monitor(app_handle, classifier, running));
+    std::thread::spawn(move || run_monitor(app_handle, classifier, detector, running));
     Ok(())
 }
 
@@ -1073,12 +1125,122 @@ fn nsfw_monitor_running(monitor: tauri::State<'_, MonitorState>) -> bool {
     monitor.running.load(Ordering::SeqCst)
 }
 
+/// Authorize a real shutdown of the dual-process watchdog so closing the app no
+/// longer triggers resurrection. The legitimate quit path (the uninstall flow)
+/// calls this; it is also the kill switch during development.
+#[tauri::command]
+fn stop_watchdog() {
+    watchdog::request_shutdown();
+}
+
+// ============================================================================
+// 48-hour uninstall request (Phase 4 friction)
+// ============================================================================
+
+/// Current uninstall-request state (pending? ready? seconds remaining?).
+#[tauri::command]
+fn get_uninstall_state(
+    store: tauri::State<'_, Arc<uninstall::UninstallStore>>,
+) -> uninstall::UninstallState {
+    store.get()
+}
+
+/// Open an uninstall request, starting the cool-off countdown. Idempotent — an
+/// existing pending request keeps its original clock. Protection stays fully on.
+#[tauri::command]
+fn request_uninstall(
+    store: tauri::State<'_, Arc<uninstall::UninstallStore>>,
+) -> uninstall::UninstallState {
+    let st = store.request();
+    log::warn!(
+        "uninstall requested — {}s cool-off started (protection stays active)",
+        st.delay_secs
+    );
+    st
+}
+
+/// Restart the cool-off clock (available once the window has elapsed).
+#[tauri::command]
+fn reset_uninstall_timer(
+    store: tauri::State<'_, Arc<uninstall::UninstallStore>>,
+) -> uninstall::UninstallState {
+    log::info!("uninstall timer reset");
+    store.reset()
+}
+
+/// Cancel the uninstall request and continue normally.
+#[tauri::command]
+fn cancel_uninstall(
+    store: tauri::State<'_, Arc<uninstall::UninstallStore>>,
+) -> uninstall::UninstallState {
+    log::info!("uninstall request cancelled");
+    store.cancel()
+}
+
+/// Complete the uninstall once the cool-off has elapsed: stand down the guard,
+/// clear any force-install policy, drop the request, and launch the OS
+/// uninstaller. Returns `"launched"` (uninstaller started; the app will close)
+/// or `"manual"` (no installer found — caller shows manual-removal steps).
+#[tauri::command]
+fn complete_uninstall(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Mutex<AppState>>>,
+    store: tauri::State<'_, Arc<uninstall::UninstallStore>>,
+) -> Result<String, String> {
+    if !store.get().ready {
+        return Err("The waiting period hasn't elapsed yet.".to_string());
+    }
+
+    // Stand down the reinstall guard so enforcement stops fighting the removal.
+    state.lock().unwrap().guard_enabled = false;
+    // Stand down the dual-process watchdog so neither process resurrects the
+    // other while the OS uninstaller removes the app.
+    watchdog::request_shutdown();
+    // Clear any force-install policy we may have written (best-effort).
+    for def in BROWSERS {
+        browsers::remove_policy(def);
+    }
+    // Drop the persisted request — the cool-off is spent.
+    store.cancel();
+    log::warn!("uninstall confirmed — guard disabled, policy cleared");
+
+    match uninstall::launch_uninstaller() {
+        uninstall::LaunchResult::Launched(what) => {
+            log::warn!("uninstaller launched: {what}");
+            // Close the app shortly after so the uninstaller can remove the
+            // running executable cleanly.
+            let app2 = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(2000));
+                app2.exit(0);
+            });
+            Ok("launched".to_string())
+        }
+        uninstall::LaunchResult::NotFound => {
+            log::warn!("no installer found — protection disabled, manual removal needed");
+            Ok("manual".to_string())
+        }
+    }
+}
+
 // ============================================================================
 // Entry point
 // ============================================================================
 
+/// Guardian-mode entry point: a hidden, windowless process (the same `app.exe`
+/// relaunched with `--watchdog`) that does nothing but keep the main app alive.
+/// Never starts Tauri. Blocks until the guard loop ends.
+pub fn run_guardian() {
+    watchdog::run_guardian();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Dual-process watchdog (Phase 4 tamper resistance). Acquire the main-role
+    // mutex and start guarding the guardian *before* the window comes up; this
+    // also exits early if another main instance is already running.
+    watchdog::init_main();
+
     let shared_state = Arc::new(Mutex::new(AppState {
         guard_enabled: true,
         ..Default::default()
@@ -1105,6 +1267,12 @@ pub fn run() {
             start_nsfw_monitor,
             stop_nsfw_monitor,
             nsfw_monitor_running,
+            stop_watchdog,
+            get_uninstall_state,
+            request_uninstall,
+            reset_uninstall_timer,
+            cancel_uninstall,
+            complete_uninstall,
         ])
         .setup(move |app| {
             if cfg!(debug_assertions) {
@@ -1116,6 +1284,15 @@ pub fn run() {
             }
 
             register_native_host(app.handle());
+
+            // Persisted 48-hour uninstall request (survives restarts + a wiped
+            // renderer localStorage).
+            let udd = app
+                .path()
+                .app_data_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let _ = std::fs::create_dir_all(&udd);
+            app.manage(Arc::new(uninstall::UninstallStore::load(&udd)));
 
             start_tcp_server(app.handle().clone(), shared_state.clone());
             start_monitor(app.handle().clone(), shared_state.clone());

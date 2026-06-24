@@ -435,3 +435,33 @@ pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
     // macOS/Linux managed-policy enforcement is out of scope for this pass.
     EnforceOutcome::Unsupported
 }
+
+/// Remove any force-install policy we may have written for `def`. Used when the
+/// user completes a 48-hour uninstall so the extension is no longer pinned and
+/// can actually be removed. Best-effort and idempotent — deleting an absent key
+/// is a harmless no-op (and it's a no-op anyway while enforcement is dormant).
+#[cfg(target_os = "windows")]
+pub fn remove_policy(def: &BrowserDef) {
+    match def.engine {
+        Engine::Chromium => {
+            // Drop only our ordinal entry, leaving any other managed forcelist
+            // values (and the forcelist key itself) untouched.
+            for root in ["HKLM", "HKCU"] {
+                let key = format!(r"{}\{}\ExtensionInstallForcelist", root, def.policy_subkey);
+                let _ = reg().args(["delete", &key, "/v", "1", "/f"]).output();
+            }
+        }
+        Engine::Gecko => {
+            for root in ["HKLM", "HKCU"] {
+                let key = format!(
+                    r"{}\{}\ExtensionSettings\{}",
+                    root, def.policy_subkey, GECKO_EXTENSION_ID
+                );
+                let _ = reg().args(["delete", &key, "/f"]).output();
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn remove_policy(_def: &BrowserDef) {}

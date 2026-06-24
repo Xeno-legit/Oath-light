@@ -662,6 +662,19 @@ input, textarea { font-family: inherit; }
 .btn-ghost { background: var(--glass-2); border-color: var(--glass-brd); color: var(--text); }
 .btn-ghost:hover { border-color: var(--glass-brd-strong); }
 .btn-sm { padding: 8px 13px; font-size:13px; border-radius:11px; }
+.btn-danger { background: linear-gradient(135deg, #e5565b, #c83a40); color:#fff; box-shadow: 0 10px 26px -12px rgba(220,60,66,.7); }
+.btn-danger:hover { transform: translateY(-1px); box-shadow: 0 14px 32px -12px rgba(220,60,66,.85); }
+.btn:disabled { opacity:.5; pointer-events:none; }
+
+/* uninstall (48h request) card */
+.ut-ico { width:40px; height:40px; flex:0 0 40px; border-radius:12px; display:grid; place-items:center; background: color-mix(in oklab, var(--accent-2) 14%, transparent); color: var(--accent-2); }
+.ut-ico svg { width:20px; height:20px; }
+.ut-count { font-size:30px; font-weight:800; letter-spacing:-.02em; font-variant-numeric: tabular-nums; color: var(--text); line-height:1.05; }
+.ut-sub { font-size:12.5px; color: var(--muted); margin-top:4px; }
+.ut-bar { height:6px; border-radius:999px; background: color-mix(in oklab, var(--text) 12%, transparent); overflow:hidden; margin-top:12px; max-width:340px; }
+.ut-fill { height:100%; border-radius:999px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width 1s linear; }
+.ut-ready { font-size:13.5px; font-weight:700; color: var(--text); }
+.ut-msg { margin-top:12px; font-size:13px; line-height:1.5; color: var(--text-2); background: var(--glass-2); border:1px solid var(--glass-brd); border-radius:11px; padding:10px 13px; }
 
 /* toggle switch */
 .switch { width: 46px; height: 27px; border-radius:999px; background: color-mix(in oklab, var(--text) 16%, transparent); position:relative; transition: background .25s var(--ease); flex:0 0 46px; }

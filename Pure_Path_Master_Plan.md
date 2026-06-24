@@ -52,7 +52,7 @@ Until every stage is complete or before it by one stage.
 
 ▶ Phase 4 is undeniably the most important, Because it focuses more on The Friction systems and the watchdog system.
 
-* 48-hour uninstall request
+* 24-hour uninstall request
   (After the 48 hours you can: Reset the timer, Cancel, Remove completely)
 * Watchdog system (a secondary app will be present and it will monitor the main app, making sure the app stays working and the main app will be monitoring it).
 * extension monitoring (in progress)
