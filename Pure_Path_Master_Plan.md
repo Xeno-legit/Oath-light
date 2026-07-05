@@ -36,7 +36,7 @@ Until every stage is complete or before it by one stage.
 * Useful advices and protocols (Done)
 * Graylist V2 — API/network-layer interception (Done)
 
-* Open Beta (soon)
+* Open Beta (Cancelled, Straight to Alpha instead.)
 
 
 ## Phase 4: (In Progress)
@@ -44,7 +44,7 @@ Until every stage is complete or before it by one stage.
 ▶ Phase 4 is undeniably the most important, Because it focuses more on The Friction systems and the watchdog system.
 
 * 24-hour uninstall request
-  (After the 24 hours you can: Reset the timer, Cancel, Remove completely)
+  (After the 24 hours you can: Reset the timer, Cancel, Remove completely) 
 * Watchdog system (a secondary app will be present and it will monitor the main app, making sure the app stays working and the main app will be monitoring it). (in progress)
 * extension monitoring (in progress)
 * optional Ai monitoring (in progress)

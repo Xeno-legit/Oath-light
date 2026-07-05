@@ -1300,6 +1300,11 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| std::path::PathBuf::from("."));
             let _ = std::fs::create_dir_all(&udd);
+            // Tell the watchdog where uninstall.json lives now that we know the
+            // app data dir (init_main() ran before this was knowable) — needed
+            // so a release build can verify the cool-off before honoring the
+            // shutdown sentinel, and so the guardian can be told the same path.
+            watchdog::set_uninstall_json_path(udd.join("uninstall.json"));
             app.manage(Arc::new(uninstall::UninstallStore::load(&udd)));
 
             start_tcp_server(app.handle().clone(), shared_state.clone());

@@ -16,15 +16,30 @@ use std::time::{SystemTime, UNIX_EPOCH};
 ///
 /// TESTING: currently **10 minutes** so the flow can be exercised without waiting
 /// a full day. For production set this back to 24 hours (`24 * 60 * 60`).
-/// Overridable at runtime with `PUREPATH_UNINSTALL_SECS` (seconds).
-const DEFAULT_DELAY_SECS: u64 = 10 * 60; // ← production: 24 * 60 * 60
+/// Product-owner decision: kept at the 10-minute testing value for now — do not
+/// "fix" this without checking with them first.
+/// Overridable at runtime with `PUREPATH_UNINSTALL_SECS` (seconds) — **debug
+/// builds only**, see `delay_secs` below.
+const DEFAULT_DELAY_SECS: u64 = 10; // ← production: 24 * 60 * 60
 
+/// Debug builds: honor `PUREPATH_UNINSTALL_SECS` so the cool-off can be dialed
+/// down for manual testing. Release builds ignore the env var entirely and
+/// always use `DEFAULT_DELAY_SECS` — otherwise a user could zero out the whole
+/// friction timer with `set PUREPATH_UNINSTALL_SECS=1` and an impulsive uninstall
+/// would face no cool-off at all, defeating the point of this module.
+#[cfg(debug_assertions)]
 fn delay_secs() -> u64 {
     std::env::var("PUREPATH_UNINSTALL_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|v| *v > 0)
         .unwrap_or(DEFAULT_DELAY_SECS)
+}
+
+/// Release builds: no env override — see the doc comment on the debug variant.
+#[cfg(not(debug_assertions))]
+fn delay_secs() -> u64 {
+    DEFAULT_DELAY_SECS
 }
 
 fn now_secs() -> u64 {
@@ -148,6 +163,34 @@ impl UninstallStore {
     }
 }
 
+/// Standalone reader for the watchdog: true if the persisted request at `path`
+/// (an `uninstall.json`) both exists and has actually elapsed the cool-off,
+/// straight off disk. Deliberately independent of `UninstallStore` (no shared
+/// mutex, no in-memory cache) so it reflects exactly what's on disk *right now* —
+/// this is what the release-build shutdown-sentinel check in `watchdog.rs` calls
+/// instead of duplicating the JSON shape there. The guardian process (a separate
+/// crate with no dependency on this one) re-implements the same reasoning with
+/// its own tiny hand-parser; keep the two in sync.
+///
+/// Residual, accepted weakness: `uninstall.json` lives in the app data dir and
+/// is plain user-writable JSON, so a determined user can hand-edit or backdate
+/// `requested_at` to fake an elapsed cool-off. This module is friction, not
+/// security — the point is raising the bar from "create one empty file" to
+/// "understand the internals and edit two files by hand," not making it
+/// impossible.
+pub fn cooloff_elapsed_at(path: &std::path::Path) -> bool {
+    let Some(s) = std::fs::read_to_string(path).ok() else {
+        return false;
+    };
+    let Some(p) = serde_json::from_str::<Persisted>(&s).ok() else {
+        return false;
+    };
+    match p.requested_at {
+        Some(at) => now_secs().saturating_sub(at) >= delay_secs(),
+        None => false,
+    }
+}
+
 // ============================================================================
 // OS uninstaller launch
 // ============================================================================
@@ -174,7 +217,10 @@ fn reg_quiet() -> std::process::Command {
 /// Read a single `REG_SZ`/`REG_EXPAND_SZ` value, returning its data.
 #[cfg(target_os = "windows")]
 fn read_reg_value(key: &str, value: &str) -> Option<String> {
-    let out = reg_quiet().args(["query", key, "/v", value]).output().ok()?;
+    let out = reg_quiet()
+        .args(["query", key, "/v", value])
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }

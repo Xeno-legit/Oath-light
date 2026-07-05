@@ -20,8 +20,9 @@
 //! Those same mutexes double as a single-instance guard per role, so a relaunch
 //! can never pile up duplicates: a redundant spawn fails to acquire its mutex
 //! and exits immediately. The matching guardian side lives in
-//! `desktop-app/guardian/src/main.rs`; the two MUST agree on the mutex names and
-//! the shutdown-sentinel path below.
+//! `desktop-app/guardian/src/main.rs`; the two MUST agree on the mutex names,
+//! the shutdown-sentinel path, AND the sentinel's *content* format (the
+//! `uninstall.json` path — see the sentinel protocol note below).
 //!
 //! Limitation: if BOTH processes are killed within one poll interval, neither
 //! survives to restart the other. Run-at-login plus the uninstall-friction
@@ -29,11 +30,16 @@
 //!
 //! Dev safety: disabled unless this is a release build or `PUREPATH_WATCHDOG=1`
 //! is set, and a sentinel file (see `request_shutdown`) provides a kill switch
-//! so closing the app during testing never traps you in a resurrection loop.
+//! so closing the app during testing never traps you in a resurrection loop. In
+//! a **release** build the sentinel alone is not trusted — a user could stand
+//! down the whole watchdog just by hand-creating that file — so it is only
+//! honored once the uninstall cool-off (`uninstall.rs`) has actually elapsed;
+//! see `shutdown_requested` for the full reasoning.
 
 #[cfg(windows)]
 mod imp {
     use std::path::{Path, PathBuf};
+    use std::sync::OnceLock;
     use std::time::{Duration, Instant};
 
     /// How often the main app checks that the guardian is still alive.
@@ -57,6 +63,23 @@ mod imp {
     const GUARDIAN_BIN: &str = "purepathguard.exe";
     /// Argument that tells the guardian which executable to relaunch as "main".
     const MAIN_ARG: &str = "--main";
+    /// Argument carrying the full path to `uninstall.json`, so the guardian can
+    /// independently verify the cool-off has elapsed before honoring the
+    /// shutdown sentinel in a release build. MUST match the guardian crate.
+    const UNINSTALL_JSON_ARG: &str = "--uninstall-json";
+
+    /// Full path to `uninstall.json`, learned once the Tauri app data dir is
+    /// known (see `set_uninstall_json_path`, called from `lib.rs`'s `setup()`).
+    /// `init_main()` runs before that point, so this starts empty; both the
+    /// release-build sentinel check and `spawn_guardian` treat "not yet known"
+    /// the same as "unreadable" — see `shutdown_requested`.
+    static UNINSTALL_JSON_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+    /// Record where `uninstall.json` lives, so the release-build sentinel check
+    /// and guardian spawning can find it. Call once, from `lib.rs`'s `setup()`.
+    pub fn set_uninstall_json_path(path: PathBuf) {
+        let _ = UNINSTALL_JSON_PATH.set(path);
+    }
 
     /// `CreateProcess` flag: don't create or inherit a console window, so the
     /// guardian stays hidden even from a debug (console-subsystem) build.
@@ -168,18 +191,32 @@ mod imp {
         }
         let main_exe = std::env::current_exe().unwrap_or_default();
 
-        match Command::new(&guardian)
-            .arg(MAIN_ARG)
-            .arg(&main_exe)
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
-        {
+        let mut cmd = Command::new(&guardian);
+        cmd.arg(MAIN_ARG).arg(&main_exe);
+        // Pass the uninstall.json path along if we've learned it yet, so the
+        // guardian can verify the cool-off itself (release builds only — see
+        // `shutdown_requested`). Absent is a valid, safely-defaulting state.
+        if let Some(p) = UNINSTALL_JSON_PATH.get() {
+            cmd.arg(UNINSTALL_JSON_ARG).arg(p);
+        }
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        match cmd.spawn() {
             Ok(child) => log::info!("watchdog: launched guardian (pid {})", child.id()),
             Err(e) => log::error!("watchdog: failed to launch guardian {}: {e}", guardian.display()),
         }
     }
 
     // ---- Cross-process shutdown sentinel (the kill switch) -------------------
+    //
+    // Sentinel protocol (MUST match the guardian crate):
+    //   * path    — `%TEMP%\purepath.watchdog.shutdown`, computed identically on
+    //               both sides from the per-user temp dir (no Tauri dependency);
+    //   * content — the full UTF-8 path to `uninstall.json`, so the release-build
+    //               cool-off verification can travel *with* the authorization and
+    //               does not depend on a guardian having been spawned late enough
+    //               to receive `--uninstall-json`. Empty content = "path unknown"
+    //               and release readers default-deny (see `shutdown_requested`).
 
     /// Path of the sentinel file that authorizes a real shutdown. Both processes
     /// compute it identically from the per-user temp dir (no Tauri dependency).
@@ -191,17 +228,72 @@ mod imp {
     /// Authorize a legitimate shutdown: drop the sentinel so both sides stop
     /// resurrecting and let the processes exit. (Hook for the uninstall-friction
     /// flow, and the manual kill switch during testing.)
+    ///
+    /// The sentinel's *content* is the `uninstall.json` path (from
+    /// `UNINSTALL_JSON_PATH`), so a guardian that was spawned before `setup()`
+    /// learned that path — i.e. the single long-lived guardian from the very
+    /// first `init_main()` spawn, which never received `--uninstall-json` — can
+    /// still recover the path from the sentinel and verify the cool-off in a
+    /// release build. If the OnceLock is somehow unset (no legit path reaches
+    /// here before `setup()` has run, but be defensive) we write an empty
+    /// sentinel; release readers then default-deny, which is the safe outcome.
     pub fn request_shutdown() {
         let p = shutdown_sentinel();
-        if let Err(e) = std::fs::write(&p, b"1") {
+        let content = UNINSTALL_JSON_PATH
+            .get()
+            .map(|u| u.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if let Err(e) = std::fs::write(&p, content.as_bytes()) {
             log::warn!("watchdog: could not write shutdown sentinel {p:?}: {e}");
         } else {
             log::info!("watchdog: shutdown authorized via {p:?}");
         }
     }
 
+    /// Whether a shutdown is currently authorized.
+    ///
+    /// In a **debug** build this is just "does the sentinel file exist" — the
+    /// unconditional dev kill switch, preserved on purpose so testing never
+    /// traps you in a resurrection loop (see the module doc).
+    ///
+    /// In a **release** build the sentinel alone is not trusted: creating an
+    /// empty file by hand is a one-click bypass of the entire watchdog, so the
+    /// sentinel is only *honored* if the uninstall cool-off has actually
+    /// elapsed, verified independently from `uninstall.json`
+    /// (`uninstall::cooloff_elapsed_at`). If we don't know the path yet, or it's
+    /// missing/unreadable/unparsable, that's treated as "not elapsed" —
+    /// default-deny. This is deliberately safe rather than merely convenient:
+    /// the only legitimate caller of `request_shutdown()` is the app's own
+    /// uninstall flow (`complete_uninstall` in lib.rs), which is gated on
+    /// `UninstallStore::get().ready` and therefore never fires before the
+    /// cool-off has elapsed — so at the moment a legitimate shutdown happens,
+    /// `uninstall.json` will show an elapsed request and this check passes.
+    /// (This side reads the path from `UNINSTALL_JSON_PATH`, not from the
+    /// sentinel content: any sentinel this process sees was written after
+    /// `setup()` ran, so the OnceLock is always populated by then and the
+    /// pre-`setup()` default-deny window is safe. The guardian, which can be
+    /// spawned before `setup()`, is the side that also falls back to the
+    /// sentinel content — see the guardian crate.)
+    ///
+    /// Residual, accepted weakness: `uninstall.json` is user-writable, so a
+    /// determined user can hand-edit/backdate `requested_at` to fake an elapsed
+    /// cool-off. Now that the sentinel *content* carries the path, they could
+    /// also hand-craft their own fake `uninstall.json` anywhere, point the
+    /// sentinel at it, and backdate `requested_at`. Either way that's still
+    /// "understand the internals and hand-craft two files in the right formats"
+    /// — the same accepted friction bar, not "create one empty file." This is
+    /// friction, not security — see the doc on `uninstall::cooloff_elapsed_at`.
     fn shutdown_requested() -> bool {
-        shutdown_sentinel().exists()
+        if !shutdown_sentinel().exists() {
+            return false;
+        }
+        if cfg!(debug_assertions) {
+            return true;
+        }
+        match UNINSTALL_JSON_PATH.get() {
+            Some(path) => crate::uninstall::cooloff_elapsed_at(path),
+            None => false,
+        }
     }
 
     fn clear_stale_sentinel() {
@@ -346,7 +438,7 @@ mod imp {
 #[cfg(windows)]
 pub use imp::{
     enabled, init_main, launched_at_login, register_autostart, request_shutdown,
-    unregister_autostart,
+    set_uninstall_json_path, unregister_autostart,
 };
 
 // ---- Non-Windows: graceful no-ops (the app is Windows-first; see master plan).
@@ -359,6 +451,8 @@ pub fn enabled() -> bool {
 pub fn init_main() {}
 #[cfg(not(windows))]
 pub fn request_shutdown() {}
+#[cfg(not(windows))]
+pub fn set_uninstall_json_path(_path: std::path::PathBuf) {}
 #[cfg(not(windows))]
 pub fn register_autostart() {}
 #[cfg(not(windows))]

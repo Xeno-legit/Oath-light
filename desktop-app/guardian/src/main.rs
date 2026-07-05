@@ -3,7 +3,8 @@
 //! A hidden, windowless companion to the main desktop app. Half of the
 //! dual-process watchdog (the other half lives in
 //! `desktop-app/src-tauri/src/watchdog.rs`); the two MUST agree on the mutex
-//! names and the shutdown-sentinel path below.
+//! names, the shutdown-sentinel path, AND the sentinel's *content* format (the
+//! `uninstall.json` path — see the sentinel protocol note below).
 //!
 //! This process holds the GUARDIAN mutex for its whole life and watches the MAIN
 //! mutex. When the main app's mutex vanishes — including a hard Task Manager
@@ -31,6 +32,16 @@ fn main() {
     /// Production name of the main executable, used only as a fallback when the
     /// spawner did not pass `--main` (it normally does).
     const MAIN_BIN: &str = "PurePath.exe";
+    /// Argument carrying the full path to the main app's `uninstall.json`, so we
+    /// can independently verify the uninstall cool-off before honoring the
+    /// shutdown sentinel in a release build. MUST match `watchdog.rs`.
+    const UNINSTALL_JSON_ARG: &str = "--uninstall-json";
+    /// MUST match `DEFAULT_DELAY_SECS` in `uninstall.rs`. Duplicated as a literal
+    /// (rather than shared code) because this crate is intentionally
+    /// dependency-free and does not link against the main app crate. Per the
+    /// product-owner decision recorded there, this stays at the 10-minute
+    /// testing value for now — for production set both back to `24 * 60 * 60`.
+    const COOLOFF_DELAY_SECS: u64 = 10 * 60; // ← keep in sync w/ uninstall.rs
 
     const POLL: Duration = Duration::from_millis(1000);
     const SPAWN_COOLDOWN: Duration = Duration::from_secs(3);
@@ -94,28 +105,139 @@ fn main() {
         }
     }
 
-    // ---- Shutdown sentinel (kill switch) ------------------------------------
-    fn shutdown_requested() -> bool {
-        std::env::temp_dir().join("purepath.watchdog.shutdown").exists()
-    }
-
-    // ---- Resolve which executable to relaunch as "main" ---------------------
-    // Normally passed by the spawner as `--main <path>`; otherwise assume the
-    // main exe sits next to us.
-    fn resolve_main_exe() -> PathBuf {
+    // ---- Resolve args: which exe to relaunch as "main", and where
+    // uninstall.json lives (both passed by the spawner) ------------------------
+    // Normally passed as `--main <path>` / `--uninstall-json <path>`; `--main`
+    // falls back to "the main exe sits next to us" if absent. When
+    // `--uninstall-json` is absent (the first guardian, spawned before the app
+    // learned the path — see `shutdown_requested`), the path is instead
+    // recovered from the sentinel's content at shutdown-check time.
+    fn resolve_args() -> (PathBuf, Option<PathBuf>) {
+        let mut main_exe = None;
+        let mut uninstall_json = None;
         let mut args = std::env::args_os().skip(1);
         while let Some(a) = args.next() {
             if a == MAIN_ARG {
-                if let Some(p) = args.next() {
-                    return PathBuf::from(p);
-                }
+                main_exe = args.next().map(PathBuf::from);
+            } else if a == UNINSTALL_JSON_ARG {
+                uninstall_json = args.next().map(PathBuf::from);
             }
         }
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(Path::to_path_buf))
-            .map(|d| d.join(MAIN_BIN))
-            .unwrap_or_else(|| PathBuf::from(MAIN_BIN))
+        let main_exe = main_exe.unwrap_or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(Path::to_path_buf))
+                .map(|d| d.join(MAIN_BIN))
+                .unwrap_or_else(|| PathBuf::from(MAIN_BIN))
+        });
+        (main_exe, uninstall_json)
+    }
+
+    /// Hand-parsed reader for `uninstall.json`'s `requested_at` field. This
+    /// crate carries no JSON dependency by design (see Cargo.toml — pure std +
+    /// a handful of kernel32 calls, kept tiny on purpose), and the on-disk
+    /// shape (`{"requested_at": <unix-secs|null>}`, from `serde_json` in
+    /// uninstall.rs) is trivial and stable enough that a small scanner beats
+    /// pulling in serde just for this one read. MUST track the `Persisted`
+    /// struct in uninstall.rs.
+    fn read_requested_at(path: &Path) -> Option<u64> {
+        let s = std::fs::read_to_string(path).ok()?;
+        let idx = s.find("requested_at")?;
+        let after = &s[idx + "requested_at".len()..];
+        let colon = after.find(':')?;
+        let rest = after[colon + 1..].trim_start();
+        let end = rest
+            .find(|c: char| c == ',' || c == '}' || c.is_whitespace())
+            .unwrap_or(rest.len());
+        let tok = rest[..end].trim();
+        if tok.is_empty() || tok == "null" {
+            None
+        } else {
+            tok.parse::<u64>().ok()
+        }
+    }
+
+    /// True if the uninstall cool-off has actually elapsed, per the
+    /// `uninstall.json` path the spawner gave us. A missing arg, or an
+    /// unreadable/unparsable/still-pending file, all read as "not elapsed" —
+    /// default-deny. See `shutdown_requested` for why that's the safe default.
+    fn cooloff_elapsed(uninstall_json: Option<&Path>) -> bool {
+        let Some(path) = uninstall_json else { return false };
+        let Some(requested_at) = read_requested_at(path) else { return false };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        now.saturating_sub(requested_at) >= COOLOFF_DELAY_SECS
+    }
+
+    // ---- Shutdown sentinel (kill switch) ------------------------------------
+    //
+    // Sentinel protocol (MUST match watchdog.rs):
+    //   * path    — `%TEMP%\purepath.watchdog.shutdown`;
+    //   * content — the full UTF-8 path to `uninstall.json`, so the cool-off can
+    //               be verified in a release build even by a guardian that was
+    //               spawned before the main app knew that path (i.e. the very
+    //               first guardian, launched by `init_main()` before `setup()`
+    //               populated it, which therefore never got `--uninstall-json`).
+    //               Empty content = "path unknown" -> release readers default-deny.
+    const SENTINEL_NAME: &str = "purepath.watchdog.shutdown";
+
+    /// Read the `uninstall.json` path the sentinel carries (its trimmed UTF-8
+    /// content), if any. Empty/unreadable = `None`.
+    fn sentinel_verify_path() -> Option<PathBuf> {
+        let s = std::fs::read_to_string(std::env::temp_dir().join(SENTINEL_NAME)).ok()?;
+        let t = s.trim();
+        if t.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(t))
+        }
+    }
+
+    /// Whether a shutdown is currently authorized.
+    ///
+    /// In a **debug** build this is unconditional (sentinel file exists =>
+    /// stand down) — the dev kill switch that keeps testing from trapping you
+    /// in a resurrection loop; preserved exactly as before.
+    ///
+    /// In a **release** build the sentinel alone is not honored: creating an
+    /// empty file by hand would otherwise stand down the entire watchdog, so we
+    /// additionally require the uninstall cool-off to have actually elapsed
+    /// (verified independently here, not just trusted from the main app). The
+    /// only legitimate caller of the main app's `request_shutdown()` is its own
+    /// uninstall flow, which is itself gated on the cool-off having elapsed —
+    /// so a legitimate shutdown always finds `uninstall.json` already elapsed
+    /// by the time this runs.
+    ///
+    /// The verification path comes from the `--uninstall-json` spawn arg when we
+    /// have it (guardians respawned after `setup()` do), otherwise from the
+    /// sentinel's own content. That fallback is what covers the first-spawn
+    /// race: the single long-lived guardian launched by `init_main()` starts
+    /// before `setup()` learns the path, so it never receives the arg — but the
+    /// sentinel written by `request_shutdown()` carries the path, so this
+    /// guardian can still verify the cool-off and stand down for a real uninstall.
+    ///
+    /// Residual, accepted weakness: `uninstall.json` is plain user-writable
+    /// JSON, so a determined user can hand-edit/backdate `requested_at` to fake
+    /// an elapsed cool-off. And because the sentinel content now carries the
+    /// path, they could equally hand-craft their own fake `uninstall.json`
+    /// anywhere, point the sentinel at it, and backdate `requested_at`. Either
+    /// way it's still "understand the internals and hand-craft two files in the
+    /// right formats" — the same accepted friction bar, not "create one empty
+    /// file." This is friction, not security.
+    fn shutdown_requested(uninstall_json: Option<&Path>) -> bool {
+        if !std::env::temp_dir().join(SENTINEL_NAME).exists() {
+            return false;
+        }
+        if cfg!(debug_assertions) {
+            return true;
+        }
+        // Prefer the spawn arg; fall back to the path carried in the sentinel.
+        match uninstall_json {
+            Some(p) => cooloff_elapsed(Some(p)),
+            None => cooloff_elapsed(sentinel_verify_path().as_deref()),
+        }
     }
 
     fn relaunch_main(main_exe: &Path) {
@@ -129,8 +251,10 @@ fn main() {
 
     wlog("starting");
 
+    let (main_exe, uninstall_json) = resolve_args();
+
     // If a shutdown was authorized, do nothing (let the system come down).
-    if shutdown_requested() {
+    if shutdown_requested(uninstall_json.as_deref()) {
         wlog("shutdown sentinel present at start - exiting");
         return;
     }
@@ -147,13 +271,12 @@ fn main() {
     };
     wlog("acquired guardian mutex - now guarding main");
 
-    let main_exe = resolve_main_exe();
     let mut last_spawn = Instant::now()
         .checked_sub(SPAWN_COOLDOWN)
         .unwrap_or_else(Instant::now);
 
     loop {
-        if shutdown_requested() {
+        if shutdown_requested(uninstall_json.as_deref()) {
             return;
         }
 
