@@ -1,9 +1,11 @@
 # Pure Path — On-Device NSFW Detection: Evaluation & Architecture Plan
 
-**Status:** Evaluation complete (Phase 4 AI layer). Architecture decision recorded below.
-**Date:** 2026-06-23
-**Scope:** The optional, opt-in AI image-monitoring layer — desktop now, phone next. This
-sits **after** the deterministic domain/keyword/graylist blocking, never instead of it.
+**Status:** Detection evaluation complete (Phase 4 AI layer). Action/enforcement policy added 2026-06-28 (§8).
+**Date:** 2026-06-23 (detection) · 2026-06-28 (action layer)
+**Scope:** The AI image-monitoring layer — **optional** on desktop (rides behind the
+deterministic domain/keyword/graylist blocking), but the **main blocking mechanism on
+mobile**, where no extension+app combo exists. §1–7 cover detection; §8 covers what happens
+on a positive verdict; §9 covers mobile.
 
 ---
 
@@ -34,6 +36,12 @@ Measured on a 15-NSFW / 15-SFW real-screenshot set:
 nudity SigLIP misses; SigLIP catches the *drawn/hentai* NudeNet misses. OR-ing them gains
 recall at almost no precision cost. The handful the ensemble still misses are known
 porn-tube domains the deterministic blocklist already blocks — never the AI's job.
+
+**Action layer (added 2026-06-28):** detection is only half the system. §8 records what
+happens on a positive verdict — blur + open the user's redirect link, dismissible after a
+short dwell, escalation driven by *persistence* (never single-frame confidence), and a hard
+rule that the AI gets **no irreversible actuator** — and why this desktop policy is the
+prototype for the mobile core.
 
 ---
 
@@ -255,7 +263,183 @@ a model change:
 
 ---
 
-## 8. Phone plan
+## 8. Enforcement / action layer (what happens on a detection)
+
+§1–7 settle *detection*. They say nothing about *action* — and today there is none:
+[`run_monitor`](../src-tauri/src/lib.rs) only sets `blocked` and emits a `nsfw-scan` event to
+the UI. The model is a **sensor with no actuator**. This section records the action policy.
+
+### 8.1 Why this layer matters more than it looks (the mobile stake)
+
+On **desktop** the AI is optional and rides behind the deterministic blocklist — a residual
+catcher (new/unlisted sites, images in non-porn contexts, non-browser apps). On **mobile**
+there is no extension+app combo to lean on, so **the AI _is_ the product** — the main blocking
+mechanism, not an opt-in extra. The desktop action layer is therefore a **prototype/lab for
+mobile**: the policy tuned here is the one the phone build inherits. Get it right here.
+
+### 8.2 First principle: "wrong" ≠ "harmful"
+
+The model is not, and will never be, 100% accurate. Local inference caps the ceiling; the only
+way past it is a cloud API, rejected for an always-on screen watcher on three grounds —
+**privacy** (continuously uploading the user's screen), **latency**, and **cost**. Local +
+imperfect is the correct trade; the accuracy ceiling is **fixed**.
+
+What is *not* fixed is the **blast radius of a false positive**, and that is a pure design
+choice. The catastrophe (a FP destroying the user's work) exists only if the AI is wired to an
+**irreversible** action. Hard rule:
+
+> **The AI never gets an irreversible or destructive actuator.** No deleting files. No
+> quarantining work. No silent permanent blocklist writes. The most it may do on its own is a
+> reversible interrupt the user can undo in seconds. Humans make every irreversible decision.
+
+Under that rule "the AI was wrong" costs seconds, and the accuracy number stops being scary.
+
+### 8.3 The action policy
+
+1. **Detect → blur immediately + open the user's configured redirect link.** The blur is the
+   interrupt (breaks the frame the instant of detection); the redirect link (an existing app
+   option) is the "wake up to conscious reality" lever.
+2. **First hit is cheap — dismissible after ~5–10 s.** This is the *floor*, and it is where false
+   positives are absorbed: long enough to break the loop, short enough that being wrong costs a
+   shrug.
+3. **Escalate on _persistence_, not single-frame confidence.** Each time NSFW is detected *again*
+   after a blur was dismissed (the user cleared the warning and kept going), the friction climbs a
+   rung:
+
+   | Level | Trigger | Minimum blur before it can be dismissed |
+   |---|---|---|
+   | 0 | first hit | ~5–10 s (cheap floor) |
+   | 1 | persisted past level 0 | 1 min |
+   | 2 | persisted again | 2 min |
+   | 3 | persisted again | 5 min |
+   | 4+ | persisted again | 10 min (cap) |
+
+**Disengagement always exits.** Leaving the offending content — closing the tab/app, switching
+away, taking the redirect — lifts the *current* blur **instantly, at any level**. What the ladder
+makes expensive is *staying and dismissing-to-keep-looking*, never being at the computer. A
+determined user trying to stay on the content faces 1→2→5→10; anyone who just leaves (a false
+positive included) is free immediately. The minutes-long rungs are safe **because persistence
+gates them** — a false positive can't reach level 1, since reaching it requires hitting NSFW
+*again* right after a dismissal, which innocent content doesn't do.
+
+**Decay is an independent wall-clock timer.** The escalation level drops one rung per ~20 minutes,
+asymmetric by design (climbs fast, cools slowly) so brief pauses can't game it. Lifting a blur or
+closing the offending app only removes that blur — it does **not** reset or pause the timer, so
+the level can't be escaped by closing and reopening; only elapsed time brings it down, and new
+detections push it back up. The level persists across app restarts (like the uninstall timer).
+
+**Why persistence, not confidence, is the severity signal:** a false positive does not persist —
+innocent content scrolls away, the call moves on, the frame passes — so it self-clears and never
+escalates. Real porn-browsing *does* persist, so it climbs fast. Persistence sorts true from false
+**for free**; single-frame confidence cannot (and confident FPs exist — see §8.4).
+
+### 8.4 Explicitly rejected
+
+- **Confidence-scaled timed lock (e.g. blur 5–20 min keyed to "how porny" one frame looks).**
+  It's the *confidence-scaling* that's rejected, not the minutes. Scaling punishment by
+  single-frame confidence picks the worst possible signal: confident FPs get the *harshest*
+  penalty. Evidence from our own set — **sfw_01** (a konachan image rated *"safe"*) scores
+  **95% Hentai**, the lone ensemble FP, and a confident one; a confidence-scaled lock would hand
+  it near the maximum penalty. Punishing the most-wrong calls the hardest is backwards. The
+  *persistence-gated* ladder in §8.3 reaches the same 1–10 min friction **safely**, because a
+  false positive can't climb to it and disengagement always exits.
+- **Accountability-partner / "detect → report to a human" model (Covenant Eyes,
+  Accountable2You).** Pure Path has no partner feature and will not add one. The interrupt is
+  between the user and themselves.
+
+### 8.5 Attribution — "which app / which browser?"
+
+Pixels don't say; the **foreground window** does: `GetForegroundWindow →
+GetWindowThreadProcessId → PID → image name`, mapped to a browser via the existing
+`match_browser_process` table in [browsers.rs](../src-tauri/src/browsers.rs). Two actuator paths
+fall out:
+
+- **Browser** → hand the signal to the extension over the existing native-messaging bridge. The
+  extension is the *precision* actuator: it sees the URL/DOM, can **prevent** (intercept before
+  render) and **learn** (add the unlisted domain locally). The AI just supplies the visual signal
+  the extension structurally lacks.
+- **Non-browser** (Steam, a game, an image viewer, a downloaded file opened in Photos) → the
+  **overlay** is the *universal* actuator: a fullscreen, always-on-top blur at the compositor
+  level works app-agnostically, since it needs no API into the target app.
+
+### 8.6 Localization — what gets blurred (decision: foreground window)
+
+"Blur the item" assumes the AI knows *where* the item is. Mostly it doesn't, and which model fired
+decides whether there is any location signal at all:
+
+- **SigLIP is a classifier, not a detector** — one score for the whole frame, **no box**. For the
+  drawn/hentai half there is *no* localization signal, in principle.
+- **NudeNet is a detector** — it returns boxes (currently discarded in
+  [nudenet.rs](../src-tauri/src/nudenet.rs), which keeps only max scores). But a box pinned to a
+  captured frame goes **stale the instant the content moves** (scroll, video, reflow): the overlay
+  then covers empty space (over-blur) while the content slides out from under it (under-blur). The
+  320×320-letterbox → screen-coords mapping (DPI, multi-monitor) is error-prone on top of that.
+
+**Decision: on desktop, blur at _foreground-window_ granularity** — not the item, not the whole
+monitor. Cover the active app's window (handle from §8.5). This sidesteps the "blur extra or less"
+problem by *not aiming at the item*:
+
+| Granularity | Under-blur | Over-blur | Stale on scroll | Verdict |
+|---|---|---|---|---|
+| NudeNet box | leaks | low | **yes** | only a frozen photo |
+| **Foreground window** | **impossible** (item is inside) | bounded (the flagged app) | **no** (rect is stable) | **chosen** |
+| Whole monitor | impossible | high (clock, other apps) | no | dead-simple fallback only |
+
+The window *rectangle* doesn't move when content scrolls inside it, so the snapshot verdict ("this
+window is NSFW") maps cleanly to a snapshot cover ("blur this window") with nothing to track frame
+to frame. Under-blur is impossible (the item is inside the window) and over-blur is bounded to the
+one app already flagged — and on a *false* positive that bounded over-blur is exactly the cheap,
+dismissible floor cost from §8.3. (Detection still has the primary-monitor gap of roadmap item 10,
+but blur *placement* via the window handle works on any monitor — the two are separable.)
+
+True per-image "blur just the item" is realistic only on **mobile**, by hooking the decode/render
+boundary: the image element itself is the unit, so there is no coordinate mapping and no staleness —
+another reason desktop is the lab and mobile is the target.
+
+### 8.7 Base-rate caveat (why desktop stays opt-in)
+
+After the deterministic blocklist does its job, most of what a whole-screen monitor sees all day
+is ordinary **SFW**. Apply even a 6.7% FPR to a full day of innocent frames and the large majority
+of alarms are false — not from a weak model but from **base rate**. Hence the desktop monitor
+stays **opt-in / off-by-default** ([`start_nsfw_monitor`](../src-tauri/src/lib.rs) is never
+auto-started), and the AI's precision-in-use is best where context already raises the prior. The
+whole-screen-everywhere mode fights base rate hardest — unavoidable as the mobile core (no
+alternative there), wrong as a desktop default. The **context gate (§8.8)** is the structural
+mitigation: scan only when the foreground app makes porn plausible, so most innocent screen time
+is never scanned at all.
+
+### 8.8 Context gate — only scan when the foreground app warrants it
+
+The structural fix for §8.7: don't run the model on the whole screen all day — run it only when
+the **foreground app** (from the §8.5 primitive) is one where porn is plausible. Most of a day's
+innocent screen time is in games and work tools; not scanning those removes the bulk of the
+false-positive surface *and* saves compute (critical for mobile battery). Design rules:
+
+- **Default-deny.** The AI runs *unless* the foreground app is affirmatively trusted. Unknown app
+  → scan.
+- **Verify the app, don't trust its name.** Process-name matching is spoofable — a user renames
+  `chrome.exe` to `eldenring.exe`, runs it borderless-fullscreen, and a name-based gate switches
+  the AI off. Key the allowlist on the executable's **code signature / publisher** (Adobe, Valve,
+  Microsoft sign their binaries; a renamed Chrome won't carry Adobe's signature), not the filename.
+  This is a **UX gate to cut false alarms, never a security boundary.**
+- **Browsers are never auto-trusted** — they are the primary porn vector and the whole reason the
+  layer exists.
+- **Instant re-arm.** Switching to any untrusted app resumes scanning on the next poll
+  (sub-second); the gate must never be able to get stuck *off*.
+- **Exclude image/web-feed apps even if they look "trustworthy."** Apps that render arbitrary
+  user/web content can't be trusted: Discord/Slack/Telegram display images (porn in a DM), and
+  Steam hosts an entire adult-games section (so "it's a fullscreen game" ≠ SFW; true-fullscreen-
+  exclusive games often can't be captured anyway). The trustable set is narrow — apps whose content
+  is the user's *own work* and can't show a web/image feed: IDEs, terminals, office docs, and (a
+  reasonable trade) creative tools like Adobe.
+
+---
+
+## 9. Phone plan
+
+**Mobile is where the AI stops being optional.** No extension+app combo exists to fall back on,
+so the AI layer *is* the blocking mechanism (§8.1) — the action policy in §8 is the product, not
+an add-on, and the desktop build is its proving ground.
 
 - **Both models are ONNX → on-device.** NudeNet is tiny (~a few MB, YOLO-class) → trivial on a
   phone. SigLIP-base is **343 MB → too heavy for mobile as-is**; quantize (int8) or swap the
@@ -273,7 +457,7 @@ a model change:
 
 ---
 
-## 9. Caveats & limitations
+## 10. Caveats & limitations
 
 - **30 images is directional, not production-grade.** These numbers justify the *architecture*
   decision; they do not certify a shipping accuracy. Build a few-hundred-image labelled set before
@@ -286,20 +470,40 @@ a model change:
 
 ---
 
-## 10. Roadmap / next steps
+## 11. Roadmap / next steps
 
 1. Build a larger labelled eval set (~200–400 imgs, same capture discipline) and re-bench.
 2. Integrate NudeNet's ONNX detector into the Rust `ort` pipeline (YOLO letterbox preprocess + NMS
    postprocess) so the AI layer is a single native ensemble — no Python at runtime.
 3. Quantize / distill the SigLIP drawn-classifier for mobile (target < ~50 MB int8) or replace with
-   a lighter anime/hentai classifier.
+   a lighter anime/hentai classifier. **Suggested candidates:** WD14 taggers (SmilingWolf's
+   `wd-…-tagger` v3 line) or DeepDanbooru — ONNX, anime-trained, smaller than SigLIP, with
+   tag/rating outputs that fit the existing threshold logic. Both are *classifiers* (no boxes);
+   bench on our set before adopting. No off-the-shelf NudeNet-grade anime *detector* exists (anime
+   data is tag-rich, box-poor) — that would be a train-it-yourself YOLO, and window-granularity blur
+   (§8.6) means it isn't needed on desktop anyway.
 4. Implement the strictness config (EXPOSED-only vs +COVERED) and the optional WARN tier.
 5. Prototype per-image WebView interception for the desktop/own-browser path; measure vs screenshot.
 6. Wire the AI layer strictly **after** the deterministic blocklist (it only scores the residual).
+7. **Build the action layer as a portable policy engine** separated from its actuator (§8): the
+   decision/escalation logic ports to mobile; the renderer (Tauri overlay vs. Android overlay /
+   per-image hook) does not. Build the brain once, swap the hands.
+8. **Implement the actuator** (§8.3): instant blur (foreground-window granularity, §8.6) + open the
+   user's redirect link; ~5–10 s cheap floor; persistence ladder (1/2/5/10 min, capped) with
+   disengagement always exiting; independent ~20-min wall-clock decay persisted across restarts. No
+   irreversible actions.
+9. **Add foreground-window attribution** (§8.5) so a detection is routed — browser → extension
+   hand-off (precision, can prevent + learn); non-browser → overlay (universal). One shared Win32
+   primitive.
+10. **Cover multi-monitor capture** — `capture_primary` ([screen.rs](../src-tauri/src/screen.rs))
+    only scans the primary display; second-screen content is invisible today.
+11. **Build the context gate** (§8.8): default-deny allowlist keyed on code signature, browsers
+    never trusted, instant re-arm, image/web-feed apps excluded — so the monitor scans only when
+    the foreground app warrants it.
 
 ---
 
-## 11. Artifacts
+## 12. Artifacts
 
 - Eval captures: `.playwright-mcp/eval/{nsfw,sfw}_*.jpg` — **gitignored, never committed** (and prone
   to being pruned by Defender / sync on this drive; the scores in this doc are the durable record).

@@ -437,7 +437,7 @@ pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
 }
 
 /// Remove any force-install policy we may have written for `def`. Used when the
-/// user completes a 48-hour uninstall so the extension is no longer pinned and
+/// user completes a 24-hour uninstall so the extension is no longer pinned and
 /// can actually be removed. Best-effort and idempotent — deleting an absent key
 /// is a harmless no-op (and it's a no-op anyway while enforcement is dormant).
 #[cfg(target_os = "windows")]

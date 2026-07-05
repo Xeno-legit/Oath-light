@@ -1,0 +1,17 @@
+[package]
+name = "purepathguard"
+version = "0.1.0"
+description = "Pure Path watchdog guardian — keeps the main app alive"
+edition = "2021"
+rust-version = "1.77.2"
+
+[[bin]]
+name = "purepathguard"
+path = "src/main.rs"
+
+# No dependencies: pure std + a handful of kernel32 FFI calls. Tiny binary.
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

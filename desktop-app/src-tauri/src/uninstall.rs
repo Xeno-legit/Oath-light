@@ -1,4 +1,4 @@
-//! 48-hour uninstall request (Phase 4 friction system).
+//! 24-hour uninstall request (Phase 4 friction system).
 //!
 //! Removing Pure Path is meant to be a *deliberate* act, not an impulsive one.
 //! A removal request opens a cool-off window during which blocking stays fully
@@ -15,9 +15,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Cool-off window before an uninstall can complete.
 ///
 /// TESTING: currently **10 minutes** so the flow can be exercised without waiting
-/// two days. For production set this back to 48 hours (`48 * 60 * 60`).
+/// a full day. For production set this back to 24 hours (`24 * 60 * 60`).
 /// Overridable at runtime with `PUREPATH_UNINSTALL_SECS` (seconds).
-const DEFAULT_DELAY_SECS: u64 = 10 * 60; // ← production: 48 * 60 * 60
+const DEFAULT_DELAY_SECS: u64 = 10 * 60; // ← production: 24 * 60 * 60
 
 fn delay_secs() -> u64 {
     std::env::var("PUREPATH_UNINSTALL_SECS")

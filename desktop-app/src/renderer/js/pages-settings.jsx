@@ -1,6 +1,6 @@
 /* pages-settings.jsx — user settings */
 
-// --- 48-hour uninstall request (Phase 4 friction) ---------------------------
+// --- 24-hour uninstall request (Phase 4 friction) ---------------------------
 
 // "47h 59m 03s" style remaining-time string.
 function fmtDur(secs) {
@@ -14,7 +14,7 @@ function fmtDur(secs) {
   return out.join(' ');
 }
 
-// Human cool-off length, e.g. "10 minutes" / "48 hours" (kept in step with the
+// Human cool-off length, e.g. "10 minutes" / "24 hours" (kept in step with the
 // backend's actual delay so the copy never lies, even while testing).
 function delayWords(secs) {
   secs = Math.max(0, Math.floor(secs));
@@ -100,7 +100,7 @@ function UninstallCard() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <b style={{ fontSize: 14.5, fontWeight: 800 }}>Uninstall Pure Path</b>
           <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, lineHeight: 1.5, maxWidth: '64ch' }}>
-            Removing Pure Path opens a {st ? delayWords(st.delay_secs) : '48-hour'} waiting period first — a moment
+            Removing Pure Path opens a {st ? delayWords(st.delay_secs) : '24-hour'} waiting period first — a moment
             of friction for your future self. Blocking and everything else stay fully active the entire time.
           </div>
 
@@ -212,7 +212,7 @@ function SettingsPage({ s, PP }) {
         <button className="btn btn-ghost" onClick={() => { if (confirm('Reset all app data?')) PP.reset(); }}>Reset</button>
       </div>
 
-      {/* uninstall — 48-hour friction request */}
+      {/* uninstall — 24-hour friction request */}
       <UninstallCard />
     </div>
   );

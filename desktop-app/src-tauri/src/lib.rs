@@ -1134,7 +1134,7 @@ fn stop_watchdog() {
 }
 
 // ============================================================================
-// 48-hour uninstall request (Phase 4 friction)
+// 24-hour uninstall request (Phase 4 friction)
 // ============================================================================
 
 /// Current uninstall-request state (pending? ready? seconds remaining?).
@@ -1194,8 +1194,10 @@ fn complete_uninstall(
     // Stand down the reinstall guard so enforcement stops fighting the removal.
     state.lock().unwrap().guard_enabled = false;
     // Stand down the dual-process watchdog so neither process resurrects the
-    // other while the OS uninstaller removes the app.
+    // other while the OS uninstaller removes the app, and drop the login
+    // autostart entry so it does not come back at the next boot.
     watchdog::request_shutdown();
+    watchdog::unregister_autostart();
     // Clear any force-install policy we may have written (best-effort).
     for def in BROWSERS {
         browsers::remove_policy(def);
@@ -1226,13 +1228,6 @@ fn complete_uninstall(
 // ============================================================================
 // Entry point
 // ============================================================================
-
-/// Guardian-mode entry point: a hidden, windowless process (the same `app.exe`
-/// relaunched with `--watchdog`) that does nothing but keep the main app alive.
-/// Never starts Tauri. Blocks until the guard loop ends.
-pub fn run_guardian() {
-    watchdog::run_guardian();
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -1285,7 +1280,20 @@ pub fn run() {
 
             register_native_host(app.handle());
 
-            // Persisted 48-hour uninstall request (survives restarts + a wiped
+            // Persistence: keep Pure Path starting at login so protection
+            // survives reboots (enforced like the watchdog, gated to release /
+            // PUREPATH_WATCHDOG so dev logins aren't hijacked). A login-triggered
+            // launch comes up minimized, out of the way.
+            if watchdog::enabled() {
+                watchdog::register_autostart();
+            }
+            if watchdog::launched_at_login() {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.minimize();
+                }
+            }
+
+            // Persisted 24-hour uninstall request (survives restarts + a wiped
             // renderer localStorage).
             let udd = app
                 .path()

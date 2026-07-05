@@ -54,7 +54,7 @@
       return T.event.listen('nsfw-scan', (evt) => { if (evt && evt.payload) cb(evt.payload); });
     },
 
-    // 48-hour uninstall request (Phase 4 friction). The backend owns the timer
+    // 24-hour uninstall request (Phase 4 friction). The backend owns the timer
     // (persisted to disk); these just read/drive it. State shape:
     //   { requested, requested_at, delay_secs, elapsed_secs, remaining_secs, ready }
     getUninstallState() { return invoke('get_uninstall_state'); },

@@ -23,16 +23,7 @@ Until every stage is complete or before it by one stage.
 * 500k+ active domains blocked
 * Desktop app skeleton
 * Domain blocking logic (for Desktop) remaster.
-* Domain-name keyword layer (catches unlisted sites like sex4arabs.com)
-  (Deterministic, NOT score-based. Matches strong stems — sex, porn, xxx, etc. — only against the
-   registrable domain label/eTLD+1, never paths/queries/page content, so no Scunthorpe false positives.
-   Runs only after the exact list misses; guarded by a small collision-exception list — essex, analytics, etc.)
-* Bypass-vector blocking (anti-bypass)
-  (Blocks content-bypass routes: web proxies/unblockers (proxysite, 12ft.io), translate & archive
-   wrappers, raw-IP navigation. Principle "unwrap then re-check" — pull the real target out of the
-   wrapper and run it through the normal pipeline, so legit translation/archiving survives but a
-   blocked site viewed through them is still caught. Private IP ranges exempt. DNS/DoH bypass
-   deferred — not doing DNS yet.)
+* Domain-name keyword layer.
 
 ## Phase 3: (Complete)
 
@@ -53,8 +44,8 @@ Until every stage is complete or before it by one stage.
 ▶ Phase 4 is undeniably the most important, Because it focuses more on The Friction systems and the watchdog system.
 
 * 24-hour uninstall request
-  (After the 48 hours you can: Reset the timer, Cancel, Remove completely)
-* Watchdog system (a secondary app will be present and it will monitor the main app, making sure the app stays working and the main app will be monitoring it).
+  (After the 24 hours you can: Reset the timer, Cancel, Remove completely)
+* Watchdog system (a secondary app will be present and it will monitor the main app, making sure the app stays working and the main app will be monitoring it). (in progress)
 * extension monitoring (in progress)
 * optional Ai monitoring (in progress)
 * Pre-Alpha launch test. (Testing everything again at full scale, pushing the app to its absolute limits.)
