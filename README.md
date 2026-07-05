@@ -193,4 +193,4 @@ file for details.
 
 ---
 
-Pure Path is founded and maintained by [Xeno-legit](https://github.com/Xeno-legit).
+Pure Path Blocker is founded and maintained by [Xeno-legit](https://github.com/Xeno-legit).
