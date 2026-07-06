@@ -60,7 +60,7 @@ async function recordBlockAndRedirect(tabId, url, reason, match, skipTabUpdate =
   // the Playwright automation bridge. While PP_TESTING is true, every block routes
   // to a light about:blank instead. Set PP_TESTING=false to restore BOTH the normal
   // block screen and the redirect-link behaviour.
-  const PP_TESTING = true;
+  const PP_TESTING = false;
   const blockedUrl = PP_TESTING
     ? 'about:blank'
     : blockedPrefix + `?reason=${reason}&match=${encodeURIComponent(match)}`;

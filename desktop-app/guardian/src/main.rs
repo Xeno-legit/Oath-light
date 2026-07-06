@@ -29,6 +29,10 @@ fn main() {
     const MAIN_MUTEX: &str = "PurePath.Watchdog.Main.v1";
     const GUARDIAN_MUTEX: &str = "PurePath.Watchdog.Guardian.v1";
     const MAIN_ARG: &str = "--main";
+    /// Passed to a resurrected main app so it comes up hidden in the background
+    /// (tray only) instead of popping a focused window in the user's face. MUST
+    /// match `AUTOSTART_ARG` in `watchdog.rs` / the app's login-launch flag.
+    const AUTOSTART_ARG: &str = "--autostart";
     /// Production name of the main executable, used only as a fallback when the
     /// spawner did not pass `--main` (it normally does).
     const MAIN_BIN: &str = "PurePath.exe";
@@ -38,10 +42,19 @@ fn main() {
     const UNINSTALL_JSON_ARG: &str = "--uninstall-json";
     /// MUST match `DEFAULT_DELAY_SECS` in `uninstall.rs`. Duplicated as a literal
     /// (rather than shared code) because this crate is intentionally
-    /// dependency-free and does not link against the main app crate. Per the
-    /// product-owner decision recorded there, this stays at the 10-minute
-    /// testing value for now — for production set both back to `24 * 60 * 60`.
-    const COOLOFF_DELAY_SECS: u64 = 10 * 60; // ← keep in sync w/ uninstall.rs
+    /// dependency-free and does not link against the main app crate.
+    ///
+    /// This MUST NOT exceed the app's value: the app only self-deletes once the
+    /// user explicitly completes a removal that the *app's* cool-off has
+    /// already unlocked (it never fires on its own). If the guardian's copy of
+    /// the delay were larger than the app's, the guardian could still think the
+    /// cool-off is unmet for a legitimately-completed uninstall and keep
+    /// resurrecting the app, fighting the self-delete worker forever. Keeping
+    /// this value less-than-or-equal to the app's guarantees a real, completed
+    /// uninstall is always honored. Kept equal, at the intentional 10-second
+    /// testing value the product owner chose in `uninstall.rs` — for production
+    /// set BOTH back to `24 * 60 * 60`.
+    const COOLOFF_DELAY_SECS: u64 = 10; // ← keep in sync w/ uninstall.rs
 
     const POLL: Duration = Duration::from_millis(1000);
     const SPAWN_COOLDOWN: Duration = Duration::from_secs(3);
@@ -241,7 +254,9 @@ fn main() {
     }
 
     fn relaunch_main(main_exe: &Path) {
-        match std::process::Command::new(main_exe).spawn() {
+        // Resurrect hidden (`--autostart`) so a killed app comes back running in
+        // the background rather than as a focused window the user didn't open.
+        match std::process::Command::new(main_exe).arg(AUTOSTART_ARG).spawn() {
             Ok(_) => {}
             Err(_) => { /* nothing we can usefully log to; retry next cooldown */ }
         }

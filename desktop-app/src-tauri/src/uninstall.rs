@@ -2,10 +2,13 @@
 //!
 //! Removing Pure Path is meant to be a *deliberate* act, not an impulsive one.
 //! A removal request opens a cool-off window during which blocking stays fully
-//! functional. Only once the window elapses can the user actually remove the app
-//! (or reset the timer / cancel the request). The pending request is persisted to
-//! disk so it survives an app restart *and* a wiped renderer `localStorage` — the
-//! renderer is deliberately not trusted to hold friction state.
+//! functional. Once the window elapses, removal is only *unlocked* — it does
+//! NOT fire on its own. The user still has to take an explicit, destructive
+//! action (the "Remove Pure Path now" button, which calls `complete_uninstall`)
+//! to actually tear anything down. Until then they can reset the timer or cancel
+//! the request outright. The pending request is persisted to disk so it survives
+//! an app restart *and* a wiped renderer `localStorage` — the renderer is
+//! deliberately not trusted to hold friction state.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -14,10 +17,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Cool-off window before an uninstall can complete.
 ///
-/// TESTING: currently **10 minutes** so the flow can be exercised without waiting
-/// a full day. For production set this back to 24 hours (`24 * 60 * 60`).
-/// Product-owner decision: kept at the 10-minute testing value for now — do not
-/// "fix" this without checking with them first.
+/// TESTING: currently **10 seconds** — intentionally tiny so the whole flow
+/// (request → cool-off → ready → remove) can be exercised in one sitting.
+/// Product-owner decision: this is NOT a bug; do not "fix" it without checking
+/// with them first. Safe at this size because elapsing only *unlocks* the
+/// explicit "Remove completely" action — nothing fires automatically. For
+/// production set this back to 24 hours (`24 * 60 * 60`).
 /// Overridable at runtime with `PUREPATH_UNINSTALL_SECS` (seconds) — **debug
 /// builds only**, see `delay_secs` below.
 const DEFAULT_DELAY_SECS: u64 = 10; // ← production: 24 * 60 * 60
@@ -192,103 +197,302 @@ pub fn cooloff_elapsed_at(path: &std::path::Path) -> bool {
 }
 
 // ============================================================================
-// OS uninstaller launch
+// Self-contained removal ("delete everything with it")
 // ============================================================================
+//
+// Removal deliberately does NOT depend on the NSIS `uninstall.exe` the installer
+// drops. That file (and its registry entry) can be destroyed out of band — e.g.
+// the user runs Windows' normal "Uninstall" first, which deletes `uninstall.exe`
+// but can't remove the *running* app (the watchdog resurrects it). After that
+// the friction flow would have nothing to launch and could never remove itself.
+//
+// So instead we spawn a tiny detached batch that waits for our processes to
+// exit, then deletes the install directory and the app-data directory itself.
+// This works even when the installer's own uninstaller is long gone, and it is
+// what makes the timer-driven removal actually finish.
 
-/// Outcome of attempting to launch the OS uninstaller.
+/// Outcome of kicking off removal.
 pub enum LaunchResult {
-    /// The uninstaller (or its command) was launched.
+    /// A self-delete worker was spawned; the app should now close so it can
+    /// delete the (then-unlocked) executables and data.
     Launched(String),
-    /// No installer found — e.g. a dev/unpackaged build. The caller should fall
-    /// back to manual-removal instructions.
+    /// Removal could not be started (e.g. couldn't resolve paths / spawn).
     NotFound,
 }
 
-/// `reg` command that never flashes a console window.
+/// Fixed executable image names the self-delete worker also waits on, besides
+/// the main app's own exe name (added dynamically — see `wait_for_processes`).
+/// MUST match the real binary names — the guardian `[[bin]]` and the native
+/// host sidecar.
 #[cfg(target_os = "windows")]
-fn reg_quiet() -> std::process::Command {
+const OTHER_WAIT_PROCESSES: &[&str] = &["purepathguard.exe", "pure-path-host.exe"];
+
+/// Build the full list of image names the self-delete worker waits on: the
+/// *current* process's own exe file name, plus the guardian and native-host
+/// sidecars. Deliberately NOT a hardcoded `"PurePath.exe"` constant: the
+/// installed binary is `PurePath.exe` (Tauri `productName`), but the Cargo
+/// package is named `app`, so a loose `target/release/app.exe` run (or any
+/// future rename) has a different exe file name — hardcoding the installed
+/// name would silently break waiting/killing for every other build shape.
+/// Deduped case-insensitively (Windows image names are compared
+/// case-insensitively by `tasklist`/`taskkill` anyway) in case the current exe
+/// happens to collide with one of the fixed names.
+#[cfg(target_os = "windows")]
+fn wait_for_processes(current_exe_name: &str) -> Vec<String> {
+    let mut names = vec![current_exe_name.to_string()];
+    for other in OTHER_WAIT_PROCESSES {
+        if !names.iter().any(|n| n.eq_ignore_ascii_case(other)) {
+            names.push(other.to_string());
+        }
+    }
+    names
+}
+
+/// The Tauri app identifier (`tauri.conf.json` → `identifier`). Tauri's
+/// `app_data_dir()` is always `<per-user data root>/<identifier>`, so a
+/// genuine app-data dir's last path component MUST be exactly this.
+#[cfg(target_os = "windows")]
+const APP_IDENTIFIER: &str = "com.purepath.desktop";
+
+/// Number of `Normal` (non-root, non-prefix) path components in `path`. Used as
+/// a cheap "is this suspiciously close to a drive root" guard — e.g. `C:\`
+/// (0 normal components) is rejected, while `C:\PurePath` (1) or
+/// `C:\Program Files\PurePath` (2) are accepted.
+#[cfg(target_os = "windows")]
+fn normal_component_count(path: &std::path::Path) -> usize {
+    path.components()
+        .filter(|c| matches!(c, std::path::Component::Normal(_)))
+        .count()
+}
+
+/// Cheap belt-and-braces check: real Windows paths can never contain a
+/// double-quote character. `spawn_self_delete` passes `install`/`data` to the
+/// batch via `%PUREPATH_RM_INSTALL%`/`%PUREPATH_RM_DATA%` env vars wrapped in
+/// literal double quotes (`"%PUREPATH_RM_INSTALL%"`); a value containing `"`
+/// would break out of that quoting. Impossible for a genuine path, so refusing
+/// it costs nothing.
+#[cfg(target_os = "windows")]
+fn path_is_batch_safe(path: &std::path::Path) -> bool {
+    !path.to_string_lossy().contains('"')
+}
+
+/// Validate a candidate install directory before we ever let it near an
+/// `rmdir /s /q`. Must be an absolute path, at least one normal path component
+/// deep (rejects a bare drive root like `C:\`, but accepts a legitimate custom
+/// install such as `D:\PurePath`), free of double quotes, and must actually
+/// contain the running app's own exe file — the one file we know a genuine
+/// install directory has. The exe-containment check is the real guard here;
+/// the depth check only exists to catch a degenerate root path.
+#[cfg(target_os = "windows")]
+fn validate_install_dir(dir: &std::path::Path, current_exe_name: &str) -> bool {
+    dir.is_absolute()
+        && normal_component_count(dir) >= 1
+        && path_is_batch_safe(dir)
+        && dir.join(current_exe_name).is_file()
+}
+
+/// Validate a candidate app-data directory the same way. Must be absolute, at
+/// least two components deep (Tauri's `app_data_dir()` is always a per-user
+/// data root plus the identifier, so this is always deep — unlike the install
+/// dir above, there is no legitimate shallow case here), free of double
+/// quotes, and its last component must be the Tauri app identifier — exactly
+/// what `app_data_dir()` always ends in. A path that merely looks plausible
+/// but fails the identifier check is refused; there is no "close enough" here,
+/// only a literal match.
+#[cfg(target_os = "windows")]
+fn validate_app_data_dir(dir: &std::path::Path) -> bool {
+    dir.is_absolute()
+        && normal_component_count(dir) >= 2
+        && path_is_batch_safe(dir)
+        && dir.file_name().and_then(|n| n.to_str()) == Some(APP_IDENTIFIER)
+}
+
+/// Spawn a detached worker that waits for Pure Path's processes to exit, then
+/// deletes the install directory and the app-data directory — a self-contained
+/// uninstall that needs no external uninstaller. Returns `Launched` once the
+/// worker is running (the caller should then exit the app), or `NotFound` if it
+/// couldn't be started (including: either path failed validation, in which case
+/// nothing is written and nothing is touched).
+///
+/// `app_data_dir` is the Tauri per-user data dir (`uninstall.json` etc.). The
+/// install dir is inferred from `current_exe()`, and so is the current exe's
+/// own file name (fed into both validation and the wait/kill list — see
+/// `wait_for_processes`), since it differs across build shapes (`PurePath.exe`
+/// installed vs. `app.exe` for a loose `target/release` run). In debug builds
+/// this is a no-op that returns `Launched` without wiping anything — deleting
+/// your `target/` tree mid-`cargo run` is never what you want; real removal is
+/// a release path.
+///
+/// The worker itself is a self-deleting batch script with a *bounded* wait: it
+/// polls `tasklist` for our processes, but after ~30 seconds gives up waiting
+/// and force-kills them with `taskkill /F`. This matters specifically for
+/// `pure-path-host.exe` — that process is spawned and owned by the browser
+/// over native messaging, not by us, and it does not exit just because the main
+/// app and guardian did; without the bound this would spin forever with an
+/// open browser. The force-kill is not trusted to be instantaneous or
+/// complete, so after it the script re-checks `tasklist` for up to 5 more
+/// bounded iterations before proceeding regardless — `taskkill /F` returning
+/// doesn't guarantee the OS has finished tearing the process down, and this
+/// gives it a little more bounded slack without risking an unbounded loop.
+/// After that, the rmdirs are retried a few times in case something still has
+/// a brief hold on a file (AV scan, Explorer preview, etc).
+///
+/// The install/data paths are deliberately NOT spliced into the script's text
+/// as literal strings — they're passed via the `PUREPATH_RM_INSTALL` /
+/// `PUREPATH_RM_DATA` environment variables on the spawned `cmd` process, and
+/// the script only ever references them as `%PUREPATH_RM_INSTALL%` /
+/// `%PUREPATH_RM_DATA%`. `cmd` expands `%...%` even inside double quotes, so a
+/// path containing a literal `%` spliced directly into
+/// `rmdir /s /q "{install}"` would get mangled before the delete ever ran; an
+/// env-var reference is expanded exactly once to its verbatim value and is not
+/// rescanned for further `%...%` pairs, which sidesteps both the `%`-mangling
+/// and the `cmd /C` argument-quoting minefield entirely. `validate_install_dir`
+/// / `validate_app_data_dir` additionally refuse any path containing a `"`,
+/// which would otherwise break out of the quoting regardless of the above.
+#[cfg(target_os = "windows")]
+pub fn spawn_self_delete(app_data_dir: &std::path::Path) -> LaunchResult {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let mut c = std::process::Command::new("reg");
-    c.creation_flags(CREATE_NO_WINDOW);
-    c
-}
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
 
-/// Read a single `REG_SZ`/`REG_EXPAND_SZ` value, returning its data.
-#[cfg(target_os = "windows")]
-fn read_reg_value(key: &str, value: &str) -> Option<String> {
-    let out = reg_quiet()
-        .args(["query", key, "/v", value])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
+    // Debug: never nuke the dev build tree. Report success so the flow proceeds.
+    if cfg!(debug_assertions) {
+        log::warn!("self-delete skipped (debug build) — would wipe install + app data");
+        return LaunchResult::Launched("debug-noop".to_string());
     }
-    let text = String::from_utf8_lossy(&out.stdout);
-    for line in text.lines() {
-        let t = line.trim_start();
-        // `reg /v` does a substring match on the value name, so guard against a
-        // longer value (UninstallString vs QuietUninstallString) by anchoring.
-        if t.starts_with(value) {
-            // After the value name: "REG_SZ    <data>" — drop the type token.
-            let rest = t[value.len()..].trim_start();
-            if let Some(pos) = rest.find(char::is_whitespace) {
-                let data = rest[pos..].trim();
-                if !data.is_empty() {
-                    return Some(data.to_string());
-                }
-            }
-        }
-    }
-    None
-}
 
-/// Registry uninstall keys to probe (product-name and identifier variants, per
-/// user and per machine, incl. 32-bit view). Best-effort — covers NSIS/MSI.
-#[cfg(target_os = "windows")]
-const UNINSTALL_KEYS: &[&str] = &[
-    r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\PurePath",
-    r"HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\PurePath",
-    r"HKLM\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\PurePath",
-    r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\com.tauri.dev",
-    r"HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\com.tauri.dev",
-];
+    let current_exe = match std::env::current_exe().ok() {
+        Some(p) => p,
+        None => return LaunchResult::NotFound,
+    };
+    let current_exe_name = match current_exe.file_name().and_then(|n| n.to_str()) {
+        Some(n) => n.to_string(),
+        None => return LaunchResult::NotFound,
+    };
+    let install_dir = match current_exe.parent().map(|d| d.to_path_buf()) {
+        Some(d) => d,
+        None => return LaunchResult::NotFound,
+    };
 
-/// Launch the OS uninstaller. Prefers the `uninstall.exe` Tauri's NSIS installer
-/// drops next to the app, then any registered uninstall string. Returns
-/// `NotFound` for dev/unpackaged builds (no installer exists).
-#[cfg(target_os = "windows")]
-pub fn launch_uninstaller() -> LaunchResult {
-    // 1. Tauri's NSIS installer drops `uninstall.exe` beside the app exe.
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let cand = dir.join("uninstall.exe");
-            if cand.exists() && std::process::Command::new(&cand).spawn().is_ok() {
-                return LaunchResult::Launched(cand.to_string_lossy().into_owned());
-            }
-        }
+    // Refuse to proceed at all unless both targets pass validation — no batch
+    // file gets written and nothing is touched if either check fails.
+    if !validate_install_dir(&install_dir, &current_exe_name) {
+        log::error!("self-delete refused: install dir failed validation: {}", install_dir.display());
+        return LaunchResult::NotFound;
     }
-    // 2. Fall back to a registered uninstall string (MSI/WiX or per-machine NSIS).
-    for key in UNINSTALL_KEYS {
-        for value in ["QuietUninstallString", "UninstallString"] {
-            if let Some(cmd) = read_reg_value(key, value) {
-                // The string can embed arguments (e.g. `msiexec /x {GUID}`); run it
-                // through `cmd` so quoting/args are handled by the shell.
-                if std::process::Command::new("cmd")
-                    .args(["/C", &cmd])
-                    .spawn()
-                    .is_ok()
-                {
-                    return LaunchResult::Launched(cmd);
-                }
-            }
-        }
+    if !validate_app_data_dir(app_data_dir) {
+        log::error!("self-delete refused: app data dir failed validation: {}", app_data_dir.display());
+        return LaunchResult::NotFound;
     }
-    LaunchResult::NotFound
+
+    // Build the wait loop: block until every one of our images is gone from
+    // tasklist, tracked with a single shared counter (see the note on cmd
+    // semantics below — plain `set /a` line-by-line inside a goto loop is fine;
+    // it's only multi-line `( ... )` blocks where `%var%` reads stale). The
+    // process list is derived at runtime (see `wait_for_processes`), not
+    // hardcoded, because the current exe's own file name varies by build.
+    let processes = wait_for_processes(&current_exe_name);
+    let mut checks = String::new();
+    for name in &processes {
+        checks.push_str(&format!(
+            "tasklist /FI \"IMAGENAME eq {name}\" 2>nul | find /I \"{name}\" >nul\r\n\
+             if not errorlevel 1 set FOUND=1\r\n"
+        ));
+    }
+    let mut kills = String::new();
+    for name in &processes {
+        kills.push_str(&format!("taskkill /F /IM {name} >nul 2>nul\r\n"));
+    }
+
+    let install = install_dir.to_string_lossy().into_owned();
+    let data = app_data_dir.to_string_lossy().into_owned();
+    let script = format!(
+        // `cd /d "%~dp0"` first: cmd inherits the app's working directory, which
+        // on a normal shortcut launch is the install dir itself — and Windows
+        // refuses to rmdir any process's current directory. Hop to the batch's
+        // own dir (TEMP, outside both delete targets) before touching anything.
+        //
+        // `{checks}` is reused verbatim for both the initial wait loop and the
+        // post-force-kill re-verify loop below (`:forcecheck`) — same lines,
+        // different label to jump back to.
+        "@echo off\r\n\
+         cd /d \"%~dp0\"\r\n\
+         set /a WAITN=0\r\n\
+         \r\n\
+         :waitloop\r\n\
+         set FOUND=\r\n\
+         {checks}\
+         if not defined FOUND goto afterwait\r\n\
+         set /a WAITN+=1\r\n\
+         if %WAITN% GEQ 30 goto forcekill\r\n\
+         ping -n 2 127.0.0.1 >nul\r\n\
+         goto waitloop\r\n\
+         \r\n\
+         :forcekill\r\n\
+         {kills}\
+         ping -n 3 127.0.0.1 >nul\r\n\
+         set /a FORCEN=0\r\n\
+         \r\n\
+         :forcecheck\r\n\
+         set FOUND=\r\n\
+         {checks}\
+         if not defined FOUND goto afterwait\r\n\
+         set /a FORCEN+=1\r\n\
+         if %FORCEN% GEQ 5 goto afterwait\r\n\
+         ping -n 2 127.0.0.1 >nul\r\n\
+         goto forcecheck\r\n\
+         \r\n\
+         :afterwait\r\n\
+         set /a RETRY=0\r\n\
+         :deleteloop\r\n\
+         rmdir /s /q \"%PUREPATH_RM_INSTALL%\" 2>nul\r\n\
+         rmdir /s /q \"%PUREPATH_RM_DATA%\" 2>nul\r\n\
+         if exist \"%PUREPATH_RM_INSTALL%\" goto retrydelete\r\n\
+         if exist \"%PUREPATH_RM_DATA%\" goto retrydelete\r\n\
+         goto selfdelete\r\n\
+         \r\n\
+         :retrydelete\r\n\
+         set /a RETRY+=1\r\n\
+         if %RETRY% GEQ 3 goto selfdelete\r\n\
+         ping -n 2 127.0.0.1 >nul\r\n\
+         goto deleteloop\r\n\
+         \r\n\
+         :selfdelete\r\n\
+         (goto) 2>nul & del \"%~f0\"\r\n"
+    );
+
+    // Drop the batch in TEMP (outside the dirs we're about to delete) and run it
+    // detached and windowless, so it outlives us and cleans up silently. The
+    // filename carries our own pid rather than being static: a re-triggered
+    // removal (the app exits ~2s into `perform_uninstall` but a previous
+    // worker can still be running for up to ~40s, and a relaunch during that
+    // window is possible) must never overwrite the batch file a still-running
+    // cmd.exe from the earlier attempt is reading incrementally line-by-line.
+    let bat = std::env::temp_dir().join(format!("purepath-uninstall-{}.bat", std::process::id()));
+    if std::fs::write(&bat, script).is_err() {
+        return LaunchResult::NotFound;
+    }
+    match std::process::Command::new("cmd")
+        .args(["/C", &bat.to_string_lossy()])
+        // Belt and braces with the batch's own `cd /d "%~dp0"`: never let the
+        // worker inherit a CWD inside a directory it is about to delete.
+        .current_dir(std::env::temp_dir())
+        // Paths travel via env vars, not spliced into the script text — see the
+        // doc comment on this function for why.
+        .env("PUREPATH_RM_INSTALL", &install)
+        .env("PUREPATH_RM_DATA", &data)
+        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+        .spawn()
+    {
+        Ok(_) => LaunchResult::Launched(install),
+        Err(_) => LaunchResult::NotFound,
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn launch_uninstaller() -> LaunchResult {
-    // macOS/Linux removal is left to the user's package manager / drag-to-trash.
-    LaunchResult::NotFound
+pub fn spawn_self_delete(app_data_dir: &std::path::Path) -> LaunchResult {
+    // macOS/Linux: best-effort delete of the app-data dir; the app bundle itself
+    // is left to the user's package manager / drag-to-trash.
+    let _ = std::fs::remove_dir_all(app_data_dir);
+    LaunchResult::Launched(app_data_dir.to_string_lossy().into_owned())
 }

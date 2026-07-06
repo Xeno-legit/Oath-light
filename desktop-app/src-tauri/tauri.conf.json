@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "licenseFile": "../installer/EULA.rtf",
     "externalBin": [
       "binaries/purepathguard",
       "binaries/pure-path-host"

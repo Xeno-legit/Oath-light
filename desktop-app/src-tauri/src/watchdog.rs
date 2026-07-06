@@ -35,6 +35,13 @@
 //! down the whole watchdog just by hand-creating that file — so it is only
 //! honored once the uninstall cool-off (`uninstall.rs`) has actually elapsed;
 //! see `shutdown_requested` for the full reasoning.
+//!
+//! A duplicate launch of the **main** role (e.g. the desktop shortcut, while a
+//! login-autostart or guardian-resurrected instance is already running hidden
+//! in the tray) finds the main mutex held and exits — but before it does, it
+//! signals a named auto-reset event so the already-running instance can surface
+//! its window instead of the launch silently doing nothing. See `SHOW_EVENT`
+//! and `start_show_listener`.
 
 #[cfg(windows)]
 mod imp {
@@ -58,6 +65,14 @@ mod imp {
     /// MUST match the guardian crate.
     const MAIN_MUTEX: &str = "PurePath.Watchdog.Main.v1";
     const GUARDIAN_MUTEX: &str = "PurePath.Watchdog.Guardian.v1";
+
+    /// Session-namespace named auto-reset event: signaling it asks the
+    /// currently-running **main** instance to surface its window. Written by a
+    /// duplicate main launch that's about to bow out (mutex already held),
+    /// consumed by `start_show_listener`'s background thread in the surviving
+    /// instance. The guardian crate does not use this event at all — it is a
+    /// main-to-main signal only, so there's nothing to keep in sync there.
+    const SHOW_EVENT: &str = "PurePath.ShowWindow.v1";
 
     /// Guardian executable name (the `guardian` crate's `[[bin]]`).
     const GUARDIAN_BIN: &str = "purepathguard.exe";
@@ -91,11 +106,20 @@ mod imp {
     const ERROR_ALREADY_EXISTS: u32 = 183;
     const SYNCHRONIZE: u32 = 0x0010_0000;
 
+    // Event-object access/wait constants for the show-window signal below.
+    const EVENT_MODIFY_STATE: u32 = 0x0002;
+    const WAIT_OBJECT_0: u32 = 0;
+    const INFINITE: u32 = 0xFFFF_FFFF;
+
     extern "system" {
         fn CreateMutexW(attr: *const std::ffi::c_void, initial_owner: i32, name: *const u16) -> Handle;
         fn OpenMutexW(desired_access: u32, inherit_handle: i32, name: *const u16) -> Handle;
         fn CloseHandle(h: Handle) -> i32;
         fn GetLastError() -> u32;
+        fn CreateEventW(attr: *const std::ffi::c_void, manual_reset: i32, initial_state: i32, name: *const u16) -> Handle;
+        fn OpenEventW(desired_access: u32, inherit_handle: i32, name: *const u16) -> Handle;
+        fn SetEvent(h: Handle) -> i32;
+        fn WaitForSingleObject(h: Handle, ms: u32) -> u32;
     }
 
     fn wide(s: &str) -> Vec<u16> {
@@ -296,10 +320,101 @@ mod imp {
         }
     }
 
+    /// Called from `init_main`, before the guard loop starts. In a release
+    /// build, decides whether a shutdown sentinel found on disk is a
+    /// genuinely stale leftover from an interrupted/failed removal (safe to
+    /// clear, so the app boots normally) or an ACTIVE authorization for a
+    /// removal that's still in flight from a *different*, still-running
+    /// instance (must NOT be cleared).
+    ///
+    /// The race this guards against: `perform_uninstall` (lib.rs) writes the
+    /// sentinel, spawns a self-delete worker bounded to ~30-40s (see
+    /// `uninstall.rs`'s `spawn_self_delete`), then exits the app ~2s later.
+    /// If the user relaunches Pure Path during that window — the worker
+    /// hasn't finished tearing things down yet, so a double-click on the
+    /// desktop shortcut, or a stray autostart race, can start a fresh
+    /// `init_main()` before the worker force-kills whatever's still running —
+    /// the new instance's *unconditional* sentinel clear used to erase the
+    /// very authorization the in-flight removal depends on:
+    /// `shutdown_requested()` would then read "not authorized", the new
+    /// instance would re-arm autostart / force-install policy (see `run()` in
+    /// lib.rs), and the worker would force-kill it a few seconds later
+    /// anyway — a pointless resurrection that briefly fights the teardown the
+    /// user just asked for.
+    ///
+    /// Fix: before deleting, check whether the sentinel currently VERIFIES —
+    /// same reasoning as `shutdown_requested`: in a release build that means
+    /// reading the `uninstall.json` path the sentinel names and confirming
+    /// `cooloff_elapsed_at` — AND the sentinel file's mtime is recent (within
+    /// the last 5 minutes). `UNINSTALL_JSON_PATH` is NOT yet set this early in
+    /// `init_main` (it's only learned once `lib.rs`'s `setup()` runs — see
+    /// `set_uninstall_json_path`), so unlike `shutdown_requested` this can't
+    /// read the path from that `OnceLock`; instead it reads the path straight
+    /// from the sentinel file's own CONTENT, which is exactly the case
+    /// `request_shutdown` writes that content for.
+    ///
+    /// If both hold, a removal is genuinely in flight: log a warning and exit
+    /// immediately (`std::process::exit(0)`) rather than clearing the
+    /// sentinel. Exiting — not clearing — is the correct move: clearing would
+    /// de-authorize the original worker's kill (re-arming everything it's
+    /// about to tear down anyway); exiting just quietly gets out of the
+    /// worker's way without touching the sentinel, the worker, or anything
+    /// else.
+    ///
+    /// If the sentinel doesn't verify, or its mtime is older than 5 minutes,
+    /// it's genuinely stale (an interrupted/failed removal, a hand-crafted
+    /// file, or clock skew we can't trust) and is cleared as before, letting
+    /// the app boot normally. The 5-minute bound is what prevents this from
+    /// ever bricking the app: the worker is bounded to ~40s, so 5 minutes
+    /// safely covers every legitimate in-flight case, while a sentinel from a
+    /// removal that never completed (interrupted, crashed, worker killed
+    /// outright) still gets cleared on the very next launch instead of wedging
+    /// the app in a permanent "can't start" state.
+    ///
+    /// Debug builds keep the old unconditional-clear behavior untouched, so
+    /// developers are never trapped in a resurrection loop by this check.
     fn clear_stale_sentinel() {
         let p = shutdown_sentinel();
-        if p.exists() {
-            let _ = std::fs::remove_file(&p);
+        if !p.exists() {
+            return;
+        }
+
+        if !cfg!(debug_assertions) && sentinel_looks_active(&p) {
+            wlog("shutdown sentinel looks ACTIVE (recent + verifying) - exiting instead of clearing");
+            log::warn!(
+                "watchdog: shutdown sentinel is recent and verifies an elapsed cool-off — a removal \
+                 appears to be in flight from a relaunch; exiting quietly instead of clearing it"
+            );
+            std::process::exit(0);
+        }
+
+        let _ = std::fs::remove_file(&p);
+    }
+
+    /// Release-path helper for `clear_stale_sentinel`: true if the sentinel at
+    /// `p` looks like an ACTIVE, in-flight removal rather than a stale
+    /// leftover — its content names an `uninstall.json` whose cool-off has
+    /// actually elapsed (the same check `shutdown_requested` performs, just
+    /// reading the path from the sentinel's own content instead of
+    /// `UNINSTALL_JSON_PATH`), AND the file's mtime is within the last 5
+    /// minutes. See `clear_stale_sentinel`'s doc comment for the full
+    /// reasoning; not used in debug builds (callers gate on
+    /// `cfg!(debug_assertions)` first).
+    fn sentinel_looks_active(p: &Path) -> bool {
+        let recent = std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|mtime| mtime.elapsed().ok())
+            .map(|age| age <= Duration::from_secs(5 * 60))
+            .unwrap_or(false);
+        if !recent {
+            return false;
+        }
+        match std::fs::read_to_string(p) {
+            Ok(content) if !content.trim().is_empty() => {
+                crate::uninstall::cooloff_elapsed_at(Path::new(content.trim()))
+            }
+            _ => false,
         }
     }
 
@@ -421,10 +536,52 @@ mod imp {
                 // the OS keeps the mutex (our liveness signal) alive until this
                 // process exits — which is exactly the lifetime we want.
                 wlog("acquired main mutex");
+
+                // Create the show-window event now, before Tauri's setup() has
+                // even run. This shrinks the race where a duplicate launch shows
+                // up before `start_show_listener` is listening: the named event
+                // object already exists at this point, so a duplicate's SetEvent
+                // latches against the auto-reset event (initial_state = 0,
+                // manual_reset = 0) and the listener thread will consume that
+                // signal the moment it starts waiting, rather than the signal
+                // being sent to nobody. The handle is intentionally leaked, same
+                // idiom as the mutex above: it must stay open for the process's
+                // whole life so the named object doesn't get destroyed under us.
+                let wname = wide(SHOW_EVENT);
+                // SAFETY: standard CreateEventW call; wname is a valid
+                // NUL-terminated UTF-16 buffer that outlives the call.
+                let h = unsafe { CreateEventW(std::ptr::null(), 0, 0, wname.as_ptr()) };
+                if h.is_null() {
+                    wlog("failed to create show-window event");
+                }
             }
             None => {
                 log::info!("watchdog: another main instance is already running — exiting");
-                wlog("another main already holds the mutex - exiting");
+                if launched_at_login() {
+                    // An `--autostart` duplicate (login autostart, or a guardian
+                    // resurrection that lost the mutex race) exists to run
+                    // *hidden* — it must never pop the surviving instance's
+                    // window in the user's face. Only a user-initiated launch
+                    // (no flag, e.g. the desktop shortcut) signals for show.
+                    wlog("another main already holds the mutex - autostart duplicate, exiting quietly");
+                } else {
+                    // Best-effort: tell the instance that's already running to
+                    // surface its window, since this duplicate launch is about to
+                    // silently vanish otherwise. Must never block the exit below.
+                    let wname = wide(SHOW_EVENT);
+                    // SAFETY: standard OpenEventW call; wname is a valid
+                    // NUL-terminated UTF-16 buffer that outlives the call.
+                    let h = unsafe { OpenEventW(EVENT_MODIFY_STATE, 0, wname.as_ptr()) };
+                    if h.is_null() {
+                        wlog("another main already holds the mutex - could not open show event - exiting");
+                    } else {
+                        unsafe {
+                            SetEvent(h);
+                            CloseHandle(h);
+                        }
+                        wlog("another main already holds the mutex - signaled show + exiting");
+                    }
+                }
                 std::process::exit(0);
             }
         }
@@ -433,12 +590,64 @@ mod imp {
 
         std::thread::spawn(guard_loop);
     }
+
+    /// Start a background thread that surfaces the main window whenever a
+    /// duplicate main launch signals the show-window event (see `SHOW_EVENT` and
+    /// `init_main`'s duplicate branch). No-op if the watchdog isn't enabled: the
+    /// silent duplicate-exit this works around only happens when `init_main` is
+    /// actually enforcing the single-instance mutex.
+    ///
+    /// `on_show` runs on this background thread, not the main/UI thread — that's
+    /// fine here because Tauri v2's window methods (`show`/`unminimize`/
+    /// `set_focus`) are thread-safe and don't require dispatching back onto a
+    /// particular thread.
+    pub fn start_show_listener<F: Fn() + Send + 'static>(on_show: F) {
+        if !enabled() {
+            return;
+        }
+
+        let wname = wide(SHOW_EVENT);
+        // SAFETY: standard CreateEventW call; wname is a valid NUL-terminated
+        // UTF-16 buffer that outlives the call. This normally just opens the
+        // object `init_main` already created; passing CreateEventW (rather than
+        // OpenEventW) here too means the listener still works even if it were
+        // somehow started before `init_main` created the object.
+        let h = unsafe { CreateEventW(std::ptr::null(), 0, 0, wname.as_ptr()) };
+        if h.is_null() {
+            wlog("start_show_listener: failed to create/open show-window event");
+            return;
+        }
+
+        // The handle is intentionally leaked into the spawned thread: it must
+        // stay open for as long as the thread is waiting on it, which is the
+        // rest of the process's life, so there is no good point to close it.
+        // Raw pointers aren't `Send`, so ferry it across as a `usize` (its bit
+        // pattern is just an opaque HANDLE value, not something we dereference
+        // on this side) and cast back once we're on the new thread.
+        let h_bits = h as usize;
+        std::thread::spawn(move || loop {
+            let h = h_bits as Handle;
+            // SAFETY: h is a valid event handle for the lifetime of this loop
+            // (leaked above, never closed).
+            let res = unsafe { WaitForSingleObject(h, INFINITE) };
+            if res == WAIT_OBJECT_0 {
+                on_show();
+                // Auto-reset event: the wait above already consumed the signal,
+                // so just loop back around to wait for the next one.
+            } else {
+                // Anything else (WAIT_FAILED, WAIT_ABANDONED, ...) means the
+                // handle is broken; log once and stop instead of spinning.
+                wlog("show-window listener: unexpected wait result, stopping");
+                break;
+            }
+        });
+    }
 }
 
 #[cfg(windows)]
 pub use imp::{
     enabled, init_main, launched_at_login, register_autostart, request_shutdown,
-    set_uninstall_json_path, unregister_autostart,
+    set_uninstall_json_path, start_show_listener, unregister_autostart,
 };
 
 // ---- Non-Windows: graceful no-ops (the app is Windows-first; see master plan).
@@ -461,3 +670,5 @@ pub fn unregister_autostart() {}
 pub fn launched_at_login() -> bool {
     false
 }
+#[cfg(not(windows))]
+pub fn start_show_listener<F: Fn() + Send + 'static>(_on_show: F) {}

@@ -34,6 +34,7 @@ function TitleBar({ s }) {
       <div className="tl-brand" data-tauri-drag-region>
         <span className="tl-logo"><Logo size={18} /></span>
         <span className="tl-title">Pure Path</span>
+        <span className="beta-badge" title="Open beta build — features are still in testing and may change or misbehave.">BETA</span>
       </div>
       <div className="tl-drag" data-tauri-drag-region style={{ flex: 1, alignSelf: 'stretch' }} />
       <div className="win-ctrls">
@@ -104,6 +105,14 @@ function HubMenu({ s, go }) {
   const name = s.profile.name.split(' ')[0];
   return (
     <div className="page hub" style={{ maxWidth: 1040 }}>
+      <div className="beta-banner fade-up" role="note">
+        <span className="beta-banner-tag">OPEN BETA</span>
+        <span className="beta-banner-text">
+          You're running an early public build of Pure Path. It's still in active
+          testing — some protection may be incomplete and things can change or break.
+          Please don't rely on it as your only safeguard yet.
+        </span>
+      </div>
       <div className="hub-hero fade-up">
         <div className="hub-mark"><Logo size={56} /></div>
         <div className="eyebrow" style={{ marginTop: 22 }}>{greeting}, {name}</div>

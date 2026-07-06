@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 // ============================================================================
 // Tuning
@@ -31,6 +31,13 @@ const HEARTBEAT_STALE_MS: u64 = 40_000;
 
 /// Monotonic id per accepted native-host connection (one per browser profile).
 static CONN_SEQ: AtomicU64 = AtomicU64::new(1);
+
+/// Latches once removal has been kicked off, so a manual "Remove completely"
+/// click can never run the teardown (or spawn a second self-delete worker)
+/// twice concurrently. Reset back to `false` if the self-delete worker fails to
+/// launch, so a failed attempt can be retried instead of leaving the app in a
+/// half-torn-down state forever.
+static UNINSTALL_FIRED: AtomicBool = AtomicBool::new(false);
 
 // ============================================================================
 // Application State
@@ -1126,11 +1133,22 @@ fn nsfw_monitor_running(monitor: tauri::State<'_, MonitorState>) -> bool {
 }
 
 /// Authorize a real shutdown of the dual-process watchdog so closing the app no
-/// longer triggers resurrection. The legitimate quit path (the uninstall flow)
-/// calls this; it is also the kill switch during development.
+/// longer triggers resurrection. The legitimate quit path (the uninstall flow,
+/// `perform_uninstall`) calls `watchdog::request_shutdown()` directly — it does
+/// NOT go through this command. This command is reachable from any JS running
+/// in the webview (it's in `generate_handler!`), so in a **release** build its
+/// body is a no-op: it just logs a warning and returns, without writing the
+/// shutdown sentinel. Left in `generate_handler!` (rather than removed) so the
+/// frontend doesn't need a release-vs-debug branch of its own. In a **debug**
+/// build it keeps its old behavior — the dev kill switch that lets closing the
+/// app during testing skip the resurrection loop.
 #[tauri::command]
 fn stop_watchdog() {
-    watchdog::request_shutdown();
+    if cfg!(debug_assertions) {
+        watchdog::request_shutdown();
+    } else {
+        log::warn!("stop_watchdog: ignored in release build (not a valid shutdown path)");
+    }
 }
 
 // ============================================================================
@@ -1160,69 +1178,266 @@ fn request_uninstall(
 }
 
 /// Restart the cool-off clock (available once the window has elapsed).
+///
+/// Gated on `UNINSTALL_FIRED`: once `perform_uninstall` has actually launched
+/// the self-delete worker, `uninstall.json` must keep showing an *elapsed*
+/// request — the release-build watchdog/guardian only honor the shutdown
+/// sentinel while that's true (see `watchdog::shutdown_requested` and
+/// `uninstall::cooloff_elapsed_at`). Resetting the clock this late would flip
+/// `cooloff_elapsed_at` back to false and make both processes refuse to stand
+/// down mid-removal, fighting the worker that's about to force-kill them
+/// anyway. So once removal is in flight this returns an error instead of
+/// touching the persisted state.
 #[tauri::command]
 fn reset_uninstall_timer(
     store: tauri::State<'_, Arc<uninstall::UninstallStore>>,
-) -> uninstall::UninstallState {
+) -> Result<uninstall::UninstallState, String> {
+    if UNINSTALL_FIRED.load(Ordering::SeqCst) {
+        return Err("Removal is already in progress — Pure Path is closing.".to_string());
+    }
     log::info!("uninstall timer reset");
-    store.reset()
+    Ok(store.reset())
 }
 
 /// Cancel the uninstall request and continue normally.
+///
+/// Gated on `UNINSTALL_FIRED` for the same reason as `reset_uninstall_timer`
+/// above: cancelling clears `requested_at` entirely, which is just as fatal to
+/// an in-flight removal as resetting it — both make `cooloff_elapsed_at` read
+/// false and stop the watchdog/guardian from standing down while the
+/// self-delete worker is mid-teardown.
 #[tauri::command]
 fn cancel_uninstall(
     store: tauri::State<'_, Arc<uninstall::UninstallStore>>,
-) -> uninstall::UninstallState {
+) -> Result<uninstall::UninstallState, String> {
+    if UNINSTALL_FIRED.load(Ordering::SeqCst) {
+        return Err("Removal is already in progress — Pure Path is closing.".to_string());
+    }
     log::info!("uninstall request cancelled");
-    store.cancel()
+    Ok(store.cancel())
 }
 
-/// Complete the uninstall once the cool-off has elapsed: stand down the guard,
-/// clear any force-install policy, drop the request, and launch the OS
-/// uninstaller. Returns `"launched"` (uninstaller started; the app will close)
-/// or `"manual"` (no installer found — caller shows manual-removal steps).
+/// Bring the main window back from the tray (show + unminimize + focus).
+fn show_main_window(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+}
+
+/// Install the system-tray icon. Closing the window hides Pure Path to the tray
+/// (it keeps running in the background); clicking the tray icon — or its "Open
+/// Pure Path" item — brings the window back. There is intentionally no "Quit":
+/// the only real exit is the uninstall flow, so the tray can't be used to stand
+/// down protection.
+fn install_tray(app: &AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let open = MenuItem::with_id(app, "open", "Open Pure Path", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open])?;
+
+    let mut builder = TrayIconBuilder::new()
+        .tooltip("Pure Path — protection active")
+        .menu(&menu)
+        .on_menu_event(|app, event| {
+            if event.id.as_ref() == "open" {
+                show_main_window(app);
+            }
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon);
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
+/// Registry paths the NSIS installer's Add/Remove Programs entry may live
+/// under (see the generated `installer.nsi`'s `UNINSTKEY`, defined as
+/// `Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}` i.e.
+/// `...\Uninstall\PurePath`, and written under `SHCTX` — HKCU for a per-user
+/// install, HKLM (and, on a 32-bit-registry-view write, its WOW6432Node
+/// mirror) for a per-machine one). After the self-delete worker removes
+/// `uninstall.exe`, a leftover entry here would still show Pure Path in
+/// Settings -> Apps, pointing at a now-deleted uninstaller.
+#[cfg(target_os = "windows")]
+const UNINSTALL_REGISTRY_KEYS: &[&str] = &[
+    r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\PurePath",
+    r"HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\PurePath",
+    r"HKLM\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\PurePath",
+];
+
+/// Best-effort delete of the Add/Remove Programs registry entries above, quiet
+/// (no console window, mirroring the `CREATE_NO_WINDOW` pattern `watchdog.rs`
+/// uses for its own `reg` calls). Failures are swallowed on purpose: deleting
+/// an HKLM key requires admin, which an unprivileged per-user install won't
+/// have, and a per-machine install never wrote the HKCU key — either way
+/// there's nothing actionable to do about a failure here, and this cleanup is
+/// cosmetic, not load-bearing for removal itself (the self-delete worker has
+/// already been launched by the time this runs).
+#[cfg(target_os = "windows")]
+fn remove_uninstall_registry_entries() {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    for key in UNINSTALL_REGISTRY_KEYS {
+        let result = std::process::Command::new("reg")
+            .args(["delete", key, "/f"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        match result {
+            Ok(s) if s.success() => log::info!("removed uninstall registry entry: {key}"),
+            _ => log::info!("uninstall registry entry not removed (absent or no permission): {key}"),
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn remove_uninstall_registry_entries() {}
+
+/// Tear down all of Pure Path and delete it from the machine. Idempotent via
+/// `UNINSTALL_FIRED`: only ever called from the explicit "Remove completely"
+/// command (once the cool-off has *unlocked* removal — it never fires on its
+/// own), and only the first caller runs anything.
+///
+/// Ordering is deliberate and safety-critical: nothing is torn down until
+/// removal is guaranteed to actually proceed.
+///   1. Win the `UNINSTALL_FIRED` latch, then immediately re-check
+///      `store.get().ready`. This closes a TOCTOU: the caller
+///      (`complete_uninstall`) checked readiness before calling in, but
+///      `cancel_uninstall` / `reset_uninstall_timer` could in principle have
+///      raced it in the gap between that check and winning the latch here (in
+///      the current call graph they're also gated on `UNINSTALL_FIRED` now, so
+///      this is belt-and-braces, not the only guard). If no longer ready,
+///      unlatch and return an error — nothing has been touched.
+///   2. Resolve `app_data_dir()` — bail out with an error if that fails; never
+///      guess a fallback path (see `uninstall.rs` for why a bad path here used
+///      to be catastrophic).
+///   3. Spawn the self-delete worker *first*, while everything is still fully
+///      intact. If it can't be started (bad paths, couldn't write/spawn the
+///      batch), unlatch `UNINSTALL_FIRED` and return an error — nothing has
+///      been touched, so the user can simply try again. This is safe to do
+///      before the teardown below: the worker waits for our processes to exit
+///      before it deletes anything, and the teardown always completes (and the
+///      app exits) well before that wait is satisfied.
+///   4. Only once the worker is confirmed running: stand down the reinstall
+///      guard and the dual-process watchdog, remove the login autostart entry,
+///      clear any force-install policy and native-messaging host
+///      registrations, best-effort clear the NSIS Add/Remove Programs registry
+///      entry, then close the app shortly after so the worker can delete the
+///      (now unlocked) executables and data.
+///
+/// Deliberately does NOT rely on the NSIS `uninstall.exe`, which may already be
+/// gone (see `uninstall.rs`).
+fn perform_uninstall(app: &AppHandle) -> Result<String, String> {
+    // Latch: only the first caller runs the teardown.
+    if UNINSTALL_FIRED.swap(true, Ordering::SeqCst) {
+        return Ok("launched".to_string());
+    }
+
+    // TOCTOU close: `complete_uninstall` checked `store.get().ready` before
+    // calling here, but that check and this latch-win aren't atomic with each
+    // other — a `cancel_uninstall`/`reset_uninstall_timer` call could in
+    // principle land in the gap between them. Both of those commands are now
+    // themselves gated on `UNINSTALL_FIRED` (see their doc comments), which
+    // closes the *reverse* race (cancel-after-launch); this re-check closes
+    // the remaining direction by re-verifying readiness ourselves now that
+    // we're the confirmed sole winner of the latch, before anything is
+    // touched. If it's no longer ready, unlatch so a future genuine attempt
+    // isn't permanently blocked.
+    if let Some(store) = app.try_state::<Arc<uninstall::UninstallStore>>() {
+        if !store.get().ready {
+            UNINSTALL_FIRED.store(false, Ordering::SeqCst);
+            return Err("The waiting period hasn't elapsed yet.".to_string());
+        }
+    }
+
+    let app_data_dir = match app.path().app_data_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            UNINSTALL_FIRED.store(false, Ordering::SeqCst);
+            return Err(format!("Could not resolve the app data directory ({e}); nothing was changed."));
+        }
+    };
+
+    // Spawn the self-delete worker BEFORE touching anything else. If it fails,
+    // unlatch and report — the app is exactly as it was, so this can be retried.
+    let install_dir = match uninstall::spawn_self_delete(&app_data_dir) {
+        uninstall::LaunchResult::Launched(what) => what,
+        uninstall::LaunchResult::NotFound => {
+            UNINSTALL_FIRED.store(false, Ordering::SeqCst);
+            log::warn!("self-delete could not be started — nothing was changed, removal can be retried");
+            return Err(
+                "Could not start removal (couldn't verify the install/data paths or launch the \
+                 cleanup worker). Nothing was changed — you can try again.".to_string(),
+            );
+        }
+    };
+    log::warn!("self-delete worker started; wiping {install_dir}");
+
+    // Now that removal is guaranteed to proceed, stand down the reinstall guard
+    // so enforcement stops fighting it.
+    if let Some(state) = app.try_state::<Arc<Mutex<AppState>>>() {
+        state.lock().unwrap().guard_enabled = false;
+    }
+    // Stand down the dual-process watchdog so neither process resurrects the
+    // other while we delete the app, and drop the login autostart entry so it
+    // cannot come back at the next boot.
+    watchdog::request_shutdown();
+    watchdog::unregister_autostart();
+    // Clear any force-install policy and native-host registrations we wrote.
+    for def in BROWSERS {
+        browsers::remove_policy(def);
+    }
+    browsers::unregister_all_hosts();
+    // Best-effort: clear the NSIS Add/Remove Programs entry so it doesn't
+    // linger in Settings -> Apps pointing at a deleted uninstaller. Purely
+    // cosmetic — never blocks or fails the removal itself.
+    remove_uninstall_registry_entries();
+    // NB: deliberately do NOT cancel the persisted request here. In a release
+    // build the watchdog only honors the shutdown sentinel while
+    // `uninstall.json` still shows an *elapsed* request (see
+    // `watchdog::shutdown_requested` / `uninstall::cooloff_elapsed_at`); zeroing
+    // it would make both processes refuse to stand down and keep resurrecting
+    // mid-removal. It is now safe to leave the file as-is: nothing auto-fires
+    // on the next launch (the watcher that used to do that is gone), so an
+    // interrupted removal just leaves the request in its "ready" state, which
+    // the user can simply re-trigger from the settings page.
+    log::warn!("uninstall confirmed — guard disabled, policy + host registrations cleared");
+
+    // Close the app shortly after so the worker can delete the (now unlocked)
+    // executables and data.
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(2000));
+        app2.exit(0);
+    });
+    Ok("launched".to_string())
+}
+
+/// Complete the uninstall once the cool-off has elapsed (unlocked). Returns
+/// `Ok("launched")` (removal started; the app will close and delete itself) or
+/// `Err(message)` if removal could not be started — in which case nothing was
+/// changed and the user can retry.
 #[tauri::command]
 fn complete_uninstall(
     app: AppHandle,
-    state: tauri::State<'_, Arc<Mutex<AppState>>>,
     store: tauri::State<'_, Arc<uninstall::UninstallStore>>,
 ) -> Result<String, String> {
     if !store.get().ready {
         return Err("The waiting period hasn't elapsed yet.".to_string());
     }
-
-    // Stand down the reinstall guard so enforcement stops fighting the removal.
-    state.lock().unwrap().guard_enabled = false;
-    // Stand down the dual-process watchdog so neither process resurrects the
-    // other while the OS uninstaller removes the app, and drop the login
-    // autostart entry so it does not come back at the next boot.
-    watchdog::request_shutdown();
-    watchdog::unregister_autostart();
-    // Clear any force-install policy we may have written (best-effort).
-    for def in BROWSERS {
-        browsers::remove_policy(def);
-    }
-    // Drop the persisted request — the cool-off is spent.
-    store.cancel();
-    log::warn!("uninstall confirmed — guard disabled, policy cleared");
-
-    match uninstall::launch_uninstaller() {
-        uninstall::LaunchResult::Launched(what) => {
-            log::warn!("uninstaller launched: {what}");
-            // Close the app shortly after so the uninstaller can remove the
-            // running executable cleanly.
-            let app2 = app.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_millis(2000));
-                app2.exit(0);
-            });
-            Ok("launched".to_string())
-        }
-        uninstall::LaunchResult::NotFound => {
-            log::warn!("no installer found — protection disabled, manual removal needed");
-            Ok("manual".to_string())
-        }
-    }
+    perform_uninstall(&app)
 }
 
 // ============================================================================
@@ -1280,16 +1495,45 @@ pub fn run() {
 
             register_native_host(app.handle());
 
+            // Background app: closing the window hides it to the tray and keeps
+            // protection running, instead of quitting (which would drop the
+            // watchdog mutex and make the guardian resurrect a fresh, focused
+            // window in the user's face). Only wired when the watchdog is active
+            // (release / PUREPATH_WATCHDOG) so ordinary `cargo run` still quits
+            // on close. A tray icon brings the window back; the only real exit is
+            // the uninstall flow.
+            if watchdog::enabled() {
+                install_tray(app.handle())?;
+                if let Some(win) = app.get_webview_window("main") {
+                    let w = win.clone();
+                    win.on_window_event(move |event| {
+                        if let WindowEvent::CloseRequested { api, .. } = event {
+                            let _ = w.hide();
+                            api.prevent_close();
+                        }
+                    });
+                }
+
+                // Single-instance activation: a duplicate launch (desktop
+                // shortcut while this instance is already running hidden in the
+                // tray) finds the watchdog's main mutex held and exits, but not
+                // before signaling a named event. Listen for that here and
+                // surface our window instead of the duplicate launch silently
+                // doing nothing.
+                let handle = app.handle().clone();
+                watchdog::start_show_listener(move || show_main_window(&handle));
+            }
+
             // Persistence: keep Pure Path starting at login so protection
             // survives reboots (enforced like the watchdog, gated to release /
             // PUREPATH_WATCHDOG so dev logins aren't hijacked). A login-triggered
-            // launch comes up minimized, out of the way.
+            // launch comes up hidden in the background (tray only), out of the way.
             if watchdog::enabled() {
                 watchdog::register_autostart();
             }
             if watchdog::launched_at_login() {
                 if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.minimize();
+                    let _ = win.hide();
                 }
             }
 
@@ -1305,7 +1549,12 @@ pub fn run() {
             // so a release build can verify the cool-off before honoring the
             // shutdown sentinel, and so the guardian can be told the same path.
             watchdog::set_uninstall_json_path(udd.join("uninstall.json"));
-            app.manage(Arc::new(uninstall::UninstallStore::load(&udd)));
+            let store = Arc::new(uninstall::UninstallStore::load(&udd));
+            app.manage(store);
+            // No background watcher here: the cool-off elapsing only flips
+            // `UninstallState.ready`, unlocking the explicit "Remove Pure Path
+            // now" action in the UI (`complete_uninstall`). Nothing removes
+            // itself automatically — see `perform_uninstall`.
 
             start_tcp_server(app.handle().clone(), shared_state.clone());
             start_monitor(app.handle().clone(), shared_state.clone());

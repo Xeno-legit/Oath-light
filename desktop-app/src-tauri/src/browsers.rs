@@ -315,6 +315,30 @@ pub fn register_all_hosts(chromium_manifest: &Path, gecko_manifest: &Path) {
     }
 }
 
+/// Remove every native-messaging host registration we may have written, so an
+/// uninstall leaves no dangling pointer to a deleted host binary. Best-effort —
+/// mirrors `register_all_hosts` and includes the Chrome fallback key.
+#[cfg(target_os = "windows")]
+pub fn unregister_all_hosts() {
+    let delete_value = |subkey: &str| {
+        let full = format!(r"HKCU\{}\{}", subkey, HOST_NAME);
+        let _ = reg().args(["delete", &full, "/f"]).output();
+    };
+    for def in BROWSERS {
+        delete_value(def.nm_registry_subkey);
+    }
+    delete_value(r"SOFTWARE\Google\Chrome\NativeMessagingHosts");
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn unregister_all_hosts() {
+    let home = std::env::var("HOME").unwrap_or_default();
+    for def in BROWSERS {
+        let target = format!("{}/{}/{}.json", home, def.nm_unix_dir, HOST_NAME);
+        let _ = std::fs::remove_file(&target);
+    }
+}
+
 // ============================================================================
 // Force-install enforcement (gated — dormant until update URLs are set)
 // ============================================================================

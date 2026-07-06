@@ -26,13 +26,15 @@ function delayWords(secs) {
 }
 
 // The settings card that drives the persisted, backend-owned uninstall request.
-// Three states: idle → request, pending → live countdown + cancel, ready →
-// reset / cancel / remove.
+// Four states: idle → request, pending → live countdown + cancel, ready →
+// reset / cancel / remove, removing → success message only (no actions —
+// the app is seconds from closing itself down).
 function UninstallCard() {
   const available = !!(window.PPNative && window.PPNative.available);
   const [st, setSt] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState('');
+  const [removing, setRemoving] = React.useState(false);
   const [, tick] = React.useReducer((x) => x + 1, 0);
   // Anchor the last backend reading so the local ticker can derive the countdown
   // without hammering the backend every second.
@@ -60,7 +62,12 @@ function UninstallCard() {
     return () => clearInterval(id);
   }, [st, refresh]);
 
-  const run = (fn) => { setBusy(true); fn().then(apply).catch(() => {}).finally(() => setBusy(false)); };
+  const run = (fn) => {
+    setBusy(true);
+    fn().then(apply)
+      .catch((e) => setMsg('Something went wrong: ' + (e && e.message ? e.message : e) + ' — please try again.'))
+      .finally(() => setBusy(false));
+  };
 
   const doRequest = () => {
     if (!st) return;
@@ -72,16 +79,18 @@ function UninstallCard() {
   const doReset = () => { setMsg(''); run(() => window.PPNative.resetUninstallTimer()); };
   const doRemove = () => {
     if (!confirm('Remove Pure Path completely?\n\n'
-      + 'This disables all protection and launches the uninstaller. This cannot be undone.')) return;
+      + 'This disables all protection and deletes Pure Path from your computer. This cannot be undone.')) return;
     setBusy(true);
     window.PPNative.completeUninstall()
-      .then((r) => {
-        setMsg(r === 'launched'
-          ? 'The uninstaller has been launched. Pure Path will close shortly.'
-          : 'Protection has been disabled. To finish, remove Pure Path from Windows Settings → Apps.');
+      .then(() => {
+        setMsg('Removing Pure Path — it will close and delete itself in a moment.');
+        setRemoving(true);
         refresh();
       })
-      .catch((e) => setMsg('Could not start the uninstall: ' + (e && e.message ? e.message : e)))
+      // The backend refuses to tear anything down unless removal is
+      // guaranteed to proceed, and its error message already says as much —
+      // just surface it as-is instead of restating it.
+      .catch((e) => setMsg('Could not remove Pure Path: ' + (e && e.message ? e.message : e)))
       .finally(() => setBusy(false));
   };
 
@@ -105,7 +114,7 @@ function UninstallCard() {
           </div>
 
           {/* idle → request */}
-          {st && !requested &&
+          {st && !requested && !removing &&
             <div style={{ marginTop: 14 }}>
               <button className="btn btn-danger btn-sm" disabled={busy || !available} onClick={doRequest}>
                 Request uninstall
@@ -114,7 +123,7 @@ function UninstallCard() {
           }
 
           {/* pending → live countdown */}
-          {requested && !ready &&
+          {requested && !ready && !removing &&
             <div className="ut-pending" style={{ marginTop: 16 }}>
               <div className="ut-count">{fmtDur(liveRemaining)}</div>
               <div className="ut-sub">until removal unlocks · protection active</div>
@@ -126,7 +135,7 @@ function UninstallCard() {
           }
 
           {/* ready → reset / cancel / remove */}
-          {ready &&
+          {ready && !removing &&
             <div style={{ marginTop: 16 }}>
               <div className="ut-ready">The waiting period is over. What would you like to do?</div>
               <div className="row" style={{ gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
@@ -137,6 +146,7 @@ function UninstallCard() {
             </div>
           }
 
+          {/* removing → success message only, no actions — the app is about to close itself */}
           {msg && <div className="ut-msg">{msg}</div>}
           {!available &&
             <div className="ut-msg" style={{ color: 'var(--muted)' }}>Uninstall controls are available in the desktop app.</div>

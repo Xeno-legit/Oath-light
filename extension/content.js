@@ -137,7 +137,7 @@
     if (hostname !== 'newgrounds.com' && !hostname.endsWith('.newgrounds.com')) return;
     if (window._purePathBlockedNG) return;
 
-    function doBlock() {
+    async function doBlock() {
       // Check for the bypass link or the page title
       const bypassLink = document.getElementById('ignore-filter-link');
       const title = document.title;
@@ -148,9 +148,17 @@
       // Hide everything immediately
       document.documentElement.style.display = 'none';
       try {
-        // TEMP (testing): blocked.html hangs Playwright; route to a light page.
-        console.log('[PurePath][TEST] BLOCK newgrounds bypass page', window.location.href);
-        window.location.replace('about:blank');
+        const response = await chrome.runtime.sendMessage({
+          action: 'checkUrl',
+          url: window.location.href
+        });
+        if (response && response.blockedUrl) {
+          window.location.replace(response.blockedUrl);
+        } else {
+          // Fallback to blocked.html directly
+          window.location.replace(chrome.runtime.getURL('blocked.html') +
+            '?reason=newgrounds-bypass&match=' + encodeURIComponent(window.location.href));
+        }
       } catch (e) {
         // Fallback: nuke the page entirely
         document.documentElement.innerHTML = '<html><body style="background:#0f172a;"></body></html>';
