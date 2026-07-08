@@ -18,8 +18,15 @@ function Logo({ size = 21 }) {
   );
 }
 
-function Switch({ on, onClick }) {
-  return <button className={'switch' + (on ? ' on' : '')} onClick={onClick} role="switch" aria-checked={on} />;
+function Switch({ on, onClick, disabled }) {
+  return (
+    <button
+      className={'switch' + (on ? ' on' : '')}
+      onClick={disabled ? undefined : onClick}
+      role="switch"
+      aria-checked={on}
+      disabled={!!disabled} />);
+
 }
 
 function Segmented({ value, options, onChange }) {

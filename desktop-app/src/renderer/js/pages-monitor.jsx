@@ -21,22 +21,42 @@ function ScoreBar({ label, value, highlight }) {
   );
 }
 
+// Assigns stable "Display N" labels to monitor ids in first-seen order (the
+// ids themselves are opaque OS handles, not 1/2/3). Kept in a ref rather than
+// state — it's only read during render of already-changing scan data, not a
+// value that needs to itself trigger a re-render.
+function monitorLabeler() {
+  const order = [];
+  return (monitorId) => {
+    if (monitorId == null) return null;
+    let idx = order.indexOf(monitorId);
+    if (idx === -1) { order.push(monitorId); idx = order.length - 1; }
+    return { label: 'Display ' + (idx + 1), multi: order.length > 1 };
+  };
+}
+
 function MonitorPage() {
   const native = !!(window.PPNative && PPNative.available);
   const [running, setRunning] = React.useState(false);
   const [last, setLast] = React.useState(null);
   const [history, setHistory] = React.useState([]);
   const [err, setErr] = React.useState('');
+  const [overlayEvents, setOverlayEvents] = React.useState([]);
+  const labelFor = React.useRef(monitorLabeler()).current;
 
   React.useEffect(() => {
     if (!native) return;
-    let unlisten = null, cancelled = false;
+    let unlisten = null, unlistenOverlay = null, cancelled = false;
     PPNative.nsfwMonitorRunning().then((r) => { if (!cancelled) setRunning(r); });
     PPNative.onNsfwScan((scan) => {
+      labelFor(scan.monitor_id); // register this id's display order even if not shown yet
       setLast(scan);
       setHistory((h) => [scan, ...h].slice(0, 8));
     }).then((fn) => { if (cancelled) fn(); else unlisten = fn; });
-    return () => { cancelled = true; if (unlisten) unlisten(); };
+    PPNative.onNsfwOverlay((evt) => {
+      setOverlayEvents((h) => [{ ...evt, ts: Date.now() }, ...h].slice(0, 6));
+    }).then((fn) => { if (cancelled) fn(); else unlistenOverlay = fn; });
+    return () => { cancelled = true; if (unlisten) unlisten(); if (unlistenOverlay) unlistenOverlay(); };
   }, []);
 
   const start = () => { setErr(''); PPNative.startNsfwMonitor().then(() => setRunning(true)).catch((e) => setErr(String(e && e.message || e))); };
@@ -91,6 +111,8 @@ function MonitorPage() {
           </div>
           {last &&
             <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginTop: 10, fontSize: 11.5, opacity: 0.8 }}>
+              {labelFor(last.monitor_id).multi &&
+                <span className="chip" style={{ fontWeight: 700 }}>{labelFor(last.monitor_id).label}</span>}
               <span className="chip">capture {last.capture_ms.toFixed(0)}ms</span>
               <span className="chip">infer {last.infer_ms.toFixed(0)}ms</span>
               <span className="chip">Δ {last.change.toFixed(0)}</span>
@@ -131,8 +153,29 @@ function MonitorPage() {
                   <span style={{ position: 'absolute', bottom: 4, right: 4, padding: '1px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, color: '#fff', background: ppRiskColor(h.nsfw_score) }}>
                     {(h.nsfw_score * 100).toFixed(0)}%
                   </span>
+                  {labelFor(h.monitor_id).multi &&
+                    <span style={{ position: 'absolute', top: 4, left: 4, padding: '1px 6px', borderRadius: 999, fontSize: 9.5, fontWeight: 700, color: '#fff', background: 'rgba(0,0,0,.55)' }}>
+                      {labelFor(h.monitor_id).label}
+                    </span>}
                 </div>
                 <div style={{ fontSize: 10.5, opacity: 0.7, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{h.top_label}</div>
+              </div>
+            )}
+          </div>
+        </div>}
+
+      {/* Action-layer overlay lifecycle (escalated/dismissed) — see overlay.rs */}
+      {overlayEvents.length > 0 &&
+        <div className="card" style={{ padding: 14, marginTop: 18 }}>
+          <div className="nav-label" style={{ marginBottom: 10 }}>Action layer</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {overlayEvents.map((e, i) =>
+              <div key={e.ts + '-' + i} className="row" style={{ gap: 8, fontSize: 12.5, opacity: 0.85 }}>
+                <span className="chip" style={{ fontWeight: 700, color: e.event === 'escalated' ? '#ef4444' : '#22c55e' }}>
+                  {e.event === 'escalated' ? 'Overlay shown' : 'Dismissed'}
+                </span>
+                {labelFor(e.monitor_id).multi && <span className="chip">{labelFor(e.monitor_id).label}</span>}
+                <span>{new Date(e.ts).toLocaleTimeString()}</span>
               </div>
             )}
           </div>

@@ -355,6 +355,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return false;
   }
 
+  if (request.action === 'openPanic') {
+    // Blocked-page SOS button (plan 5.1): forward the deep-link to the desktop
+    // app when it's connected — the desktop surfaces its window and opens the
+    // full panic flow. Best-effort by design: the blocked page runs its own
+    // self-contained in-page flow whether or not this gets through.
+    let forwarded = false;
+    if (typeof NativeMessagingBridge !== 'undefined' &&
+        typeof NativeMessagingBridge.sendOpenPanic === 'function') {
+      forwarded = NativeMessagingBridge.sendOpenPanic();
+    }
+    sendResponse({ forwarded });
+    return true;
+  }
+
   if (request.action === 'isDomainSafe') {
     // Unified whitelist check — single source of truth
     const hostname = (request.hostname || '').toLowerCase();

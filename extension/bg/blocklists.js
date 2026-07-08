@@ -21,7 +21,34 @@ async function loadBlockingSettings() {
     const { ppBlocking } = await chrome.storage.local.get(['ppBlocking']);
     if (ppBlocking && typeof ppBlocking === 'object') blockingSettings = ppBlocking;
   } catch (_) {}
+  // Re-assert the DNR-backed strictness toggle on every worker spawn — ruleset
+  // enable/disable persists across restarts, but re-applying from the cached
+  // settings keeps DNR state honest if it and storage ever drift.
+  applyYouTubeRestrictRuleset();
   return blockingSettings;
+}
+
+// YouTube Restricted Mode (plan 3.4) — an opt-in strictness level, DEFAULT
+// OFF. Implemented as a static declarativeNetRequest ruleset (manifest id
+// `pp_youtube_restrict`, disabled at install) that stamps the documented
+// `YouTube-Restrict: Strict` request header onto *.youtube.com traffic — the
+// same mechanism school/enterprise networks use, so YouTube itself filters
+// server-side. Toggled by the desktop app's blocking settings
+// (`youtubeRestrict` on the same channel as redirectLinkOn/redirectUrl).
+// Wrapped in feature checks: Firefox < 113 and the test harness have no
+// chrome.declarativeNetRequest, and enforcement must degrade silently there.
+const YT_RESTRICT_RULESET_ID = 'pp_youtube_restrict';
+function applyYouTubeRestrictRuleset() {
+  const on = !!(blockingSettings && blockingSettings.youtubeRestrict);
+  try {
+    const dnr = chrome.declarativeNetRequest;
+    if (!dnr || typeof dnr.updateEnabledRulesets !== 'function') return;
+    const p = dnr.updateEnabledRulesets(
+      on ? { enableRulesetIds: [YT_RESTRICT_RULESET_ID] }
+         : { disableRulesetIds: [YT_RESTRICT_RULESET_ID] }
+    );
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch (_) {}
 }
 
 // Cached Set of the built-in domains, for fast "is this a default?" checks.
@@ -95,19 +122,25 @@ loadDefaultListsIntoMemory();
 loadBlockingSettings();
 
 // Cache default lists into variables to send to Desktop app
-// Loads all 3 part files in parallel for fastest cold-start
+// Loads all part files in parallel for fastest cold-start. domains_ai.json is
+// the AI-erotica category (AI-girlfriend/companion sites, NSFW AI image
+// generators, NSFW character-chat frontends, jailbroken chat UIs) — kept as
+// its own file/category like the other parts, merged into the same flat
+// defaultDomains array the matcher already treats every part uniformly.
 async function loadDefaultListsIntoMemory() {
   try {
-    const [r1, r2, r3] = await Promise.all([
+    const [r1, r2, r3, r4] = await Promise.all([
       fetch(chrome.runtime.getURL('blocklists/domains_part1.json')),
       fetch(chrome.runtime.getURL('blocklists/domains_part2.json')),
       fetch(chrome.runtime.getURL('blocklists/domains_part3.json')),
+      fetch(chrome.runtime.getURL('blocklists/domains_ai.json')),
     ]);
-    const [d1, d2, d3] = await Promise.all([r1.json(), r2.json(), r3.json()]);
+    const [d1, d2, d3, d4] = await Promise.all([r1.json(), r2.json(), r3.json(), r4.json()]);
     defaultDomains = [
       ...(d1.domains || []),
       ...(d2.domains || []),
       ...(d3.domains || []),
+      ...(d4.domains || []),
     ];
   } catch(e) {
     console.error('Error caching default lists:', e);

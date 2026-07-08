@@ -7,7 +7,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "purepath@xeno-legit.github.io",
-      "strict_min_version": "109.0"
+      "strict_min_version": "113.0"
     }
   },
   "permissions": [
@@ -17,11 +17,26 @@
     "nativeMessaging",
     "cookies",
     "unlimitedStorage",
-    "alarms"
+    "alarms",
+    "declarativeNetRequest"
   ],
   "host_permissions": [
     "<all_urls>"
   ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "pp_safesearch_static",
+        "enabled": true,
+        "path": "dnr/safesearch.json"
+      },
+      {
+        "id": "pp_youtube_restrict",
+        "enabled": false,
+        "path": "dnr/youtube-restrict.json"
+      }
+    ]
+  },
   "background": {
     "service_worker": "background.js",
     "scripts": [
@@ -66,6 +81,7 @@
         "blocklists/domains_part1.json",
         "blocklists/domains_part2.json",
         "blocklists/domains_part3.json",
+        "blocklists/domains_ai.json",
         "icons/*"
       ],
       "matches": [

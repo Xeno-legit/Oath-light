@@ -181,10 +181,18 @@ pub fn browser_by_key(key: &str) -> Option<&'static BrowserDef> {
 
 /// All running process image names (lowercased), scanned once. Callers reuse
 /// this for both known-browser and custom-browser detection.
+///
+/// Called every monitor tick (every 3s, for the app's whole lifetime), so this
+/// uses `refresh_processes_specifics(ProcessRefreshKind::new())` instead of
+/// `refresh_processes()`: the latter also collects CPU usage, memory, disk
+/// I/O counters, and the exe path for every process on the system, none of
+/// which we read here — only the image name (always populated when
+/// enumerating processes). That's a lot of wasted per-tick work for a
+/// steady-state background poll.
 pub fn running_process_names() -> Vec<String> {
-    use sysinfo::System;
+    use sysinfo::{ProcessRefreshKind, System};
     let mut sys = System::new();
-    sys.refresh_processes();
+    sys.refresh_processes_specifics(ProcessRefreshKind::new());
     sys.processes()
         .values()
         .map(|p| p.name().to_lowercase())

@@ -20,6 +20,51 @@ pub fn capture_primary() -> Result<RgbaImage, String> {
     monitor.capture_image().map_err(|e| format!("capture: {e}"))
 }
 
+/// Capture every connected monitor (multi-monitor blind-spot fix — a second
+/// display used to never be scanned at all). Returns `(monitor id, frame)`
+/// pairs; `Monitor::id()` is fallible on some platforms so a monitor whose id
+/// can't be read is skipped rather than aborting the whole poll, and likewise
+/// a monitor that fails to capture (mid-hot-plug, permissions, a screen that
+/// just went to sleep) is skipped rather than dropping every other display's
+/// frame for the tick. The caller (`run_monitor`) keys its per-monitor
+/// fingerprint/state off this id, so a monitor that vanishes between polls
+/// simply stops appearing here and its state is dropped there.
+pub fn capture_all() -> Result<Vec<(u32, RgbaImage)>, String> {
+    let monitors = Monitor::all().map_err(|e| format!("enumerate monitors: {e}"))?;
+    let mut out = Vec::with_capacity(monitors.len());
+    for m in &monitors {
+        let id = match m.id() {
+            Ok(id) => id,
+            Err(e) => {
+                log::warn!("monitor id unavailable, skipping: {e}");
+                continue;
+            }
+        };
+        match m.capture_image() {
+            Ok(img) => out.push((id, img)),
+            Err(e) => log::warn!("capture failed for monitor {id}: {e}"),
+        }
+    }
+    Ok(out)
+}
+
+/// Physical `(x, y, width, height, scale_factor)` of the still-connected
+/// monitor with this xcap id, or `None` if it's gone (unplugged) or its id
+/// lookup fails. Used to place the action-layer overlay (see `overlay.rs`) on
+/// the exact monitor that triggered it, converting xcap's physical-pixel
+/// geometry to the logical pixels Tauri's window builder expects.
+pub fn monitor_geometry(id: u32) -> Option<(i32, i32, u32, u32, f32)> {
+    let monitors = Monitor::all().ok()?;
+    let m = monitors.iter().find(|m| m.id().ok() == Some(id))?;
+    Some((
+        m.x().ok()?,
+        m.y().ok()?,
+        m.width().ok()?,
+        m.height().ok()?,
+        m.scale_factor().unwrap_or(1.0),
+    ))
+}
+
 /// Downscale to a `size`x`size` grayscale fingerprint for cheap diffing.
 pub fn fingerprint(img: &RgbaImage, size: u32) -> Vec<u8> {
     let small = image::imageops::resize(img, size, size, FilterType::Triangle);

@@ -48,6 +48,7 @@ function makeChromeStub() {
   const noop = () => {};
   const listener = { addListener: noop, removeListener: noop, hasListener: () => false };
   const store = {}; // backing store for chrome.storage.local
+  const dnrCalls = []; // recorded declarativeNetRequest.updateEnabledRulesets args
 
   const asyncGet = (keys) => {
     const r = {};
@@ -85,12 +86,19 @@ function makeChromeStub() {
     cookies: { set: () => Promise.resolve(), get: () => Promise.resolve(null), remove: () => Promise.resolve() },
     alarms: { create: noop, get: () => Promise.resolve(null), onAlarm: listener, clear: noop },
     action: { setBadgeText: noop, setBadgeBackgroundColor: noop },
+    // DNR stub — records updateEnabledRulesets calls so the YouTube-Restrict
+    // opt-in toggle (bg/blocklists.js applyYouTubeRestrictRuleset) is testable.
+    declarativeNetRequest: {
+      updateEnabledRulesets: (opts) => { dnrCalls.push(opts); return Promise.resolve(); },
+      updateDynamicRules: () => Promise.resolve(),
+      getEnabledRulesets: () => Promise.resolve([]),
+    },
   };
-  return { chrome, store };
+  return { chrome, store, dnrCalls };
 }
 
 function makeSandbox() {
-  const { chrome, store } = makeChromeStub();
+  const { chrome, store, dnrCalls } = makeChromeStub();
   const sandbox = {
     chrome, console, URL, URLSearchParams, setTimeout, clearTimeout, setInterval, clearInterval,
     Date, Math, JSON, Set, Map, Promise,
@@ -100,7 +108,7 @@ function makeSandbox() {
   sandbox.self = sandbox;
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  return { sandbox, store };
+  return { sandbox, store, dnrCalls };
 }
 
 // Evaluate the Firefox `background.scripts` order: each bg/ file then
@@ -130,14 +138,15 @@ function loadChromeOrder(sandbox, filesLoaded) {
   if (filesLoaded) filesLoaded.push(ENTRY_FILE);
 }
 
-// mode: 'firefox' (default) or 'chrome'. Returns { sandbox, store, filesLoaded }.
+// mode: 'firefox' (default) or 'chrome'.
+// Returns { sandbox, store, filesLoaded, dnrCalls }.
 function buildSandbox(opts) {
   const mode = (opts && opts.mode) || 'firefox';
-  const { sandbox, store } = makeSandbox();
+  const { sandbox, store, dnrCalls } = makeSandbox();
   const filesLoaded = [];
   if (mode === 'chrome') loadChromeOrder(sandbox, filesLoaded);
   else loadFirefoxOrder(sandbox, filesLoaded);
-  return { sandbox, store, filesLoaded };
+  return { sandbox, store, filesLoaded, dnrCalls };
 }
 
 module.exports = { buildSandbox, makeSandbox, BG_FILES, ENTRY_FILE, EXT_ROOT, readExt };

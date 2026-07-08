@@ -74,6 +74,17 @@ function Sidebar({ s, go }) {
         )}
       </nav>
 
+      {/* Panic / SOS (5.1) — deliberately its own section, always visible,
+          never buried in the page list. Also reachable from the tray item,
+          Ctrl+Shift+Space, and the extension's blocked page. */}
+      <div className="nav-label" style={{ marginTop: 16 }}>Support</div>
+      <nav className="nav">
+        <button className={'nav-item nav-sos' + (s.page === 'panic' ? ' active' : '')} onClick={() => go('panic')}>
+          <IconHeart />
+          <span>SOS — I need help</span>
+        </button>
+      </nav>
+
       <div className="sidebar-foot">
         <div className="divider" style={{ margin: '10px 6px 12px' }} />
         <div className={'user-card' + (s.page === 'settings' ? ' active' : '')} onClick={() => go('settings')}>
@@ -92,7 +103,7 @@ function Sidebar({ s, go }) {
 /* ---------- HUB MENU (starting page) ---------- */
 const HUB_CARDS = [
 { id: 'overview', icon: IconGrid, title: 'Overview', desc: 'Your streak, progress and daily intention at a glance.', stat: (s) => `Day ${s.streak}` },
-{ id: 'blocklist', icon: IconShield, title: 'Blocklist', desc: 'Check what gets blocked — blacklist, graylist and custom sites.', stat: (s) => `${s.blocklist.blacklistDomains} domains` },
+{ id: 'blocklist', icon: IconShield, title: 'Blocklist', desc: 'Check what gets blocked — blacklist, graylist and custom sites.', stat: () => 'Blocklist' },
 { id: 'blocking', icon: IconSliders, title: 'Blocking Settings', desc: 'Strictness, schedules and tamper protection.', stat: (s) => 'Manage settings' },
 { id: 'mentor', icon: IconChat, title: 'Personal Mentor', desc: 'A calm companion for the hard moments. Always here.', stat: () => 'Coming soon' },
 { id: 'tips', icon: IconSpark, title: 'Tips & Questions', desc: 'Questions you might encounter, and tips to guide you.', stat: () => '15 items' },
@@ -103,6 +114,9 @@ function HubMenu({ s, go }) {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const name = s.profile.name.split(' ')[0];
+  // Live domain count for the Blocklist card's stat chip (null until loaded /
+  // outside Tauri) — guarded so a not-yet-wired hook can't crash the hub.
+  const counts = (window.useBlocklistCounts || (() => null))();
   return (
     <div className="page hub" style={{ maxWidth: 1040 }}>
       <div className="beta-banner fade-up" role="note">
@@ -127,17 +141,25 @@ function HubMenu({ s, go }) {
       </div>
 
       <div className="grid hub-grid stagger" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginTop: 40 }}>
-        {HUB_CARDS.map((c) =>
-        <button key={c.id} className="card hover hub-card" onClick={() => go(c.id)}>
-            <div className="hub-card-ico"><c.icon size={22} /></div>
-            <div className="hub-card-title">{c.title}</div>
-            <div className="hub-card-desc">{c.desc}</div>
-            <div className="hub-card-foot">
-              <span className="chip">{c.stat(s)}</span>
-              <IconChevron size={18} className="hub-arrow" />
-            </div>
-          </button>
-        )}
+        {HUB_CARDS.map((c) => {
+          // Blocklist's stat is a live count sourced from the real backend
+          // list, not the card's own stat() fn — every other card keeps the
+          // plain stat-function architecture.
+          const stat = c.id === 'blocklist' ?
+          counts ? `${counts.domain_count.toLocaleString()} domains` : 'View list' :
+          c.stat(s);
+          return (
+            <button key={c.id} className="card hover hub-card" onClick={() => go(c.id)}>
+              <div className="hub-card-ico"><c.icon size={22} /></div>
+              <div className="hub-card-title">{c.title}</div>
+              <div className="hub-card-desc">{c.desc}</div>
+              <div className="hub-card-foot">
+                <span className="chip">{stat}</span>
+                <IconChevron size={18} className="hub-arrow" />
+              </div>
+            </button>);
+
+        })}
       </div>
     </div>);
 

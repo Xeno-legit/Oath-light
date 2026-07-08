@@ -523,7 +523,12 @@ const SEARCH_ENGINES = [
   { id: 'yandex',     tier: 2, re: /^(www\.)?yandex\.[a-z]{2,3}(\.[a-z]{2})?$|^ya\.ru$/, qkeys: ['text', 'q'], param: 'family',     value: 'yes' },
   { id: 'brave',      tier: 2, re: /^search\.brave\.com$/,                               qkeys: ['q'],          param: 'safesearch', value: 'strict' },
   { id: 'qwant',      tier: 2, re: /^(www\.)?qwant\.com$/,                               qkeys: ['q'],          param: 'safesearch', value: '2' },
-  { id: 'ecosia',     tier: 2, re: /^(www\.)?ecosia\.org$/,                              qkeys: ['q'] },
+  // Ecosia DOES honour a URL param (verified against its settings UI and the
+  // serv-inc/safe-search enforcement addon): safesearch=2 = strict. (The plan
+  // doc said `sfsg=strict` — that param doesn't exist; 2 is the strict value,
+  // same scheme as Qwant.) The existing safesearch=0/off bypass check above
+  // already covers attempts to force it back off.
+  { id: 'ecosia',     tier: 2, re: /^(www\.)?ecosia\.org$/,                              qkeys: ['q'],          param: 'safesearch', value: '2' },
   { id: 'startpage',  tier: 2, re: /^(www\.)?startpage\.com$/,                           qkeys: ['query', 'q'] },
   { id: 'mojeek',     tier: 2, re: /^(www\.)?mojeek\.com$/,                              qkeys: ['q'] },
   { id: 'swisscows',  tier: 2, re: /^(www\.)?swisscows\.com$/,                           qkeys: ['query', 'q'] },
@@ -575,9 +580,42 @@ function readSearchQuery(urlObj, qkeys) {
   return null;
 }
 
+// Direct image-CDN access (plan 3.4) — the raw thumbnail servers BEHIND the
+// engines' image search. An image-search result grid is just <img> tags into
+// these hosts, so copying a thumbnail URL (or a "view image" deep link) into
+// the address bar serves the NSFW image with zero engine-side SafeSearch and
+// zero SEARCH_ENGINES coverage (the CDN hostnames don't match any engine
+// regex). Only ever consulted for top-level navigations / frame loads via
+// shouldBlockUrl — embedded <img> subresources on normal pages never reach
+// this code path, so blocking here can't break Bing/Yandex thumbnails
+// legitimately inlined elsewhere.
+function isDirectImageCdn(urlObj) {
+  const h = urlObj.hostname.toLowerCase();
+  // Bing thumbnails: tse1–tse4.mm.bing.net + th.bing.com, all under /th?id=…
+  // Path-gated so unrelated bing.net infrastructure hosts stay untouched.
+  if ((h === 'th.bing.com' || h === 'bing.net' || h.endsWith('.bing.net')) &&
+      /^\/th([\/?]|$)/.test(urlObj.pathname)) return true;
+  // Yandex image thumbnails: the im0-tub-{ru,com,…}.yandex.net farm serves
+  // /i?id=… previews; avatars.mds.yandex.net/get-images-* is the full-size
+  // image store behind yandex.com/images (path-gated — avatars.mds also hosts
+  // benign service icons under other /get-* namespaces).
+  if (/^im\d+-tub[a-z0-9-]*\.yandex\.net$/.test(h)) return true;
+  if (h === 'avatars.mds.yandex.net' && /^\/get-images/.test(urlObj.pathname)) return true;
+  return false;
+}
+
 // SAFESEARCH ENFORCEMENT (always-on)
 
 function checkSearchEngineSafeSearch(url, hostname) {
+  // Image-CDN direct access is checked BEFORE the engine table — the CDN
+  // hosts aren't search frontends, so matchSearchEngine can never see them.
+  try {
+    const cdnUrl = new URL(url);
+    if (isDirectImageCdn(cdnUrl)) {
+      return { blocked: true, reason: 'search_media_uncovered', match: cdnUrl.hostname + ' image CDN direct', tier: 'blacklist', hostname };
+    }
+  } catch (_) {}
+
   const se = matchSearchEngine(hostname);
   if (!se) return null;
 
@@ -824,6 +862,49 @@ const KEYWORD_COMPOUNDS = [
   'analsex', 'analporn', 'analcreampie'
 ];
 
+// AI-erotica COMPOUNDS (plan item 3.3) — the AI-girlfriend/companion-bot and
+// jailbroken-chat naming trend pairs a common English word ("girlfriend",
+// "boyfriend", "companion", "waifu", "nude", "lewd") with "ai"/"gpt", the same
+// way cum/ass/tit/pussy/cock/dick above are compound-only: the bare word alone
+// is common-word collision-heavy (see below), but nobody accidentally names a
+// website "aigirlfriend" or "nsfwgpt".
+//   - 'nsfwai'/'ainsfw'/'nsfwgpt'/'gptnsfw'/'hentaiai'/'aihentai'/'aiwaifu'/
+//     'waifuai' are already reachable via the existing bare 'nsfw'/'hentai'/
+//     'waifu' STRONG stems above — kept explicit anyway for readability/intent
+//     and because compounds are checked with zero whitelist escape (unlike
+//     guarded roots), so they're worth pinning down with their own tests.
+//   - Deliberately did NOT add bare 'girlfriend'/'boyfriend'/'companion' as a
+//     GUARDED root: "companion" collides with real senior-care/travel-
+//     insurance brands (CompanionLife, travel companion services, senior
+//     "companion aide" care) and "girlfriend"/"boyfriend" collide with dating/
+//     entertainment sites generally — guarding them would need a whitelist the
+//     size of the English language. Compound-only sidesteps that entirely.
+//   - Also deliberately did NOT add 'companionai'/'companionaide'-shaped
+//     suffix compounds (real collision: senior-care "Companion Aide" services)
+//     or bare 'jailbreak'-anything (collides with legitimate iOS-jailbreak and
+//     AI-safety/"uncensored LLM" research discourse). 'unfilteredai'/
+//     'uncensoredai' were considered and DROPPED for the same reason
+//     (foreseeable collision with legit open-source "uncensored LLM" research
+//     naming) even though a couple of confirmed NSFW brands use that exact name
+//     — those are handled as exact domain entries in domains_ai.json instead,
+//     where an exact-match blocklist carries no substring false-positive risk.
+//     'tavernai' (TavernAI, the jailbroken-chat frontend) was likewise DROPPED
+//     — it sits inside real Greek restaurant names ("tavernaithaki" = Taverna
+//     Ithaki) and compounds have zero whitelist escape; tavernai.net /
+//     nsfwtavern.ai are exact entries in domains_ai.json.
+//   - 'aicompanion' is NOT here either — every "-ai"-final word + "companion"
+//     contains it (bonsaicompanion, samuraicompanion), so it needs the
+//     whitelist-escape machinery: it's a GUARDED root below.
+const KEYWORD_COMPOUNDS_AI_EROTICA = [
+  'aigirlfriend', 'girlfriendai', 'virtualgirlfriend',
+  'aiboyfriend', 'boyfriendai', 'virtualboyfriend',
+  'nsfwai', 'ainsfw', 'nsfwgpt', 'gptnsfw',
+  'hentaiai', 'aihentai',
+  'aiwaifu', 'waifuai',
+  'lewdai', 'nudeai', 'ainude'
+];
+KEYWORD_COMPOUNDS.push(...KEYWORD_COMPOUNDS_AI_EROTICA);
+
 // Guarded roots — substring match, but excused by whitelist coverage.
 const KEYWORD_ROOTS_GUARDED = [
   // NB: cock & dick are NOT here — like cum/ass/tit/pussy they are COMPOUND-ONLY
@@ -848,7 +929,12 @@ const KEYWORD_ROOTS_GUARDED = [
   // demoted via the wordlist audit (audit-wordlist.cjs):
   'pillu', 'gooning', 'zoophil',
   // bocha (MR) was strong → collided with turbo-charge/turbo-charger (trap: bochar):
-  'bocha'
+  'bocha',
+  // AI-erotica (plan 3.3): 'aicompanion' is the companion-bot ecosystem's
+  // generic self-description, but any "-ai"-final word + "companion" contains
+  // it (bonsaicompanion, samuraicompanion — traps below), so it can't be a
+  // zero-escape compound like the aigirlfriend/nsfwgpt family above.
+  'aicompanion'
 ];
 
 // Whitelist of real words that legitimately contain a guarded root. A guarded
@@ -1020,7 +1106,12 @@ const KEYWORD_WHITELIST_WORDS = [
   // gooning (demoted) → dragooning:
   'dragooning',
   // zoophil (demoted) → zoophilous/zoophily (ecology — pollinated by animals):
-  'zoophilou', 'zoophily'
+  'zoophilou', 'zoophily',
+  // aicompanion → "-ai"-final word + companion: bonsai/samurai/acai companion
+  // apps (gardening guides, game-guide sites, nutrition). NB deliberately NOT
+  // excusing thai/dubai + companion — "companion" in those geo pairings is
+  // escort vocabulary, exactly what the root is for.
+  'bonsaicompanion', 'samuraicompanion', 'acaicompanion'
 ];
 
 // Pre-index whitelist words by the guarded root they contain (perf + clarity).

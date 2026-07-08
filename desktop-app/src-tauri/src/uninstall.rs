@@ -210,6 +210,12 @@ pub fn cooloff_elapsed_at(path: &std::path::Path) -> bool {
 // exit, then deletes the install directory and the app-data directory itself.
 // This works even when the installer's own uninstaller is long gone, and it is
 // what makes the timer-driven removal actually finish.
+//
+// Not depending on `uninstall.exe` doesn't mean ignoring it: when it IS still
+// present, the batch runs it (silently) first, once our processes are gone —
+// that's the only thing that cleans up what the raw rmdirs can't reach (Start
+// Menu / desktop shortcuts, the installer's registry state). The rmdirs then
+// sweep whatever the uninstaller left (or everything, if it was missing).
 
 /// Outcome of kicking off removal.
 pub enum LaunchResult {
@@ -307,9 +313,12 @@ fn validate_app_data_dir(dir: &std::path::Path) -> bool {
         && dir.file_name().and_then(|n| n.to_str()) == Some(APP_IDENTIFIER)
 }
 
-/// Spawn a detached worker that waits for Pure Path's processes to exit, then
-/// deletes the install directory and the app-data directory — a self-contained
-/// uninstall that needs no external uninstaller. Returns `Launched` once the
+/// Spawn a detached worker that waits for Pure Path's processes to exit, runs
+/// the NSIS `uninstall.exe` silently if it's still present (shortcuts + the
+/// installer's own registry state only come off natively), then deletes the
+/// install directory and the app-data directory — a self-contained uninstall
+/// that needs no external uninstaller but uses one when it can. Returns
+/// `Launched` once the
 /// worker is running (the caller should then exit the app), or `NotFound` if it
 /// couldn't be started (including: either path failed validation, in which case
 /// nothing is written and nothing is touched).
@@ -443,6 +452,11 @@ pub fn spawn_self_delete(app_data_dir: &std::path::Path) -> LaunchResult {
          goto forcecheck\r\n\
          \r\n\
          :afterwait\r\n\
+         if not exist \"%PUREPATH_RM_INSTALL%\\uninstall.exe\" goto sweep\r\n\
+         start \"\" /wait \"%PUREPATH_RM_INSTALL%\\uninstall.exe\" /S\r\n\
+         ping -n 3 127.0.0.1 >nul\r\n\
+         \r\n\
+         :sweep\r\n\
          set /a RETRY=0\r\n\
          :deleteloop\r\n\
          rmdir /s /q \"%PUREPATH_RM_INSTALL%\" 2>nul\r\n\
@@ -453,7 +467,7 @@ pub fn spawn_self_delete(app_data_dir: &std::path::Path) -> LaunchResult {
          \r\n\
          :retrydelete\r\n\
          set /a RETRY+=1\r\n\
-         if %RETRY% GEQ 3 goto selfdelete\r\n\
+         if %RETRY% GEQ 5 goto selfdelete\r\n\
          ping -n 2 127.0.0.1 >nul\r\n\
          goto deleteloop\r\n\
          \r\n\

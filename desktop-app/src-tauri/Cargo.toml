@@ -35,3 +35,29 @@ image = "0.25"
 xcap = "0.9"
 # Base64-encode the scan thumbnail sent to the UI as a data URL.
 base64 = "0.22"
+
+# Windows API access for the action-layer overlay (overlay.rs): marks the
+# overlay window WDA_EXCLUDEFROMCAPTURE so the screen monitor never scans its
+# own interrupt. Version pinned to match what `tauri` itself already pulls in
+# (its HWND type must be the exact same crate version as ours) so this adds
+# no new major version to the dependency tree.
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.61"
+features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"]
+
+# Panic/SOS global hotkey (Ctrl+Shift+Space opens the urge-surfing flow from
+# anywhere — plan item 5.1). The plugin only supports desktop platforms, so
+# it's declared for desktop targets exactly as its docs prescribe.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-global-shortcut = "2"
+
+# The exe embeds ~10MB of blocklists plus the ORT runtime; a smaller binary
+# means less disk I/O at login, which is part of what Windows' startup-impact
+# score measures. opt-level stays at its default (3) — image
+# preprocessing/inference for the NSFW layer wants it — and panic stays at the
+# default (unwind): abort would change failure behavior for no meaningful size
+# win on a binary dominated by embedded data.
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"

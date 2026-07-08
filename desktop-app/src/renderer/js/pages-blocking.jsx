@@ -173,6 +173,91 @@ function BlockingPage({ s, PP }) {
         )}
       </div>
 
+      {/* tamper protection & enforcement */}
+      <div className="card fade-up" style={{ marginTop: 18 }}>
+        <div style={{ fontWeight: 800, fontSize: 16 }}>Tamper protection &amp; enforcement</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, marginBottom: 18, maxWidth: '60ch', lineHeight: 1.5 }}>
+          What actually stops you from working around Pure Path — and what's still on the way.
+        </div>
+
+        {/* real, backend-enforced */}
+        <div className="setting">
+          <div className="ico"><IconShield size={20} /></div>
+          <div className="txt">
+            <b>Uninstall guard</b>
+            <span>Arms the monitor that re-applies the extension's force-install policy if it's removed — full auto-restore switches on at release</span>
+          </div>
+          <Switch on={b.uninstallGuard} onClick={() => toggle('uninstallGuard')} />
+        </div>
+
+        {/* SafeSearch is enforced unconditionally by the extension — there's
+            genuinely no switch for this, so we don't pretend there is one. */}
+        <div className="setting">
+          <div className="ico"><IconSearch size={20} /></div>
+          <div className="txt">
+            <b>SafeSearch enforcement</b>
+            <span>Forced on every connected browser, permanently — it can't be turned off, on purpose</span>
+          </div>
+          <span className="chip" style={{ color: 'var(--accent-2)' }}>Always on</span>
+        </div>
+
+        {/* YouTube Restricted Mode — opt-in strictness, default OFF. The browser
+            extension enforces it with a YouTube-Restrict: Strict header rule
+            (the same mechanism school networks use), pushed down on the same
+            channel as the redirect settings. */}
+        <div className="setting">
+          <div className="ico"><IconShield size={20} /></div>
+          <div className="txt">
+            <b>YouTube Restricted Mode (strict)</b>
+            <span>Opt-in: the browser extension applies YouTube's strict Restricted Mode via a header rule, so YouTube filters mature videos & comments server-side</span>
+          </div>
+          <Switch on={!!b.youtubeRestrict} onClick={() => toggle('youtubeRestrict')} />
+        </div>
+
+        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', margin: '22px 0 4px' }}>
+          Coming soon
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>
+          Not built yet — shown honestly here instead of as a switch that would quietly do nothing.
+        </div>
+
+        <div className="setting">
+          <div className="ico"><IconGrid size={20} /></div>
+          <div className="txt">
+            <b>App blocking</b>
+            <span>Block distracting or explicit desktop apps, not just browser sites</span>
+          </div>
+          <div className="row" style={{ gap: 10 }}>
+            <span className="chip">Coming in Phase 4</span>
+            <Switch on={false} disabled />
+          </div>
+        </div>
+
+        <div className="setting">
+          <div className="ico"><IconMoon size={20} /></div>
+          <div className="txt">
+            <b>Incognito blocking</b>
+            <span>Stop private/incognito windows from being used to slip past filters</span>
+          </div>
+          <div className="row" style={{ gap: 10 }}>
+            <span className="chip">Coming in Phase 4</span>
+            <Switch on={false} disabled />
+          </div>
+        </div>
+
+        <div className="setting">
+          <div className="ico"><IconLock size={20} /></div>
+          <div className="txt">
+            <b>Settings lock</b>
+            <span>Password-protect Pure Path's settings so they can't be changed without you</span>
+          </div>
+          <div className="row" style={{ gap: 10 }}>
+            <span className="chip">Coming in Alpha</span>
+            <Switch on={false} disabled />
+          </div>
+        </div>
+      </div>
+
     </div>);
 
 }

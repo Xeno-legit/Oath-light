@@ -160,13 +160,18 @@ function UninstallCard() {
 function SettingsPage({ s, PP }) {
   const p = s.profile;
   const setP = (patch) => PP.set({ profile: patch });
-  const toggleN = (k) => PP.set({ notif: { [k]: !s.notif[k] } });
+  const [editing, setEditing] = React.useState(false);
 
-  const NOTIFS = [
-    { k: 'daily', icon: IconSun, t: 'Daily intention', d: 'A gentle morning message to set the tone.' },
-    { k: 'milestone', icon: IconFlame, t: 'Milestone celebrations', d: 'Cheer you on at 7, 30, 90 days and beyond.' },
-    { k: 'urge', icon: IconShield, t: 'Urge check-ins', d: 'Occasional nudges during your vulnerable hours.' },
-    { k: 'weekly', icon: IconArrowUp, t: 'Weekly progress recap', d: 'A short summary of your week every Sunday.' },
+  // The real reminders — same array the Blocking page edits (shared store
+  // state), toggled the same way as pages-blocking.jsx's toggleAlert.
+  const b = s.blocking;
+  const toggleAlert = (id) => PP.set({ blocking: { alerts: b.alerts.map((x) => x.id === id ? { ...x, on: !x.on } : x) } });
+
+  // Not built yet — an honest disabled row beats a toggle that does nothing.
+  const COMING_NOTIFS = [
+    { icon: IconSun, t: 'Daily intention', d: 'A gentle morning message to set the tone.' },
+    { icon: IconFlame, t: 'Milestone celebrations', d: 'Cheer you on at 7, 30, 90 days and beyond.' },
+    { icon: IconArrowUp, t: 'Weekly progress recap', d: 'A short summary of your week every Sunday.' },
   ];
 
   return (
@@ -189,10 +194,11 @@ function SettingsPage({ s, PP }) {
             </div>
           )}
         </div>
-        <button className="btn btn-ghost">Edit profile</button>
+        <button className="btn btn-ghost" onClick={() => setEditing((v) => !v)}>{editing ? 'Done' : 'Edit profile'}</button>
       </div>
 
-      {/* fields */}
+      {/* fields — shown only while editing; they already persist live to the store */}
+      {editing &&
       <div className="card fade-up" style={{ marginTop: 18 }}>
         <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 6 }}>Profile details</div>
         <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', marginTop: 8 }}>
@@ -200,15 +206,36 @@ function SettingsPage({ s, PP }) {
           <label className="field"><span>Email</span><input className="input" value={p.email} onChange={(e) => setP({ email: e.target.value })} /></label>
         </div>
       </div>
+      }
 
       {/* notifications */}
       <div className="card fade-up" style={{ marginTop: 18 }}>
         <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Notifications</div>
-        {NOTIFS.map((n) => (
-          <div className="setting" key={n.k}>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>
+          These are the real check-in reminders — they show up in the browser during your vulnerable hours (set on the Blocking Settings page).
+        </div>
+        {b.alerts.map((a) => (
+          <div className="setting" key={a.id}>
+            <div className="ico"><IconBell size={20} /></div>
+            <div className="txt"><b>{a.label}</b><span>{a.desc}</span></div>
+            <Switch on={a.on} onClick={() => toggleAlert(a.id)} />
+          </div>
+        ))}
+
+        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', margin: '22px 0 4px' }}>
+          Coming soon
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>
+          Not built yet — shown honestly here instead of a switch that would quietly do nothing.
+        </div>
+        {COMING_NOTIFS.map((n) => (
+          <div className="setting" key={n.t}>
             <div className="ico"><n.icon size={20} /></div>
             <div className="txt"><b>{n.t}</b><span>{n.d}</span></div>
-            <Switch on={s.notif[n.k]} onClick={() => toggleN(n.k)} />
+            <div className="row" style={{ gap: 10 }}>
+              <span className="chip">Coming in Alpha</span>
+              <Switch on={false} disabled />
+            </div>
           </div>
         ))}
       </div>

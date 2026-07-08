@@ -442,6 +442,18 @@
   --orb-a: #fcd34d; --orb-b: #fb923c; --orb-c: #fbbf24;
 }
 
+/* ---- NOIR (black & white — pure monochrome) ---- */
+[data-style="noir"][data-theme="dark"] {
+  --bg-0: #0a0a0a; --bg-1: #121212; --text: #f2f2f2; --text-2: #b8b8b8; --muted: #7a7a7a;
+  --accent: #ffffff; --accent-2: #cfcfcf; --accent-3: #8f8f8f;
+  --orb-a: #3a3a3a; --orb-b: #5c5c5c; --orb-c: #262626;
+}
+[data-style="noir"][data-theme="light"] {
+  --bg-0: #fafafa; --bg-1: #ffffff; --text: #111111; --text-2: #3d3d3d; --muted: #7a7a7a;
+  --accent: #111111; --accent-2: #3d3d3d; --accent-3: #6e6e6e;
+  --orb-a: #d4d4d4; --orb-b: #bcbcbc; --orb-c: #e4e4e4;
+}
+
 /* per-style desktop bg override (dark) */
 [data-style="midnight"][data-theme="dark"] { --desktop: radial-gradient(120% 120% at 80% -10%, #142040 0%, #0d1625 55%, #080f1e 100%); }
 [data-style="forest"][data-theme="dark"]   { --desktop: radial-gradient(120% 120% at 80% -10%, #122018 0%, #0c1810 55%, #080f09 100%); }
@@ -449,6 +461,8 @@
 [data-style="midnight"][data-theme="light"]{ --desktop: radial-gradient(120% 120% at 80% -10%, #dce8ff 0%, #d0dcf8 55%, #c8d4f0 100%); }
 [data-style="forest"][data-theme="light"]  { --desktop: radial-gradient(120% 120% at 80% -10%, #d8f0e0 0%, #cde8d5 55%, #c4e0cc 100%); }
 [data-style="ember"][data-theme="light"]   { --desktop: radial-gradient(120% 120% at 80% -10%, #ffecd8 0%, #ffe4cc 55%, #ffdcc0 100%); }
+[data-style="noir"][data-theme="dark"]     { --desktop: radial-gradient(120% 120% at 80% -10%, #1a1a1a 0%, #0e0e0e 55%, #050505 100%); }
+[data-style="noir"][data-theme="light"]    { --desktop: radial-gradient(120% 120% at 80% -10%, #f0f0f0 0%, #e8e8e8 55%, #dedede 100%); }
 
 /* ============================================================
    RESET / BASE
@@ -689,6 +703,7 @@ input, textarea { font-family: inherit; }
 .switch::after { content:''; position:absolute; top:3px; left:3px; width:21px; height:21px; border-radius:50%; background:#fff; box-shadow: 0 2px 6px rgba(0,0,0,.3); transition: transform .26s var(--ease); }
 .switch.on { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
 .switch.on::after { transform: translateX(19px); }
+.switch:disabled { opacity:.45; cursor:not-allowed; pointer-events:none; }
 
 /* segmented control */
 .seg { display:inline-flex; padding:4px; gap:3px; background: var(--glass-2); border:1px solid var(--glass-brd); border-radius:13px; }
@@ -1149,3 +1164,72 @@ input, textarea { font-family: inherit; }
    ============================================================ */
 .field { display:flex; flex-direction:column; gap:7px; }
 .field > span { font-size:13px; font-weight:700; color: var(--text-2); }
+
+/* ============================================================
+   PANIC / SOS FLOW (pages-panic.jsx — plan item 5.1)
+   ============================================================ */
+.panic-page {
+  max-width: 720px;
+  min-height: 100%;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+}
+
+/* SOS sidebar entry — quietly distinct without shouting */
+.nav-item.nav-sos { color: var(--accent); font-weight: 700; }
+.nav-item.nav-sos svg { color: var(--accent); opacity: 1; }
+
+/* Box breathing: the ring expands (in), holds, contracts (out), holds —
+   4s per phase, 16s per cycle. CSS-only; the label/counter sync in JS. */
+.panic-breath-wrap { display: flex; flex-direction: column; align-items: center; gap: 22px; }
+.panic-breath-ring {
+  width: 170px; height: 170px; border-radius: 50%;
+  background: color-mix(in oklab, var(--accent) 13%, transparent);
+  border: 2px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  box-shadow: 0 0 60px -18px color-mix(in oklab, var(--accent) 70%, transparent);
+  animation: panic-breathe 16s var(--ease-soft) infinite;
+}
+@keyframes panic-breathe {
+  0%   { transform: scale(.66); }
+  25%  { transform: scale(1); }
+  50%  { transform: scale(1); }
+  75%  { transform: scale(.66); }
+  100% { transform: scale(.66); }
+}
+.panic-breath-label {
+  display: inline-flex; align-items: baseline; gap: 10px;
+  font-size: 15px; font-weight: 700; color: var(--text-2);
+}
+.panic-breath-count {
+  font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+/* The wave message */
+.panic-wave-copy {
+  font-size: 17.5px; line-height: 1.7; color: var(--text);
+  text-wrap: pretty;
+}
+
+/* Grounding 5-4-3-2-1 */
+.panic-ground-count {
+  font-size: 72px; font-weight: 800; line-height: 1;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.panic-ground-sense {
+  font-size: 13px; font-weight: 800; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--muted); margin-top: 6px;
+}
+.panic-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: color-mix(in oklab, var(--text) 18%, transparent);
+  transition: background .3s var(--ease);
+}
+.panic-dot.on { background: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .panic-breath-ring { animation: none; transform: scale(.85); }
+}

@@ -28,10 +28,17 @@ pub struct ProfileExt {
     pub version: String,
 }
 
-const CACHE_TTL: Duration = Duration::from_secs(8);
+const CACHE_TTL: Duration = Duration::from_secs(30);
 
 /// Cached per-browser profile read (prefs files are large-ish; don't parse them
 /// every monitor tick). `None` = this browser's data couldn't be located.
+///
+/// 30s trades off extension-removal detection latency (worst case, ≤30s
+/// before we notice the extension is gone) against steady-state cost: these
+/// are multi-MB Chromium "Secure Preferences"/"Preferences" JSON files, and at
+/// the old 8s TTL they were re-parsed roughly 4x as often for no benefit — 30s
+/// is still far below the uninstall-friction cool-off timescale (minutes to
+/// hours), so it costs us nothing that actually matters for tamper resistance.
 pub fn cached_profiles(def: &BrowserDef) -> Option<Vec<ProfileExt>> {
     static CACHE: OnceLock<Mutex<HashMap<String, (Instant, Option<Vec<ProfileExt>>)>>> =
         OnceLock::new();

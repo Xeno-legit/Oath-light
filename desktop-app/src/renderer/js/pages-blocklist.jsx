@@ -5,7 +5,10 @@ const BLACKLIST_KEYWORDS = ['porn', 'xxx', 'xvideos', 'adult', 'nsfw', 'sex', 'n
 function cleanDomain(q) {
   return q.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
 }
-function checkBlacklist(q) {
+// Fallback heuristic used only when the native bridge isn't available (e.g.
+// running outside Tauri) — the old 12-domain + keyword guess, kept exactly
+// as it was so the app still shows *something* in a browser preview.
+function checkBlacklistLocal(q) {
   const d = cleanDomain(q);
   if (!d) return null;
   const blocked = BLACKLIST_KNOWN.some((x) => d === x || d.includes(x) || x.includes(d)) ||
@@ -22,14 +25,60 @@ function checkGraylist(q, graylist) {
 function BlocklistPage({ s, PP }) {
   const [tab, setTab] = React.useState('blocked');
   const [blackQuery, setBlackQuery] = React.useState('');
+  const [blackResult, setBlackResult] = React.useState(null);
   const [grayQuery, setGrayQuery] = React.useState('');
   const [grayOpen, setGrayOpen] = React.useState(false);
   const [newSite, setNewSite] = React.useState('');
   const bl = s.blocklist;
+  // Live, real domain/keyword counts from the actual blocklist (~385k
+  // domains) — null until loaded or outside Tauri. Guarded this way (rather
+  // than calling window.useBlocklistCounts() directly) so this page doesn't
+  // crash if the hook isn't wired up yet; it's still called unconditionally
+  // every render, so it stays hook-rule safe.
+  const counts = (window.useBlocklistCounts || (() => null))();
+  const domainCountText = counts ? counts.domain_count.toLocaleString() : '—';
+
+  // Blacklist search: the keyword heuristic is instant and local (it mirrors
+  // what the extension actually blocks on the fly), but the domain verdict
+  // now comes from the real backend list instead of a 12-site guess. Debounced
+  // and guarded against stale/out-of-order responses.
+  const blackSeq = React.useRef(0);
+  React.useEffect(() => {
+    const d = cleanDomain(blackQuery);
+    if (!d) { setBlackResult(null); return; }
+    const seq = ++blackSeq.current;
+    const keywordHit = BLACKLIST_KEYWORDS.some((k) => d.includes(k));
+    const nativeAvailable = !!(window.PPNative && window.PPNative.available &&
+      typeof window.PPNative.checkDomainBlocked === 'function');
+
+    if (!nativeAvailable) {
+      setBlackResult(checkBlacklistLocal(blackQuery));
+      return;
+    }
+
+    // Clear the previous verdict while the new check is in flight — showing
+    // a stale result for a *different* domain, even briefly, is a small lie.
+    setBlackResult(null);
+    const t = setTimeout(() => {
+      window.PPNative.checkDomainBlocked(d)
+        .then((res) => {
+          if (seq !== blackSeq.current) return; // a newer query has since started
+          setBlackResult({ domain: d, blocked: !!(res && res.blocked) || keywordHit });
+        })
+        .catch(() => {
+          if (seq !== blackSeq.current) return;
+          setBlackResult(checkBlacklistLocal(blackQuery));
+        });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [blackQuery]);
 
   function addSite() {
-    const url = newSite.trim().replace(/^https?:\/\//, '');
+    // Same normalization the backend and extension apply, so the list shows
+    // exactly the domain that will be blocked.
+    const url = cleanDomain(newSite);
     if (!url) return;
+    if (bl.customSites.some((x) => x.url === url)) { setNewSite(''); return; }
     const list = [...bl.customSites, { id: Date.now(), url, added: 'just now' }];
     PP.set({ blocklist: { customSites: list } });
     setNewSite('');
@@ -41,7 +90,6 @@ function BlocklistPage({ s, PP }) {
     PP.put('blocklist', { ...bl, allow: bl.allow.filter((x) => x.id !== id) });
   }
 
-  const blackResult = checkBlacklist(blackQuery);
   const grayResult = checkGraylist(grayQuery, bl.graylist);
 
   return (
@@ -68,7 +116,7 @@ function BlocklistPage({ s, PP }) {
             <div className="panel-head">
               <div className="ico" style={{ background: 'color-mix(in oklab, #d9534f 16%, transparent)', color: '#d9534f' }}><IconShieldOff size={20} /></div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="panel-title">Blacklist <span className="chip" style={{ marginLeft: 6, color: '#d9534f' }}>{bl.blacklistDomains} domains</span></div>
+                <div className="panel-title">Blacklist <span className="chip" style={{ marginLeft: 6, color: '#d9534f' }}>{domainCountText} domains</span></div>
                 <div className="panel-sub">Sites that are <b>explicit by nature</b> — pornography and adult media. Blocked entirely, the instant they're detected.</div>
               </div>
             </div>
@@ -79,7 +127,7 @@ function BlocklistPage({ s, PP }) {
               onChange={(e) => setBlackQuery(e.target.value)} />
               </div>
               {!blackResult ?
-            <div className="search-hint">Type any website to check it against {bl.blacklistDomains} explicit domains.</div> :
+            <div className="search-hint">Type any website to check it against {domainCountText} explicit domains.</div> :
 
             <div className={'search-result ' + (blackResult.blocked ? 'is-blocked' : 'is-clear')}>
                   <div className="ico">{blackResult.blocked ? <IconShieldOff size={20} /> : <IconCheck size={20} />}</div>
@@ -165,6 +213,9 @@ function BlocklistPage({ s, PP }) {
               <input className="input" placeholder="e.g. example.com" value={newSite}
             onChange={(e) => setNewSite(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addSite()} />
               <button className="btn btn-primary" onClick={addSite}><IconPlus size={17} /> Block</button>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>
+              Changes apply across every connected browser within moments.
             </div>
           </div>
           <div className="card" style={{ padding: 8 }}>

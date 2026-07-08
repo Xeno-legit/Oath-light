@@ -41,6 +41,15 @@
     },
     // Push the app's clean-streak day count to the extensions.
     setStreak(streak) { return invoke('set_app_streak', { streak: streak | 0 }).catch(() => {}); },
+    // Push the renderer's "my blocklist" custom sites to every connected
+    // extension (localStorage stays the source of truth; this is the sync).
+    setCustomDomains(domains) {
+      return invoke('set_custom_domains', { domains })
+        .catch((e) => console.warn('[PurePath] setCustomDomains failed (rebuild the app?):', e));
+    },
+    // Check whether a domain is currently blocked (exact or parent-domain
+    // match), against whatever list is effective right now.
+    checkDomainBlocked(domain) { return invoke('check_domain_blocked', { domain }).catch(() => null); },
     // Classify an image file with the NSFW model (Phase 4 optional AI layer).
     // Resolves to { scores, top_label, top_score, nsfw_score, sensitive_score }.
     classifyImage(path) { return invoke('classify_image', { path }); },
@@ -53,6 +62,13 @@
       if (!available) return Promise.resolve(() => {});
       return T.event.listen('nsfw-scan', (evt) => { if (evt && evt.payload) cb(evt.payload); });
     },
+    // Subscribe to the action-layer overlay's lifecycle ({ event: 'escalated'
+    // | 'dismissed', monitor_id }), emitted by overlay.rs. Resolves to an
+    // unlisten function, same shape as onNsfwScan.
+    onNsfwOverlay(cb) {
+      if (!available) return Promise.resolve(() => {});
+      return T.event.listen('nsfw-overlay', (evt) => { if (evt && evt.payload) cb(evt.payload); });
+    },
 
     // 24-hour uninstall request (Phase 4 friction). The backend owns the timer
     // (persisted to disk); these just read/drive it. State shape:
@@ -63,6 +79,17 @@
     cancelUninstall() { return invoke('cancel_uninstall'); },
     // Resolves to "launched" (uninstaller started, app will close) or "manual".
     completeUninstall() { return invoke('complete_uninstall'); },
+
+    // Panic / SOS flow (5.1). `onOpenPanic` subscribes to the backend's
+    // `open-panic` event (tray "I need help now" / Ctrl+Shift+Space / the
+    // extension blocked page's deep-link); resolves to an unlisten function,
+    // same shape as onNsfwScan. `takePanicPending` consumes a request that
+    // fired before this renderer existed (cold start from the tray/hotkey).
+    onOpenPanic(cb) {
+      if (!available) return Promise.resolve(() => {});
+      return T.event.listen('open-panic', () => cb());
+    },
+    takePanicPending() { return invoke('take_panic_pending').catch(() => false); },
   };
 
   // React hook — live aggregate stats (total blocks across every extension).
@@ -78,6 +105,24 @@
       return () => { cancelled = true; if (unlisten) unlisten(); };
     }, []);
     return stats;
+  };
+
+  // React hook — live domain/keyword blocklist counts, for honest "X domains
+  // blocked" copy instead of a hardcoded string. Re-fetched whenever an
+  // extension pushes a fresh blocklist sync (the event payload is the full
+  // lists — it's only used here as a refresh signal, not kept).
+  window.useBlocklistCounts = function useBlocklistCounts() {
+    const [counts, setCounts] = React.useState(null);
+    React.useEffect(() => {
+      if (!available) return;
+      let unlisten = null, cancelled = false;
+      const refresh = () => invoke('get_blocklist_counts').then((c) => { if (!cancelled) setCounts(c); }).catch(() => {});
+      refresh();
+      T.event.listen('extension-blocklist', () => refresh())
+        .then((fn) => { if (cancelled) fn(); else unlisten = fn; }).catch(() => {});
+      return () => { cancelled = true; if (unlisten) unlisten(); };
+    }, []);
+    return counts;
   };
 
   // React hook — subscribes to the monitor's per-browser status stream.

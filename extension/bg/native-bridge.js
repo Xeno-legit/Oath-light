@@ -213,6 +213,13 @@ const NativeMessagingBridge = (function () {
         handleSetBlocking(msg);
         break;
 
+      case 'set_custom_domains':
+        // Desktop app pushed the renderer's "my blocklist" custom sites —
+        // diff-merge into our own customDomains/blocklistDomains so a desktop
+        // push can never wipe an extension-side addition or a built-in.
+        handleSetCustomDomains(msg);
+        break;
+
       default:
         console.log('Unknown message from desktop:', msg.type);
     }
@@ -238,6 +245,9 @@ const NativeMessagingBridge = (function () {
     try { await chrome.storage.local.set({ ppBlocking: settings }); } catch (_) {}
     // Re-arm the reminder loop to reflect the new schedule immediately.
     if (typeof armReminderAlarm === 'function') armReminderAlarm();
+    // Apply the opt-in YouTube Restricted Mode DNR toggle (default OFF) the
+    // moment the desktop app pushes it — same channel as the redirect link.
+    if (typeof applyYouTubeRestrictRuleset === 'function') applyYouTubeRestrictRuleset();
   }
 
   // ─ Mirror the desktop app's theme into storage ─────────────
@@ -270,11 +280,78 @@ const NativeMessagingBridge = (function () {
     }
   }
 
+  // ─ Merge the desktop app's custom-site list into ours ──────
+  // The renderer's `blocklist.customSites` is a separate source of truth from
+  // this extension's own `customDomains` (added via user_blocklist.html), so a
+  // push here is diffed against what we last received from the desktop
+  // (`ppDesktopCustom`) instead of replacing wholesale: only entries the
+  // desktop actually removed since last time are removed, only entries it
+  // actually added are added, and built-ins are never touched either way —
+  // mirrors the addCustomDomain/removeCustomDomain semantics in background.js.
+  async function handleSetCustomDomains(msg) {
+    if (!Array.isArray(msg.domains)) return;
+    const incoming = [...new Set(
+      msg.domains
+        .map((d) => (d || '').toString().trim().toLowerCase()
+          .replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, ''))
+        .filter((d) => d)
+    )];
+
+    await ensureBlocklistLoaded();
+    if (!defaultDomains || !defaultDomains.length) await loadDefaultListsIntoMemory();
+
+    const { ppDesktopCustom, customDomains } = await chrome.storage.local.get(['ppDesktopCustom', 'customDomains']);
+    const prevPushed = Array.isArray(ppDesktopCustom) ? ppDesktopCustom : [];
+    const custom = Array.isArray(customDomains) ? customDomains : [];
+
+    const removed = prevPushed.filter((d) => !incoming.includes(d));
+    const added = incoming.filter((d) => !custom.includes(d));
+    const defaultSet = getDefaultSet();
+
+    const nextCustom = custom
+      .filter((d) => !removed.includes(d))
+      .concat(added.filter((d) => !defaultSet.has(d)));
+
+    // Built-ins are already in blocklistDomains/blocklistSet — never drop one
+    // just because the desktop stopped pushing it.
+    for (const d of removed) {
+      if (!defaultSet.has(d)) {
+        blocklistDomains = blocklistDomains.filter((x) => x !== d);
+        blocklistSet.delete(d);
+      }
+    }
+    // Merge the WHOLE incoming list (not just `added`) into the live set —
+    // an extension update re-initializes blocklistDomains from the bundled
+    // defaults, silently dropping previously-merged customs, and this makes
+    // every desktop push self-healing against that.
+    const missing = incoming.filter((d) => !blocklistSet.has(d));
+    if (missing.length) {
+      blocklistDomains = blocklistDomains.concat(missing);
+      for (const d of missing) blocklistSet.add(d);
+    }
+
+    await chrome.storage.local.set({
+      customDomains: nextCustom,
+      blocklistDomains,
+      ppDesktopCustom: incoming,
+    });
+    sendBlocklistUpdate();
+  }
+
+  // ─ Panic / SOS deep-link (blocked page → desktop app, plan 5.1) ─
+  // Asks the desktop app to surface its window and open the urge-surfing
+  // flow. Returns false when the desktop isn't connected — callers treat it
+  // as best-effort (the blocked page has its own self-contained flow).
+  function sendOpenPanic() {
+    return send({ type: 'open_panic' });
+  }
+
   // ─ Public API ──────────────────────────────────────────────
   return {
     connect,
     sendStatsUpdate,
     sendBlocklistUpdate,
+    sendOpenPanic,
     isConnected: () => isConnected
   };
 })();

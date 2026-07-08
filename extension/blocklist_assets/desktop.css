@@ -442,6 +442,18 @@
   --orb-a: #fcd34d; --orb-b: #fb923c; --orb-c: #fbbf24;
 }
 
+/* ---- NOIR (black & white — pure monochrome) ---- */
+[data-style="noir"][data-theme="dark"] {
+  --bg-0: #0a0a0a; --bg-1: #121212; --text: #f2f2f2; --text-2: #b8b8b8; --muted: #7a7a7a;
+  --accent: #ffffff; --accent-2: #cfcfcf; --accent-3: #8f8f8f;
+  --orb-a: #3a3a3a; --orb-b: #5c5c5c; --orb-c: #262626;
+}
+[data-style="noir"][data-theme="light"] {
+  --bg-0: #fafafa; --bg-1: #ffffff; --text: #111111; --text-2: #3d3d3d; --muted: #7a7a7a;
+  --accent: #111111; --accent-2: #3d3d3d; --accent-3: #6e6e6e;
+  --orb-a: #d4d4d4; --orb-b: #bcbcbc; --orb-c: #e4e4e4;
+}
+
 /* per-style desktop bg override (dark) */
 [data-style="midnight"][data-theme="dark"] { --desktop: radial-gradient(120% 120% at 80% -10%, #142040 0%, #0d1625 55%, #080f1e 100%); }
 [data-style="forest"][data-theme="dark"]   { --desktop: radial-gradient(120% 120% at 80% -10%, #122018 0%, #0c1810 55%, #080f09 100%); }
@@ -449,6 +461,8 @@
 [data-style="midnight"][data-theme="light"]{ --desktop: radial-gradient(120% 120% at 80% -10%, #dce8ff 0%, #d0dcf8 55%, #c8d4f0 100%); }
 [data-style="forest"][data-theme="light"]  { --desktop: radial-gradient(120% 120% at 80% -10%, #d8f0e0 0%, #cde8d5 55%, #c4e0cc 100%); }
 [data-style="ember"][data-theme="light"]   { --desktop: radial-gradient(120% 120% at 80% -10%, #ffecd8 0%, #ffe4cc 55%, #ffdcc0 100%); }
+[data-style="noir"][data-theme="dark"]     { --desktop: radial-gradient(120% 120% at 80% -10%, #1a1a1a 0%, #0e0e0e 55%, #050505 100%); }
+[data-style="noir"][data-theme="light"]    { --desktop: radial-gradient(120% 120% at 80% -10%, #f0f0f0 0%, #e8e8e8 55%, #dedede 100%); }
 
 /* ============================================================
    RESET / BASE

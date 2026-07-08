@@ -9,7 +9,7 @@
   const defaults = {
     page: 'home',
     // display mirrored from the Tweaks panel (source of truth = useTweaks)
-    display: { theme: 'dark', style: 'aurora', bg: 'both', intensity: 7 },
+    display: { theme: 'dark', style: 'noir', bg: 'both', intensity: 7 },
 
     streak: 0,
     bestStreak: 0,
@@ -27,7 +27,10 @@
     // (see tauri-bridge.jsx → useBrowsers), not persisted here.
 
     blocklist: {
-      blacklistDomains: '4.2M+',
+      // Dead field, kept only so old persisted state merges cleanly — nothing
+      // renders it anymore. The real count comes live from the backend via
+      // useBlocklistCounts(); no hardcoded stats, ever again.
+      blacklistDomains: null,
       // Canonical Graylist V2 list — keep in sync with
       // extension/graylist-sites.js. kind: 'api' = NSFW items stripped from the
       // site's fetched JSON; 'dom' = adult items removed from server-rendered
@@ -81,6 +84,7 @@
       lock: true,
       uninstallGuard: true,
       safeSearch: true,
+      youtubeRestrict: false, // opt-in strictness — enforced by the extension via a YouTube-Restrict header rule
       blockApps: true,
       incognitoBlock: true,
       breakRequest: true,

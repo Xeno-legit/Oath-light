@@ -67,6 +67,41 @@ function run() {
   clean('scunthorpe.gov.uk', 'the original Scunthorpe problem');
   clean('milford.com', 'milf → Milford');
 
+  // ── AI-erotica compounds (plan 3.3): KEYWORD_COMPOUNDS_AI_EROTICA ───────────
+  // Compound-only, zero whitelist escape — representative sample of the
+  // aigirlfriend/nsfwgpt family (both word orders, plus the virtual* variants).
+  hit('aigirlfriend.com');
+  hit('mygirlfriendai.app', 'girlfriendai inside a longer host still hits');
+  hit('virtualgirlfriend.io');
+  hit('aiboyfriend.chat');
+  hit('virtualboyfriend.app');
+  hit('nsfwgpt.xyz');
+  hit('gptnsfw.com');
+  hit('aiwaifu.chat');
+  hit('waifuai.net');
+  hit('lewdai.app');
+  hit('nudeai.io');
+  hit('ainude.top');
+  hit('hentaiai.com', 'also reachable via the bare hentai stem — pinned as a compound too');
+
+  // guarded root 'aicompanion' (plan 3.3): blocks standalone, escapes only via
+  // the "-ai"-final-word + companion whitelist entries.
+  hit('aicompanion.com', 'guarded root aicompanion standalone → block');
+  hit('myaicompanion.app', 'aicompanion inside an unexcused longer host → block');
+  clean('bonsaicompanion.com', 'bonsai + companion (gardening) — whitelist trap');
+  clean('samuraicompanion.com', 'samurai + companion (game guide) — whitelist trap');
+  clean('acaicompanion.com', 'acai + companion (nutrition) — whitelist trap');
+
+  // tavernai was deliberately DROPPED as a compound (sits inside real Greek
+  // restaurant names; tavernai.net is an exact entry in domains_ai.json
+  // instead). None of these hostnames are exact-listed in any blocklist, so
+  // this isolates the keyword layer.
+  clean('tavernaithaki.com', 'Taverna Ithaki — real Greek restaurant name containing "tavernai"');
+  clean('tavernaithaki.gr');
+  clean('tavern.com', 'bare tavern is not a keyword');
+  clean('openai.com', 'legit AI tooling must not keyword-block');
+  clean('companionlife.com', 'bare "companion" is deliberately NOT a root — real insurance brand');
+
   // ── deep multilingual false-positive traps (the highest-value FP corpus) ───
   clean('reputable.com', 'puta → reputable');
   clean('computation.org', 'puta → computation');

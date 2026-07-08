@@ -6,6 +6,7 @@ const STYLE_OPTS = [
 { id: 'midnight', name: 'Midnight',   desc: 'Navy & electric blue — cool and focused',    a: '#1a5fff', b: '#7c63ff' },
 { id: 'forest',   name: 'Forest',     desc: 'Pine & sage green — grounded and earthy',   a: '#1f9e5c', b: '#5ec44a' },
 { id: 'ember',    name: 'Ember',      desc: 'Charcoal & burnt orange — warm energy',     a: '#cc6010', b: '#cc2a10' },
+{ id: 'noir',     name: 'Noir',       desc: 'Black & white — pure monochrome focus',     a: '#111111', b: '#f5f5f5' },
 ];
 
 const BG_OPTS = [
