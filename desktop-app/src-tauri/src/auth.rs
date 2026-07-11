@@ -81,15 +81,6 @@ fn read_hash_at(path: &Path) -> Option<String> {
     }
 }
 
-/// Whether a master password is currently configured, checked straight off
-/// disk without needing a live `AuthState` — for call sites that only have
-/// an `app_data_dir` (e.g. an early boot-time check before `AuthState` is
-/// managed). `AuthState::password_set` is the equivalent for callers that
-/// already have the managed state; both funnel through `read_hash_at`.
-pub fn password_is_set(app_data_dir: &Path) -> bool {
-    read_hash_at(&app_data_dir.join("auth.json")).is_some()
-}
-
 /// Owner of the master-password hash file and every live session token.
 /// Cheap to construct (`load` just remembers the app data dir — the hash
 /// itself is read off disk fresh on every check, so a password
