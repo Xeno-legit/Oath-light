@@ -75,10 +75,21 @@ function MonitorPage() {
   // was nothing to weaken (it was already stopped) — behave as before. When
   // `applied` is false the monitor is still running; the pending request
   // shows up via `stopPending` above within one poll.
+  //
+  // Also master-password gated (4.2) when a password is set — `PPAuth.acquire()`
+  // resolves the session token to pass through (or `null` if no password is
+  // configured), or rejects `Error('cancelled')` if the user dismissed the
+  // prompt, in which case this aborts silently rather than showing an error.
   const stop = () => {
-    PPNative.stopNsfwMonitor().then((outcome) => {
-      if (outcome && outcome.applied) setRunning(false);
-    }).catch((e) => setErr(String(e && e.message || e)));
+    (window.PPAuth ? PPAuth.acquire() : Promise.resolve(null))
+      .then((auth) => PPNative.stopNsfwMonitor(auth))
+      .then((outcome) => {
+        if (outcome && outcome.applied) setRunning(false);
+      })
+      .catch((e) => {
+        if (e && e.message === 'cancelled') return;
+        setErr(String(e && e.message || e));
+      });
   };
 
   // Re-sync the real running state whenever the pending stop appears or

@@ -1,3 +1,4 @@
+mod auth;
 mod browsers;
 mod friction;
 pub mod nsfw;
@@ -1511,11 +1512,19 @@ fn set_custom_domains(
 /// friction store — see `friction.rs`). The domain stays blocked until the
 /// delay elapses and the applier thread (in `setup`) actually removes it and
 /// re-broadcasts the updated list; this only registers the request.
+///
+/// Also gated behind the master password (4.2), if one is set — checked
+/// AFTER the "does this domain even exist" validation below (no point
+/// prompting for a password over a no-op) but BEFORE the friction request
+/// itself is ever registered, so a wrong/missing password leaves no trace of
+/// the attempt in the pending-changes list.
 #[tauri::command]
 fn remove_custom_domain(
+    app: AppHandle,
     state: tauri::State<'_, Arc<Mutex<AppState>>>,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
     domain: String,
+    auth: Option<String>,
 ) -> Result<friction::PendingView, String> {
     let norm = normalize_domain(&domain);
     if norm.is_empty() {
@@ -1525,6 +1534,7 @@ fn remove_custom_domain(
     if !present {
         return Err(format!("{norm} is not in the custom blocklist."));
     }
+    auth::require_auth(&app, &auth)?;
     let action_id = format!("custom_block.remove:{norm}");
     let view = friction.request(&action_id, &format!("Unblock {norm}"), serde_json::json!({ "domain": norm }));
     log::warn!(
@@ -1590,32 +1600,42 @@ pub struct WeakeningOutcome {
 /// any pending disable. Turning it OFF is a weakening (4.1): the guard stays
 /// ON until the friction delay elapses and the applier thread (in `setup`)
 /// actually flips it — this only registers the request and returns it.
+///
+/// Master-password gate (4.2) applies ONLY to the actual off-and-currently-on
+/// path below: enabling and the already-off no-op are both intentionally
+/// ungated (see `auth.rs`'s module doc — strengthenings and no-ops never
+/// require the password, only the one branch that actually starts a
+/// weakening's cool-off).
 #[tauri::command]
 fn set_guard_enabled(
+    app: AppHandle,
     state: tauri::State<'_, Arc<Mutex<AppState>>>,
     settings: tauri::State<'_, Arc<settings::SettingsState>>,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
     enabled: bool,
-) -> WeakeningOutcome {
+    auth: Option<String>,
+) -> Result<WeakeningOutcome, String> {
     if enabled {
         state.lock().unwrap().guard_enabled = true;
         settings.update(|s| s.guard_enabled = true);
         friction.cancel("guard.disable");
         log::info!("Guard enabled set to true");
-        return WeakeningOutcome { applied: true, pending: None };
+        return Ok(WeakeningOutcome { applied: true, pending: None });
     }
 
     let already_off = !state.lock().unwrap().guard_enabled;
     if already_off {
-        return WeakeningOutcome { applied: true, pending: None };
+        return Ok(WeakeningOutcome { applied: true, pending: None });
     }
+
+    auth::require_auth(&app, &auth)?;
 
     let view = friction.request("guard.disable", "Turn off the uninstall guard", serde_json::json!({}));
     log::warn!(
         "guard disable requested — {}s cool-off started (guard stays on until it elapses)",
         view.delay_secs
     );
-    WeakeningOutcome { applied: false, pending: Some(view) }
+    Ok(WeakeningOutcome { applied: false, pending: Some(view) })
 }
 
 /// Push the desktop app's selected theme/palette to every connected extension,
@@ -1635,6 +1655,108 @@ fn set_blocking_settings(state: tauri::State<'_, Arc<Mutex<AppState>>>, settings
     state.lock().unwrap().ext_blocking = Some(settings.clone());
     let msg = serde_json::json!({ "type": "set_blocking", "settings": settings });
     let _ = broadcast_to_extensions(state.inner(), &msg);
+}
+
+// ============================================================================
+// Master password (Phase 4 item 4.2) — see auth.rs for the module doc. The
+// commands here are the only way the renderer ever touches `AuthState`; every
+// actual gate (`auth::require_auth`) lives on the weakening commands above,
+// not here.
+// ============================================================================
+
+/// Whether a master password is currently configured. The renderer's
+/// `PasswordGate`/`SecurityCard` read this on load to decide whether to ever
+/// prompt at all — no password set means every weakening stays ungated.
+#[derive(Debug, Clone, Serialize)]
+pub struct AuthStatus {
+    pub set: bool,
+}
+
+#[tauri::command]
+fn get_auth_status(auth_state: tauri::State<'_, Arc<auth::AuthState>>) -> AuthStatus {
+    AuthStatus { set: auth_state.password_set() }
+}
+
+/// Verify the master password and, on success, mint a short-lived session
+/// token (`auth::AuthState::verify`) that the renderer then presents back as
+/// `auth` on a gated command. Rate-limited (see `MIN_ATTEMPT_GAP` in
+/// auth.rs); its error is surfaced to the caller as-is.
+#[tauri::command]
+fn verify_master_password(
+    auth_state: tauri::State<'_, Arc<auth::AuthState>>,
+    password: String,
+) -> Result<String, String> {
+    auth_state.verify(&password)
+}
+
+/// Set or change the master password. First-time set needs no `current`
+/// (setting a password from nothing is a strengthening, never gated);
+/// changing an existing one requires `current` to verify — see
+/// `auth::AuthState::set_password`. Also withdraws any pending
+/// `"password.remove"` weakening: re-setting the password is itself a
+/// strengthening, the same "turning it back on cancels the pending turn-off"
+/// rule every other weakening in this codebase follows.
+#[tauri::command]
+fn set_master_password(
+    auth_state: tauri::State<'_, Arc<auth::AuthState>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    current: Option<String>,
+    new: String,
+) -> Result<(), String> {
+    auth_state.set_password(current.as_deref(), &new)?;
+    friction.cancel("password.remove");
+    Ok(())
+}
+
+/// Request removal of the master password — a weakening gated behind BOTH
+/// the current password AND the friction delay (see the module doc in
+/// auth.rs for why that's deliberate, not redundant: the password proves
+/// it's really you asking; the delay is the same second-thought window every
+/// other weakening gets). `current` must verify before the request is even
+/// registered, so a wrong password leaves no trace in the pending list.
+#[tauri::command]
+fn request_password_removal(
+    auth_state: tauri::State<'_, Arc<auth::AuthState>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    current: String,
+) -> Result<friction::PendingView, String> {
+    auth_state.verify_only(&current)?;
+    let view = friction.request("password.remove", "Remove the master password", serde_json::json!({}));
+    log::warn!(
+        "master-password removal requested — {}s cool-off started (password still required until it elapses)",
+        view.delay_secs
+    );
+    Ok(view)
+}
+
+/// The "forgot it" recovery path: no current password needed, but the
+/// request goes through the exact same `"password.remove"` friction delay as
+/// `request_password_removal` above — forgetting the password can't shortcut
+/// the wait, it only skips proving you know a password you've said you don't
+/// remember. This is the documented recovery story for a lockout: wait out
+/// the delay, don't reach for a backdoor. The pending removal shows up in
+/// Settings -> Pending changes the entire time, so a stronger-willed future
+/// self (or a partner who remembers the password) can still cancel it.
+///
+/// TODO(near-Alpha): this reuses the standard weakening delay via the shared
+/// `"password.remove"` action id — `friction::delay_for` doesn't yet have a
+/// distinct "uninstall-length" delay class for a password-less path like this
+/// one. Before Alpha, give this its own longer (24h-class) delay so a brief
+/// unattended moment can't be used to start this clock and walk away.
+#[tauri::command]
+fn request_password_removal_forgotten(
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+) -> friction::PendingView {
+    let view = friction.request(
+        "password.remove",
+        "Remove the master password (forgotten)",
+        serde_json::json!({}),
+    );
+    log::warn!(
+        "master-password removal requested via the forgotten-password path — {}s cool-off started",
+        view.delay_secs
+    );
+    view
 }
 
 /// Open an http(s) URL in the user's default browser. The in-app webview can't
@@ -1927,20 +2049,27 @@ fn start_nsfw_monitor(
 /// `monitor.disable` request and returns it — the monitor keeps running until
 /// the delay elapses and the applier thread (in `setup`) actually flips it
 /// off.
+///
+/// Master-password gate (4.2) applies only when the monitor is actually
+/// running — the not-running no-op above stays ungated, same rule as
+/// `set_guard_enabled`.
 #[tauri::command]
 fn stop_nsfw_monitor(
+    app: AppHandle,
     monitor: tauri::State<'_, MonitorState>,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
-) -> WeakeningOutcome {
+    auth: Option<String>,
+) -> Result<WeakeningOutcome, String> {
     if !monitor.running.load(Ordering::SeqCst) {
-        return WeakeningOutcome { applied: true, pending: None };
+        return Ok(WeakeningOutcome { applied: true, pending: None });
     }
+    auth::require_auth(&app, &auth)?;
     let view = friction.request("monitor.disable", "Turn off the AI screen monitor", serde_json::json!({}));
     log::warn!(
         "monitor disable requested — {}s cool-off started (monitor keeps running until it elapses)",
         view.delay_secs
     );
-    WeakeningOutcome { applied: false, pending: Some(view) }
+    Ok(WeakeningOutcome { applied: false, pending: Some(view) })
 }
 
 /// Whether the monitor is currently running.
@@ -2034,11 +2163,19 @@ fn get_uninstall_state(friction: tauri::State<'_, Arc<friction::FrictionStore>>)
 
 /// Open an uninstall request, starting the cool-off countdown. Idempotent — an
 /// existing pending request keeps its original clock. Protection stays fully on.
+///
+/// Master-password gate (4.2): opening the request is itself the first step
+/// of a weakening (it starts the cool-off, even though nothing actually
+/// changes yet), so it's gated the same as `set_guard_enabled`'s off path —
+/// gated BEFORE the request is registered, so a wrong/missing password never
+/// even starts the clock.
 #[tauri::command]
 fn request_uninstall(
     app: AppHandle,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
-) -> uninstall::UninstallState {
+    auth: Option<String>,
+) -> Result<uninstall::UninstallState, String> {
+    auth::require_auth(&app, &auth)?;
     let view = friction.request("uninstall", "Remove Pure Path from this computer", serde_json::json!({}));
     if let Ok(dir) = app.path().app_data_dir() {
         uninstall::write_marker(&dir, Some(view.requested_at));
@@ -2047,7 +2184,7 @@ fn request_uninstall(
         "uninstall requested — {}s cool-off started (protection stays active)",
         view.delay_secs
     );
-    uninstall_state_from(&friction)
+    Ok(uninstall_state_from(&friction))
 }
 
 /// Restart the cool-off clock (available once the window has elapsed).
@@ -2472,6 +2609,11 @@ pub fn run() {
             cancel_uninstall,
             complete_uninstall,
             take_panic_pending,
+            get_auth_status,
+            verify_master_password,
+            set_master_password,
+            request_password_removal,
+            request_password_removal_forgotten,
         ])
         .setup(move |app| {
             if cfg!(debug_assertions) {
@@ -2585,6 +2727,12 @@ pub fn run() {
             app.manage(friction_store.clone());
             let settings_state = Arc::new(settings::SettingsState::load(&udd));
             app.manage(settings_state.clone());
+            // Master password (4.2). `AuthState::load` just remembers the app
+            // data dir — the hash is re-read off disk on every check, so a
+            // password set/changed/removed from a different running instance
+            // (or by hand) takes effect immediately; see auth.rs's module doc.
+            let auth_state = Arc::new(auth::AuthState::load(&udd));
+            app.manage(auth_state.clone());
             // AppState was constructed with the hardcoded pre-setup default
             // (`guard_enabled: true`) before the persisted settings file could
             // be read — now that it's loaded, the persisted value wins.
@@ -2610,6 +2758,7 @@ pub fn run() {
                 let friction2 = friction_store.clone();
                 let state2 = shared_state.clone();
                 let settings2 = settings_state.clone();
+                let auth2 = auth_state.clone();
                 std::thread::spawn(move || {
                     let mut tick: u64 = 0;
                     loop {
@@ -2655,9 +2804,19 @@ pub fn run() {
                                 let msg = serde_json::json!({ "type": "set_custom_domains", "domains": merged });
                                 let _ = broadcast_to_extensions(&state2, &msg);
                                 log::warn!("friction: custom block on {domain} removed (weakening applied)");
+                            } else if action_id == "password.remove" {
+                                // Applies both `request_password_removal` (current
+                                // password verified up front) and the "forgot it"
+                                // path (`request_password_removal_forgotten`) —
+                                // both register under the same action id, see
+                                // that command's doc comment for why. Deletes
+                                // auth.json and drops every live session token;
+                                // idempotent if the file is already gone.
+                                auth2.remove_password_file();
+                                log::warn!("friction: master password removed (weakening applied)");
                             } else {
-                                // Forward-compat hook: later items (4.2, 1.3)
-                                // add their own arms here as they gate new
+                                // Forward-compat hook: later items (1.3) add
+                                // their own arms here as they gate new
                                 // weakenings behind the friction store.
                                 log::warn!("friction: unknown ready action id '{action_id}', dropping");
                             }

@@ -31,8 +31,10 @@
     // instant; turning it OFF is a friction-gated weakening (4.1) — resolves
     // to { applied, pending }. When `applied` is false the guard is still ON
     // and stays that way until `pending`'s delay elapses; callers must not
-    // treat the guard as off just because this resolved.
-    setGuard(enabled) { return invoke('set_guard_enabled', { enabled: !!enabled }); },
+    // treat the guard as off just because this resolved. `auth` is a master-
+    // password session token (4.2) — required only when turning OFF a guard
+    // that's currently on; every other caller passes null.
+    setGuard(enabled, auth) { return invoke('set_guard_enabled', { enabled: !!enabled, auth: auth || null }); },
     // Ask all connected extensions to push fresh stats/blocklists.
     requestSync() { return invoke('request_sync'); },
     getBrowsersStatus() { return invoke('get_browsers_status'); },
@@ -66,8 +68,9 @@
     // is always instant. Stopping is a friction-gated weakening (4.1) —
     // resolves to { applied, pending }; when `applied` is false the monitor
     // is still running and stays that way until `pending`'s delay elapses.
+    // `auth` (4.2) is only required while the monitor is actually running.
     startNsfwMonitor() { return invoke('start_nsfw_monitor'); },
-    stopNsfwMonitor() { return invoke('stop_nsfw_monitor'); },
+    stopNsfwMonitor(auth) { return invoke('stop_nsfw_monitor', { auth: auth || null }); },
 
     // Friction (4.1/4.3): every pending "weakening" of protection (uninstall
     // guard, AI monitor, a custom-block removal) — the backend is the source
@@ -80,9 +83,10 @@
         .catch((e) => console.warn('[PurePath] cancelWeakening failed:', e));
     },
     // Request removal of a custom-blocked domain — a weakening, gated behind
-    // the friction delay; the domain stays blocked until it elapses.
-    removeCustomDomain(domain) {
-      return invoke('remove_custom_domain', { domain })
+    // the friction delay AND, if set, the master password (4.2). The domain
+    // stays blocked until the delay elapses.
+    removeCustomDomain(domain, auth) {
+      return invoke('remove_custom_domain', { domain, auth: auth || null })
         .catch((e) => { console.warn('[PurePath] removeCustomDomain failed:', e); return null; });
     },
     nsfwMonitorRunning() { return invoke('nsfw_monitor_running').catch(() => false); },
@@ -102,8 +106,10 @@
     // 24-hour uninstall request (Phase 4 friction). The backend owns the timer
     // (persisted to disk); these just read/drive it. State shape:
     //   { requested, requested_at, delay_secs, elapsed_secs, remaining_secs, ready }
+    // `requestUninstall`'s `auth` (4.2) is required opening a fresh request —
+    // it's the first step of a weakening even though nothing changes yet.
     getUninstallState() { return invoke('get_uninstall_state'); },
-    requestUninstall() { return invoke('request_uninstall'); },
+    requestUninstall(auth) { return invoke('request_uninstall', { auth: auth || null }); },
     resetUninstallTimer() { return invoke('reset_uninstall_timer'); },
     cancelUninstall() { return invoke('cancel_uninstall'); },
     // Resolves to "launched" (uninstaller started, app will close) or "manual".
@@ -119,6 +125,76 @@
       return T.event.listen('open-panic', () => cb());
     },
     takePanicPending() { return invoke('take_panic_pending').catch(() => false); },
+  };
+
+  // Master password (Phase 4 item 4.2). Every weakening command's real gate
+  // lives in Rust (`auth::require_auth`) — this object is just the renderer's
+  // convenience wrapper around the auth commands, plus `acquire()`, the one
+  // helper every gated caller in this codebase goes through instead of
+  // rolling its own prompt/cache logic.
+  window.PPAuth = {
+    // Resolves `{ set: bool }`; `{ set: false }` outside Tauri (nothing to gate).
+    status() {
+      if (!available) return Promise.resolve({ set: false });
+      return invoke('get_auth_status').catch(() => ({ set: false }));
+    },
+    // Verify a password and mint a session token — does NOT go through the
+    // `acquire()` cache; this is the primitive the `PasswordGate` modal and
+    // the fallback `prompt()` path in `acquire()` both call directly.
+    verify(password) { return invoke('verify_master_password', { password }); },
+    // Set (current === null/undefined) or change (current required) the
+    // master password.
+    setPassword(current, newPw) {
+      return invoke('set_master_password', { current: current || null, new: newPw });
+    },
+    // Request removal — current password required, THEN the friction delay.
+    requestRemoval(current) { return invoke('request_password_removal', { current }); },
+    // The "forgot it" recovery path — no current password, but the same
+    // friction delay (see auth.rs / lib.rs `request_password_removal_forgotten`
+    // for why that's still safe). Used by the "Forgot it?" link in Settings.
+    requestRemovalForgotten() { return invoke('request_password_removal_forgotten'); },
+
+    // Cached session token + when it was minted. Module-scoped (shared by
+    // every gated caller in the app, not owned by one component) rather than
+    // React state — `acquire()` is called from plain event handlers all over
+    // the renderer, not just from inside a component render.
+    _token: null,
+    _tokenAt: 0,
+
+    // Resolve a live master-password session token for a gated action:
+    //   - `null` immediately if no password is configured at all (nothing to
+    //     gate — the backend would no-op the check anyway, but this also
+    //     avoids ever showing a prompt to a solo user with no password set).
+    //   - the cached token if it's still comfortably fresh (< 4 minutes old —
+    //     shorter than the backend's 5-minute session TTL in auth.rs, so this
+    //     never hands back a token the backend is about to reject).
+    //   - otherwise prompts via `window.__ppAuthPrompt` (a Promise the
+    //     `PasswordGate` modal registers on mount — see ui.jsx) and caches
+    //     the result.
+    // Rejects with `Error('cancelled')` when the user dismisses the prompt —
+    // every gated caller catches that exact message and aborts silently
+    // instead of surfacing it as an error.
+    acquire() {
+      return this.status().then((st) => {
+        if (!st || !st.set) return null;
+        const fresh = this._token && (Date.now() - this._tokenAt) < 4 * 60 * 1000;
+        if (fresh) return this._token;
+        const prompt = window.__ppAuthPrompt;
+        const ask = prompt ? prompt() : new Promise((resolve, reject) => {
+          // No PasswordGate mounted (e.g. a standalone preview outside the
+          // real app shell) — fall back to a plain browser prompt so the
+          // flow still works end to end rather than dead-ending.
+          const pw = window.prompt('Enter your master password:');
+          if (pw == null) { reject(new Error('cancelled')); return; }
+          this.verify(pw).then(resolve, reject);
+        });
+        return ask.then((token) => {
+          this._token = token;
+          this._tokenAt = Date.now();
+          return token;
+        });
+      });
+    },
   };
 
   // React hook — live aggregate stats (total blocks across every extension).
