@@ -163,6 +163,52 @@ pub const BROWSERS: &[BrowserDef] = &[
     },
 ];
 
+// ============================================================================
+// Evasion-browser detection (plan item 1.3)
+// ============================================================================
+
+/// Lowercase image names of browsers whose whole point on this machine would
+/// be *escaping* the extension: no enterprise-policy hive to force-install
+/// into (or the browser deliberately ignores one), not in the Web/AMO store
+/// pipeline we can force-install from, or — for Tor Browser specifically —
+/// built to route around network-level controls entirely.
+///
+/// This list is deliberately conservative and MUST stay that way: a false
+/// positive here doesn't just log a warning, it can outright kill (see
+/// `enforce_processes` in lib.rs, gated behind `block_unknown_browsers`)
+/// someone's real, legitimately-installed browser — a much worse failure
+/// mode than under-detecting one genuine evasion attempt. When in doubt,
+/// leave a browser off this list; `is_standard_install_path` below still
+/// catches a portable copy of anything we DO recognize.
+///
+/// Deliberately NOT included: Zen, Arc, and other Chromium/Firefox forks that
+/// can run our extension and talk to the native host like any supported
+/// browser — those aren't evasion, they're just browsers we haven't added a
+/// full `BrowserDef` for yet.
+pub const EVASION_BROWSERS: &[&str] = &[
+    "tor.exe",
+    "librewolf.exe",
+    "waterfox.exe",
+    "palemoon.exe",
+    "basilisk.exe",
+    "mullvadbrowser.exe",
+    "mullvad-browser.exe",
+    "floorp.exe",
+    "thorium.exe",
+];
+
+/// True when a (lowercased) exe path looks like a normal install location
+/// rather than a portable copy run from somewhere like Downloads or a USB
+/// drive. Used to flag a portable copy of a browser we otherwise recognize
+/// (see `EVASION_BROWSERS`'s doc comment on why that's still worth a
+/// conservative heads-up, even for a known browser).
+pub fn is_standard_install_path(path_lower: &str) -> bool {
+    path_lower.contains(r"\program files")
+        || path_lower.contains(r"\appdata\local")
+        || path_lower.contains(r"\appdata\roaming")
+        || path_lower.contains(r"\windowsapps")
+}
+
 /// Map a (lowercased) process image name to its browser definition.
 pub fn match_browser_process(proc_name_lower: &str) -> Option<&'static BrowserDef> {
     BROWSERS.iter().find(|b| {

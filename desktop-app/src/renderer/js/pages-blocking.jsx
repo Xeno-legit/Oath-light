@@ -10,6 +10,184 @@ function openRedirect(raw) {
   else window.open(u, '_blank', 'noopener');
 }
 
+// Process-level app blocking + evasion-browser detection (plan item 1.3).
+// House rule: name-based process blocking is friction, not a sandbox — a
+// renamed exe slips right past it, and that's an accepted limitation, not a
+// bug to fix here. The kill decision itself always happens in Rust
+// (`enforce_processes` in lib.rs); everything in this component is just a
+// view onto that state plus the friction-gated removal/toggle requests.
+function AppBlockingSection() {
+  const available = !!(window.PPNative && window.PPNative.available);
+  const [cfg, setCfg] = React.useState(null); // { blocked_processes, block_unknown_browsers, ... }
+  const [newProc, setNewProc] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  // Session-only — not persisted, just a live feed of what the backend has
+  // emitted since this page mounted (last 6, newest first).
+  const [recent, setRecent] = React.useState([]);
+
+  const pending = (window.usePendingWeakenings || (() => []))();
+  const pendingRemovals = pending.filter((p) => p.action_id.indexOf('process_block.remove:') === 0);
+  const evasionPending = pending.find((p) => p.action_id === 'evasion_kill.disable');
+
+  const refresh = React.useCallback(() => {
+    if (!available) return;
+    window.PPNative.getAppSettings().then((s) => { if (s) setCfg(s); });
+  }, [available]);
+
+  React.useEffect(() => { refresh(); }, [refresh]);
+  // Also refetch whenever the pending-weakening count changes — an applied
+  // removal or an applied `evasion_kill.disable` needs the list/toggle here
+  // to catch up without waiting on an unrelated re-render.
+  React.useEffect(() => { refresh(); }, [pending.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  React.useEffect(() => {
+    if (!available) return;
+    let unProc = null, unEvasion = null, cancelled = false;
+    const push = (text) => setRecent((r) => [{ id: Date.now() + Math.random(), ts: Date.now(), text }, ...r].slice(0, 6));
+    window.PPNative.onProcessEnforcement((p) => push(`${p.name} — blocked list — killed`))
+      .then((fn) => { if (cancelled) fn(); else unProc = fn; });
+    window.PPNative.onEvasionDetected((p) => push(
+      `${p.name} — ${p.reason === 'tor_browser' ? 'Tor Browser' : p.reason === 'portable_browser' ? 'portable copy' : 'evasion browser'} — ${p.killed ? 'blocked' : 'detected (not blocked)'}`
+    )).then((fn) => { if (cancelled) fn(); else unEvasion = fn; });
+    return () => { cancelled = true; if (unProc) unProc(); if (unEvasion) unEvasion(); };
+  }, [available]);
+
+  function addProc() {
+    const name = newProc.trim();
+    if (!name || busy) return;
+    setErr('');
+    setBusy(true);
+    window.PPNative.addBlockedProcess(name)
+      .then(() => { setNewProc(''); refresh(); })
+      .catch((e) => setErr(e && e.message ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  }
+
+  // PPAuth (master password, 4.2) may not exist in this build yet — the
+  // defensive call means this works with or without it, and a cancelled
+  // prompt (rejected with message 'cancelled') aborts silently.
+  function acquireAuth() {
+    return window.PPAuth ? window.PPAuth.acquire() : Promise.resolve(null);
+  }
+
+  function removeProc(name) {
+    setErr('');
+    acquireAuth()
+      .then((token) => { setBusy(true); return window.PPNative.removeBlockedProcess(name, token); })
+      .then(() => refresh())
+      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
+      .finally(() => setBusy(false));
+  }
+
+  function keepBlockingProc(p) {
+    window.PPNative.cancelWeakening(p.action_id).then(refresh);
+  }
+
+  function toggleEvasionKill(enabled) {
+    setErr('');
+    if (enabled) {
+      // Turning it on is a strengthening — instant, no auth needed.
+      setBusy(true);
+      window.PPNative.setBlockUnknownBrowsers(true, null)
+        .then(() => refresh())
+        .catch((e) => setErr(e && e.message ? e.message : String(e)))
+        .finally(() => setBusy(false));
+      return;
+    }
+    acquireAuth()
+      .then((token) => { setBusy(true); return window.PPNative.setBlockUnknownBrowsers(false, token); })
+      .then(() => refresh())
+      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
+      .finally(() => setBusy(false));
+  }
+
+  const blockedList = (cfg && cfg.blocked_processes) || [];
+  const killUnknown = !!(cfg && cfg.block_unknown_browsers);
+
+  return (
+    <React.Fragment>
+      <div className="setting" style={{ alignItems: 'flex-start' }}>
+        <div className="ico"><IconGrid size={20} /></div>
+        <div className="txt" style={{ flex: 1 }}>
+          <b>App blocking</b>
+          <span>Block distracting or explicit desktop apps by process name. This is friction, not a sandbox — a renamed .exe slips straight past it, on purpose accepted as a known limit rather than something faked as airtight.</span>
+
+          <div className="row" style={{ gap: 10, marginTop: 10 }}>
+            <input
+              className="input"
+              placeholder="e.g. discord.exe"
+              value={newProc}
+              onChange={(e) => setNewProc(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && addProc()}
+              style={{ flex: 1 }} />
+            <button className="btn btn-primary btn-sm" disabled={busy || !available} onClick={addProc}>
+              <IconPlus size={15} /> Add
+            </button>
+          </div>
+
+          {blockedList.length > 0 &&
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {blockedList.map((name) => (
+                <div key={name} className="row" style={{ justifyContent: 'space-between', padding: '8px 10px', background: 'color-mix(in oklab, var(--muted) 7%, transparent)', borderRadius: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{name}</span>
+                  <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => removeProc(name)}>
+                    <IconTrash size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          }
+
+          {pendingRemovals.length > 0 &&
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {pendingRemovals.map((p) => {
+                const name = p.action_id.slice('process_block.remove:'.length);
+                return (
+                  <div key={p.action_id} className="row" style={{ justifyContent: 'space-between', padding: '8px 10px', background: 'color-mix(in oklab, #d9a441 12%, transparent)', borderRadius: 8 }}>
+                    <span style={{ fontSize: 13 }}><b>{name}</b> — unblocks in {fmtDur(p.remaining_secs)}</span>
+                    <button className="btn btn-ghost btn-sm" onClick={() => keepBlockingProc(p)}>Keep blocking</button>
+                  </div>
+                );
+              })}
+            </div>
+          }
+
+          {err && <div style={{ fontSize: 12, color: '#d9534f', marginTop: 8 }}>{err}</div>}
+          {!available && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>App blocking controls are available in the desktop app.</div>}
+        </div>
+      </div>
+
+      <div className="setting">
+        <div className="ico"><IconShieldOff size={20} /></div>
+        <div className="txt">
+          <b>Block unknown &amp; evasion browsers</b>
+          <span>Kill Tor Browser, LibreWolf and other extension-proof browsers — and portable copies of known ones — on sight instead of just logging them. Off by default: detections are always logged as warnings either way, this only decides whether they're also force-closed.</span>
+        </div>
+        <Switch on={killUnknown} onClick={() => toggleEvasionKill(!killUnknown)} disabled={busy || !available} />
+      </div>
+      {evasionPending &&
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '-6px 0 10px 54px' }}>
+          Turning off in {fmtDur(evasionPending.remaining_secs)} — cancel from Settings → Pending changes
+        </div>
+      }
+
+      {recent.length > 0 &&
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', marginBottom: 6 }}>Recent detections (this session)</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {recent.map((r) => (
+              <div key={r.id} style={{ fontSize: 12, color: 'var(--muted)' }}>
+                {new Date(r.ts).toLocaleTimeString()} — {r.text}
+              </div>
+            ))}
+          </div>
+        </div>
+      }
+    </React.Fragment>
+  );
+}
+
 function SettingRow({ icon: I, title, desc, on, onToggle, accent }) {
   return (
     <div className="setting">
@@ -256,22 +434,19 @@ function BlockingPage({ s, PP }) {
         </div>
 
         <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', margin: '22px 0 4px' }}>
+          App &amp; process blocking
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>
+          Enforced by the desktop app in the background — no browser needed.
+        </div>
+
+        <AppBlockingSection />
+
+        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', margin: '22px 0 4px' }}>
           Coming soon
         </div>
         <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>
           Not built yet — shown honestly here instead of as a switch that would quietly do nothing.
-        </div>
-
-        <div className="setting">
-          <div className="ico"><IconGrid size={20} /></div>
-          <div className="txt">
-            <b>App blocking</b>
-            <span>Block distracting or explicit desktop apps, not just browser sites</span>
-          </div>
-          <div className="row" style={{ gap: 10 }}>
-            <span className="chip">Coming in Phase 4</span>
-            <Switch on={false} disabled />
-          </div>
         </div>
 
         <div className="setting">

@@ -90,6 +90,43 @@
         .catch((e) => { console.warn('[PurePath] removeCustomDomain failed:', e); return null; });
     },
     nsfwMonitorRunning() { return invoke('nsfw_monitor_running').catch(() => false); },
+
+    // Process-level app blocking + evasion-browser detection (1.3). Backend-
+    // owned settings — `getAppSettings` is the honest read (blocked_processes,
+    // block_unknown_browsers), refetched by the caller after every mutation.
+    getAppSettings() { return invoke('get_app_settings').catch((e) => { console.warn('[PurePath] getAppSettings failed:', e); return null; }); },
+    // Adding a block is a strengthening — instant, ungated. Resolves to the
+    // new full blocked-process list.
+    addBlockedProcess(name) {
+      return invoke('add_blocked_process', { name })
+        .catch((e) => { console.warn('[PurePath] addBlockedProcess failed:', e); throw e; });
+    },
+    // Removing a block is a weakening — friction-gated (1.3), same shape as
+    // removeCustomDomain: resolves to { action_id, label, ..., remaining_secs,
+    // ready }. Requires the master-password token if one is set (4.2).
+    removeBlockedProcess(name, auth) {
+      return invoke('remove_blocked_process', { name, auth: auth || null })
+        .catch((e) => { console.warn('[PurePath] removeBlockedProcess failed:', e); throw e; });
+    },
+    // Toggle blocking unknown/evasion browsers outright. Turning ON is
+    // instant; turning OFF is friction-gated (same { applied, pending } shape
+    // as setGuard) and requires the master-password token if one is set.
+    setBlockUnknownBrowsers(enabled, auth) {
+      return invoke('set_block_unknown_browsers', { enabled: !!enabled, auth: auth || null })
+        .catch((e) => { console.warn('[PurePath] setBlockUnknownBrowsers failed:', e); throw e; });
+    },
+    // Subscribe to blocked-list kill events ({ action, name, reason }).
+    // Resolves to an unlisten function, same shape as onNsfwScan.
+    onProcessEnforcement(cb) {
+      if (!available) return Promise.resolve(() => {});
+      return T.event.listen('process-enforcement', (evt) => { if (evt && evt.payload) cb(evt.payload); });
+    },
+    // Subscribe to evasion-browser detections ({ name, path, reason, killed }).
+    // Resolves to an unlisten function, same shape as onNsfwScan.
+    onEvasionDetected(cb) {
+      if (!available) return Promise.resolve(() => {});
+      return T.event.listen('evasion-detected', (evt) => { if (evt && evt.payload) cb(evt.payload); });
+    },
     // Subscribe to live scan results; resolves to an unlisten function.
     onNsfwScan(cb) {
       if (!available) return Promise.resolve(() => {});
