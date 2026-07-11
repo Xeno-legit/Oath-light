@@ -43,6 +43,15 @@ base64 = "0.22"
 # encoding, `SaltString`) and `rand` (`OsRng`), both used directly there, with
 # no extra crate needed for random bytes or salt generation.
 argon2 = "0.5"
+# argon2 re-exports `password_hash::rand_core`, but `OsRng` (and `SaltString::
+# generate`, which needs it) live behind rand_core's `getrandom` feature, and
+# argon2's default features do NOT enable it — so `rand_core::OsRng` is
+# `cfg`'d out unless something turns getrandom on. Depend on rand_core directly
+# with that feature; Cargo unifies features across the graph, so this also
+# lights up the `argon2::password_hash::rand_core::OsRng` re-export auth.rs
+# imports. Pinned to 0.6 to match the copy argon2/password-hash already pull
+# (rand_core 0.6.4) so no second version enters the tree.
+rand_core = { version = "0.6", features = ["getrandom"] }
 
 # Windows API access for the action-layer overlay (overlay.rs): marks the
 # overlay window WDA_EXCLUDEFROMCAPTURE so the screen monitor never scans its
