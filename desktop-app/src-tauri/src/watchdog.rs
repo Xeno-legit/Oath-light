@@ -289,9 +289,10 @@ mod imp {
     /// default-deny. This is deliberately safe rather than merely convenient:
     /// the only legitimate caller of `request_shutdown()` is the app's own
     /// uninstall flow (`complete_uninstall` in lib.rs), which is gated on
-    /// `UninstallStore::get().ready` and therefore never fires before the
-    /// cool-off has elapsed — so at the moment a legitimate shutdown happens,
-    /// `uninstall.json` will show an elapsed request and this check passes.
+    /// `friction::FrictionStore::get("uninstall").ready` and therefore never
+    /// fires before the cool-off has elapsed — so at the moment a legitimate
+    /// shutdown happens, `uninstall.json` will show an elapsed request and
+    /// this check passes.
     /// (This side reads the path from `UNINSTALL_JSON_PATH`, not from the
     /// sentinel content: any sentinel this process sees was written after
     /// `setup()` ran, so the OnceLock is always populated by then and the

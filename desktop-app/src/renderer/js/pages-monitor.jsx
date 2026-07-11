@@ -42,6 +42,12 @@ function MonitorPage() {
   const [history, setHistory] = React.useState([]);
   const [err, setErr] = React.useState('');
   const [overlayEvents, setOverlayEvents] = React.useState([]);
+  // Friction (4.1): the live pending "Stop" request, if one is waiting out its
+  // delay — the monitor is still actually running the whole time. Sourced from
+  // the shared backend poll (not a local snapshot) so the countdown ticks and
+  // the note survives navigating away from this page and back.
+  const stopPending = (window.usePendingWeakenings || (() => []))()
+    .find((p) => p.action_id === 'monitor.disable') || null;
   const labelFor = React.useRef(monitorLabeler()).current;
 
   React.useEffect(() => {
@@ -59,8 +65,30 @@ function MonitorPage() {
     return () => { cancelled = true; if (unlisten) unlisten(); if (unlistenOverlay) unlistenOverlay(); };
   }, []);
 
-  const start = () => { setErr(''); PPNative.startNsfwMonitor().then(() => setRunning(true)).catch((e) => setErr(String(e && e.message || e))); };
-  const stop = () => { PPNative.stopNsfwMonitor().then(() => setRunning(false)); };
+  const start = () => {
+    setErr('');
+    PPNative.startNsfwMonitor().then(() => setRunning(true))
+      .catch((e) => setErr(String(e && e.message || e)));
+  };
+  // Stopping is a friction-gated weakening (4.1): the backend resolves
+  // { applied, pending } instead of just stopping. `applied` true means there
+  // was nothing to weaken (it was already stopped) — behave as before. When
+  // `applied` is false the monitor is still running; the pending request
+  // shows up via `stopPending` above within one poll.
+  const stop = () => {
+    PPNative.stopNsfwMonitor().then((outcome) => {
+      if (outcome && outcome.applied) setRunning(false);
+    }).catch((e) => setErr(String(e && e.message || e)));
+  };
+
+  // Re-sync the real running state whenever the pending stop appears or
+  // disappears — the backend's applier thread does the actual stop once the
+  // delay elapses (and a cancel from Settings withdraws it); either way this
+  // notices and keeps the status chip honest.
+  React.useEffect(() => {
+    if (!native) return;
+    PPNative.nsfwMonitorRunning().then((r) => setRunning(r));
+  }, [!!stopPending]);
 
   const labels = (last && last.labels) || ['Anime-SFW', 'Hentai', 'Normal-SFW', 'Pornography', 'Enticing or Sensual'];
   const scores = (last && last.scores) || [];
@@ -82,6 +110,12 @@ function MonitorPage() {
             <span style={{ width: 9, height: 9, borderRadius: '50%', background: running ? '#22c55e' : '#9ca3af', boxShadow: running ? '0 0 8px #22c55e' : 'none' }} />
             {running ? 'Monitoring' : 'Stopped'}
           </span>
+          {stopPending &&
+            /* fmtDur is a plain top-level function in pages-settings.jsx; cross-file
+               load order is safe here for the same reason noted in pages-blocking.jsx. */
+            <span className="chip" style={{ color: 'var(--muted)' }}>
+              Stops in {fmtDur(stopPending.remaining_secs)} — cancel in Settings
+            </span>}
           {running
             ? <button className="btn btn-ghost" onClick={stop}><IconX size={16} /> Stop</button>
             : <button className="btn btn-primary" onClick={start}><IconSearch size={16} /> Start monitoring</button>}

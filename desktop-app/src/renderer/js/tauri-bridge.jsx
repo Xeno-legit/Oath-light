@@ -20,9 +20,18 @@
 
   window.PPNative = {
     available,
-    // Re-apply the force-install policy (dormant/no-op until release config set).
+    // Re-apply the force-install policy. Live for Chromium (user-scope by
+    // default); still dormant for Firefox while it's on hold.
     enforce(browserKey) { return invoke('enforce_extension', { browserKey: browserKey || null }); },
-    // Toggle the "keep the extension installed" guard.
+    // Ask for admin once (UAC) and lock the extension. Writing the policy needs
+    // elevation; this relaunches elevated, writes it, and sets up silent
+    // elevated re-assertion at future logins.
+    requestElevatedSetup() { return invoke('request_elevated_setup'); },
+    // Toggle the "keep the extension installed" guard. Turning it ON is
+    // instant; turning it OFF is a friction-gated weakening (4.1) — resolves
+    // to { applied, pending }. When `applied` is false the guard is still ON
+    // and stays that way until `pending`'s delay elapses; callers must not
+    // treat the guard as off just because this resolved.
     setGuard(enabled) { return invoke('set_guard_enabled', { enabled: !!enabled }); },
     // Ask all connected extensions to push fresh stats/blocklists.
     requestSync() { return invoke('request_sync'); },
@@ -53,9 +62,29 @@
     // Classify an image file with the NSFW model (Phase 4 optional AI layer).
     // Resolves to { scores, top_label, top_score, nsfw_score, sensitive_score }.
     classifyImage(path) { return invoke('classify_image', { path }); },
-    // Background screen monitor (scans the screen on major changes).
+    // Background screen monitor (scans the screen on major changes). Starting
+    // is always instant. Stopping is a friction-gated weakening (4.1) —
+    // resolves to { applied, pending }; when `applied` is false the monitor
+    // is still running and stays that way until `pending`'s delay elapses.
     startNsfwMonitor() { return invoke('start_nsfw_monitor'); },
     stopNsfwMonitor() { return invoke('stop_nsfw_monitor'); },
+
+    // Friction (4.1/4.3): every pending "weakening" of protection (uninstall
+    // guard, AI monitor, a custom-block removal) — the backend is the source
+    // of truth for the countdown, never the renderer's own clock.
+    getPendingWeakenings() {
+      return invoke('get_pending_weakenings').catch((e) => { console.warn('[PurePath] getPendingWeakenings failed:', e); return []; });
+    },
+    cancelWeakening(actionId) {
+      return invoke('cancel_weakening', { actionId })
+        .catch((e) => console.warn('[PurePath] cancelWeakening failed:', e));
+    },
+    // Request removal of a custom-blocked domain — a weakening, gated behind
+    // the friction delay; the domain stays blocked until it elapses.
+    removeCustomDomain(domain) {
+      return invoke('remove_custom_domain', { domain })
+        .catch((e) => { console.warn('[PurePath] removeCustomDomain failed:', e); return null; });
+    },
     nsfwMonitorRunning() { return invoke('nsfw_monitor_running').catch(() => false); },
     // Subscribe to live scan results; resolves to an unlisten function.
     onNsfwScan(cb) {
@@ -123,6 +152,27 @@
       return () => { cancelled = true; if (unlisten) unlisten(); };
     }, []);
     return counts;
+  };
+
+  // React hook — polls the friction store's pending weakenings (uninstall
+  // guard / AI monitor disables, custom-block removals) while mounted. The
+  // backend is the source of truth (persisted, clock-tamper immune — see
+  // friction.rs), so this is a poll, not a push; 1.5s is fast enough for a
+  // live-feeling countdown without hammering the backend. Returns [] outside
+  // Tauri.
+  window.usePendingWeakenings = function usePendingWeakenings() {
+    const [pending, setPending] = React.useState([]);
+    React.useEffect(() => {
+      if (!available) return;
+      let cancelled = false;
+      const refresh = () => window.PPNative.getPendingWeakenings().then((list) => {
+        if (!cancelled && Array.isArray(list)) setPending(list);
+      });
+      refresh();
+      const id = setInterval(refresh, 1500);
+      return () => { cancelled = true; clearInterval(id); };
+    }, []);
+    return pending;
   };
 
   // React hook — subscribes to the monitor's per-browser status stream.

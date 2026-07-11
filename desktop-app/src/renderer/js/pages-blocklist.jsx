@@ -83,11 +83,31 @@ function BlocklistPage({ s, PP }) {
     PP.set({ blocklist: { customSites: list } });
     setNewSite('');
   }
-  function removeSite(id) {
-    PP.put('blocklist', { ...bl, customSites: bl.customSites.filter((x) => x.id !== id) });
+  function removeSite(site) {
+    if (window.PPNative && window.PPNative.available) {
+      // Fire the removal request — the backend keeps actually enforcing the
+      // block until the friction delay elapses (4.1). This only registers
+      // the request; it does not wait for it.
+      window.PPNative.removeCustomDomain(site.url).catch(() => {});
+    }
+    // Local list update happens either way, same as before removeCustomDomain
+    // existed — this is the renderer's own cosmetic copy, not the enforcement.
+    PP.put('blocklist', { ...bl, customSites: bl.customSites.filter((x) => x.id !== site.id) });
   }
   function removeAllow(id) {
     PP.put('blocklist', { ...bl, allow: bl.allow.filter((x) => x.id !== id) });
+  }
+  // Pending custom-block removals (4.1) — sites that still show removed from
+  // the list above but the backend is still blocking until the delay elapses.
+  const pendingRemovals = (window.usePendingWeakenings || (() => []))()
+    .filter((p) => p.action_id.indexOf('custom_block.remove:') === 0);
+  function keepBlocking(p) {
+    const domain = p.action_id.slice('custom_block.remove:'.length);
+    window.PPNative.cancelWeakening(p.action_id).then(() => {
+      if (!bl.customSites.some((x) => x.url === domain)) {
+        PP.put('blocklist', { ...bl, customSites: [...bl.customSites, { id: Date.now(), url: domain, added: 'restored' }] });
+      }
+    });
   }
 
   const grayResult = checkGraylist(grayQuery, bl.graylist);
@@ -223,11 +243,33 @@ function BlocklistPage({ s, PP }) {
           <div className="setting" key={site.id} style={{ padding: '13px 14px' }}>
                 <div className="ico" style={{ background: 'color-mix(in oklab, var(--accent-2) 14%, transparent)', color: 'var(--accent-2)' }}><IconShield size={18} /></div>
                 <div className="txt"><b>{site.url}</b><span>Added {site.added}</span></div>
-                <button className="btn btn-ghost btn-sm" onClick={() => removeSite(site.id)}><IconTrash size={15} /></button>
+                <button className="btn btn-ghost btn-sm" onClick={() => removeSite(site)}><IconTrash size={15} /></button>
               </div>
           )}
             {!bl.customSites.length && <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>No custom sites yet.</div>}
           </div>
+
+          {/* pending removals (4.1) — still blocked until the delay elapses */}
+          {pendingRemovals.length > 0 &&
+            <div className="card" style={{ padding: 8 }}>
+              <div style={{ fontWeight: 800, fontSize: 13, padding: '10px 14px 2px' }}>Pending removals</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', padding: '0 14px 10px' }}>
+                Still blocked until the delay below elapses — click "Keep blocking" to cancel the removal.
+              </div>
+              {pendingRemovals.map((p) => {
+                const domain = p.action_id.slice('custom_block.remove:'.length);
+                return (
+                  <div className="setting" key={p.action_id} style={{ padding: '13px 14px' }}>
+                    <div className="ico" style={{ background: 'color-mix(in oklab, #d9a441 18%, transparent)', color: '#c9962f' }}><IconShield size={18} /></div>
+                    {/* fmtDur is a plain top-level function in pages-settings.jsx; see the
+                        note in pages-blocking.jsx for why cross-file load order is safe here. */}
+                    <div className="txt"><b>{domain}</b><span>Unblocks in {fmtDur(p.remaining_secs)}</span></div>
+                    <button className="btn btn-ghost btn-sm" onClick={() => keepBlocking(p)}>Keep blocking</button>
+                  </div>
+                );
+              })}
+            </div>
+          }
         </div>
       }
 

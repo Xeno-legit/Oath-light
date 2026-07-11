@@ -40,12 +40,13 @@ pub const GECKO_EXTENSION_ID: &str = "purepath@xeno-legit.github.io";
 /// Native messaging host name (must match `connectNative()` in background.js).
 pub const HOST_NAME: &str = "com.purepath.companion";
 
-/// Update URL used by the Chromium force-install policy. EMPTY until the
-/// extension is published / self-hosted. While empty, enforcement is DORMANT:
-/// detection & monitoring run, but no policy is written. Set this to
-/// `https://clients2.google.com/service/update2/crx` (Web Store) or a
-/// self-hosted update manifest URL at release time.
-pub const CHROMIUM_UPDATE_URL: &str = "";
+/// Update URL used by the Chromium force-install policy. Points at the update
+/// manifest the desktop app serves from localhost (see `update_server` in
+/// lib.rs); the port MUST match `UPDATE_SERVER_PORT` there and the codebase URL
+/// baked into `scripts/pack-extension.mjs`. Non-empty, so Chromium enforcement
+/// is LIVE. (Firefox/Gecko is intentionally still dormant — `FIREFOX_XPI_URL`
+/// below is empty while that browser is on hold.)
+pub const CHROMIUM_UPDATE_URL: &str = "http://127.0.0.1:17244/update_manifest.xml";
 
 /// Signed-XPI URL for the Firefox force-install policy. EMPTY until published
 /// on AMO / self-hosted. Same dormant-until-set behaviour.
@@ -217,18 +218,22 @@ pub fn detect_running_from(names: &[String]) -> Vec<&'static str> {
 /// Returns true if running is already known; otherwise probes the registry.
 #[cfg(target_os = "windows")]
 pub fn is_installed(def: &BrowserDef) -> bool {
+    // The `App Paths\<exe>` key must not merely EXIST — uninstalling a browser
+    // can leave the key behind empty (observed: Opera leaves an empty HKCU
+    // `App Paths\opera.exe` after removal). The old "key exists → installed"
+    // check then reported a ghost browser and wrote a force-install policy for
+    // one that's gone. Require the key to hold a REG_SZ that actually points at
+    // an executable still present on disk.
     for root in ["HKLM", "HKCU"] {
         let key = format!(
             r"{}\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{}",
             root, def.app_path_exe
         );
-        let ok = reg()
-            .args(["query", &key])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        if ok {
-            return true;
+        for (_, data) in read_reg_sz_values(&key) {
+            let p = data.trim().trim_matches('"');
+            if !p.is_empty() && Path::new(p).exists() {
+                return true;
+            }
         }
     }
     false
@@ -353,11 +358,19 @@ pub fn unregister_all_hosts() {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum EnforceOutcome {
-    /// No update URL configured yet (pre-release) — nothing written.
+    /// No update URL configured yet — nothing written. (Firefox while on hold.)
     Dormant,
-    /// Policy successfully written.
-    Enforced,
-    /// Attempted but failed (e.g. needs elevation).
+    /// Policy written to `HKLM` — a machine-wide hard lock the blocked user
+    /// cannot remove without elevation. Only reachable when the app itself runs
+    /// elevated (Stage 2). This is the strong outcome.
+    EnforcedMachine,
+    /// Policy written to `HKCU` because `HKLM` was refused (no elevation — the
+    /// Stage 1 default today). Real and effective — the browser greys out the
+    /// Remove button and reinstalls on removal — but the policy value lives in
+    /// the user's own hive, so a determined user with a shell can delete it
+    /// without a prompt. Surfaced honestly in the UI as "user-level".
+    EnforcedUser,
+    /// Attempted but neither hive accepted the write.
     Failed,
     /// Platform/engine not supported for enforcement. (macOS/Linux.)
     #[allow(dead_code)]
@@ -372,89 +385,225 @@ pub fn enforcement_configured(engine: Engine) -> bool {
     }
 }
 
+/// Whether this device can actually honor an **off-Web-Store** force-install.
+///
+/// Chrome and Edge deliberately ignore an `ExtensionInstallForcelist` entry that
+/// points at a self-hosted update URL (like ours) unless the machine is
+/// enterprise-managed: joined to an AD domain, joined to Entra/Azure AD, or
+/// enrolled in Chrome Browser Cloud Management. On a plain consumer machine the
+/// policy is accepted into the registry and shows in `chrome://policy`, but the
+/// extension is *silently never installed* — this is the exact anti-malware
+/// measure our self-hosted force-install runs into. (Web-Store-hosted
+/// force-installs are exempt and work unmanaged; self-hosted ones are not.)
+///
+/// We detect the precondition so the app can report the truth instead of a lock
+/// the browser will never apply, and so it doesn't leave a dead "managed by your
+/// organization" policy on machines where it can't work. Cached — it can't
+/// change within a session.
+#[cfg(target_os = "windows")]
+pub fn offstore_forceinstall_supported() -> bool {
+    use std::os::windows::process::CommandExt;
+    use std::sync::OnceLock;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        // Chrome Browser Cloud Management enrollment token (Chrome or Edge).
+        for base in [
+            r"HKLM\SOFTWARE\Policies\Google\Chrome",
+            r"HKLM\SOFTWARE\Policies\Microsoft\Edge",
+        ] {
+            let enrolled = reg()
+                .args(["query", base, "/v", "CloudManagementEnrollmentToken"])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if enrolled {
+                return true;
+            }
+        }
+        // AD domain / Entra (Azure AD) / enterprise join, via dsregcmd.
+        if let Ok(o) = std::process::Command::new("dsregcmd")
+            .arg("/status")
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+        {
+            let t = String::from_utf8_lossy(&o.stdout)
+                .to_ascii_uppercase()
+                .replace(' ', "");
+            if t.contains("AZUREADJOINED:YES")
+                || t.contains("DOMAINJOINED:YES")
+                || t.contains("ENTERPRISEJOINED:YES")
+            {
+                return true;
+            }
+        }
+        false
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn offstore_forceinstall_supported() -> bool {
+    false
+}
+
+/// Read the `REG_SZ` values of a registry key as `(value_name, data)` pairs via
+/// `reg query`. Empty vec if the key is absent or unreadable (reading `HKLM`
+/// policy keys is permitted for standard users even though *writing* is not, so
+/// this works to pick a non-colliding ordinal before an elevated write).
+#[cfg(target_os = "windows")]
+fn read_reg_sz_values(full_key: &str) -> Vec<(String, String)> {
+    let stdout = match reg().args(["query", full_key]).output() {
+        Ok(o) if o.status.success() => o.stdout,
+        _ => return Vec::new(),
+    };
+    let text = String::from_utf8_lossy(&stdout);
+    let mut vals = Vec::new();
+    for line in text.lines() {
+        // Value rows are indented ("    <name>    REG_SZ    <data>"); the key
+        // path header and any subkey paths sit at column 0 — skip those.
+        if line.is_empty() || !line.starts_with(char::is_whitespace) {
+            continue;
+        }
+        let trimmed = line.trim_start();
+        if let Some(pos) = trimmed.find("REG_SZ") {
+            let name = trimmed[..pos].trim().to_string();
+            let data = trimmed[pos + "REG_SZ".len()..].trim().to_string();
+            if !name.is_empty() {
+                vals.push((name, data));
+            }
+        }
+    }
+    vals
+}
+
+/// True when `data` is a forcelist entry for *our* extension (its `id;url` form
+/// starts with our ID).
+#[cfg(target_os = "windows")]
+fn is_our_forcelist_entry(data: &str) -> bool {
+    data.split(';').next() == Some(EXTENSION_ID)
+}
+
+/// Choose the `ExtensionInstallForcelist` value name to write under: reuse the
+/// one already holding our ID if present, otherwise the lowest positive ordinal
+/// not already taken. This avoids clobbering another managed extension's entry —
+/// the previous code hard-wrote value "1", which on a real enterprise machine
+/// could belong to someone else's mandatory extension.
+#[cfg(target_os = "windows")]
+fn pick_forcelist_value(full_key: &str) -> String {
+    let entries = read_reg_sz_values(full_key);
+    if let Some((name, _)) = entries.iter().find(|(_, data)| is_our_forcelist_entry(data)) {
+        return name.clone();
+    }
+    let used: std::collections::HashSet<u32> =
+        entries.iter().filter_map(|(n, _)| n.parse::<u32>().ok()).collect();
+    let mut n = 1u32;
+    while used.contains(&n) {
+        n += 1;
+    }
+    n.to_string()
+}
+
+/// If our force-install policy is **already** present, report which scope it's
+/// in (HKLM checked first, then HKCU) without writing anything. This lets the
+/// app correctly report a policy written by the elevated installer — or by a
+/// previous elevated run — instead of trying (and failing, unelevated) to
+/// re-write it and showing "failed".
+#[cfg(target_os = "windows")]
+pub fn policy_present(def: &BrowserDef) -> Option<EnforceOutcome> {
+    if def.engine != Engine::Chromium {
+        return None; // Gecko is on hold; nothing to detect.
+    }
+    for (root, strong) in [("HKLM", true), ("HKCU", false)] {
+        let key = format!(r"{}\{}\ExtensionInstallForcelist", root, def.policy_subkey);
+        if read_reg_sz_values(&key).iter().any(|(_, d)| is_our_forcelist_entry(d)) {
+            return Some(if strong {
+                EnforceOutcome::EnforcedMachine
+            } else {
+                EnforceOutcome::EnforcedUser
+            });
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn policy_present(_def: &BrowserDef) -> Option<EnforceOutcome> {
+    None
+}
+
 /// Write the force-install policy for `def` so a removed/disabled extension is
-/// reinstalled on the browser's next launch / policy refresh. Prefers HKLM
-/// (machine-wide, hard lock — the desktop app already runs elevated); falls
-/// back to HKCU. Dormant while the update URL is empty.
+/// reinstalled on the browser's next launch / policy refresh.
+///
+/// **Requires elevation.** The `Software\Policies` registry subtree is
+/// ACL-protected against standard users in **both** `HKLM` *and* `HKCU` — a
+/// non-elevated process cannot write there, so this returns `Failed` unless the
+/// app is running elevated. (An earlier design assumed an unelevated HKCU write
+/// would work; it does not. Getting the policy written therefore needs either an
+/// elevated install-time write or the SYSTEM service — see the plan.) When the
+/// policy already exists this returns early via `policy_present` and writes
+/// nothing.
 #[cfg(target_os = "windows")]
 pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
     if !enforcement_configured(def.engine) {
         return EnforceOutcome::Dormant;
     }
+    // Already set (e.g. by the elevated installer)? Report it, don't re-write.
+    if let Some(existing) = policy_present(def) {
+        return existing;
+    }
+
+    // (hive prefix, is this the strong machine-wide scope?)
+    const HIVES: [(&str, bool); 2] = [("HKLM", true), ("HKCU", false)];
 
     match def.engine {
         Engine::Chromium => {
             let entry = format!("{};{}", EXTENSION_ID, CHROMIUM_UPDATE_URL);
-            // ExtensionInstallForcelist is a list keyed by ordinal value names.
-            let mut ok = false;
-            for root in ["HKLM", "HKCU"] {
-                let key =
-                    format!(r"{}\{}\ExtensionInstallForcelist", root, def.policy_subkey);
-                let res = reg()
-                    .args([
-                        "add", &key, "/v", "1", "/t", "REG_SZ", "/d", &entry, "/f",
-                    ])
-                    .output();
-                if res.map(|o| o.status.success()).unwrap_or(false) {
-                    ok = true;
-                    break;
+            for (root, strong) in HIVES {
+                let key = format!(r"{}\{}\ExtensionInstallForcelist", root, def.policy_subkey);
+                let value = pick_forcelist_value(&key);
+                let ok = reg()
+                    .args(["add", &key, "/v", &value, "/t", "REG_SZ", "/d", &entry, "/f"])
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                if ok {
+                    return if strong {
+                        EnforceOutcome::EnforcedMachine
+                    } else {
+                        EnforceOutcome::EnforcedUser
+                    };
                 }
             }
-            if ok {
-                EnforceOutcome::Enforced
-            } else {
-                EnforceOutcome::Failed
-            }
+            EnforceOutcome::Failed
         }
         Engine::Gecko => {
-            // Firefox uses ExtensionSettings with installation_mode=force_installed.
-            let base = format!(
-                r"{}\ExtensionSettings\{}",
-                def.policy_subkey, GECKO_EXTENSION_ID
-            );
-            let mut ok = false;
-            for root in ["HKLM", "HKCU"] {
+            // KNOWN DEFECT (Firefox on hold — see Extension_Force_Install_Plan.md
+            // §7): Mozilla's `ExtensionSettings` Windows format is believed to be
+            // a single REG_SZ holding the whole JSON object, not the nested
+            // subkeys written here. Unreachable today (FIREFOX_XPI_URL is empty),
+            // so it never runs — fix this before taking Firefox off hold.
+            let base = format!(r"{}\ExtensionSettings\{}", def.policy_subkey, GECKO_EXTENSION_ID);
+            for (root, strong) in HIVES {
                 let key = format!(r"{}\{}", root, base);
                 let a = reg()
-                    .args([
-                        "add",
-                        &key,
-                        "/v",
-                        "installation_mode",
-                        "/t",
-                        "REG_SZ",
-                        "/d",
-                        "force_installed",
-                        "/f",
-                    ])
+                    .args(["add", &key, "/v", "installation_mode", "/t", "REG_SZ", "/d", "force_installed", "/f"])
                     .output()
                     .map(|o| o.status.success())
                     .unwrap_or(false);
                 let b = reg()
-                    .args([
-                        "add",
-                        &key,
-                        "/v",
-                        "install_url",
-                        "/t",
-                        "REG_SZ",
-                        "/d",
-                        FIREFOX_XPI_URL,
-                        "/f",
-                    ])
+                    .args(["add", &key, "/v", "install_url", "/t", "REG_SZ", "/d", FIREFOX_XPI_URL, "/f"])
                     .output()
                     .map(|o| o.status.success())
                     .unwrap_or(false);
                 if a && b {
-                    ok = true;
-                    break;
+                    return if strong {
+                        EnforceOutcome::EnforcedMachine
+                    } else {
+                        EnforceOutcome::EnforcedUser
+                    };
                 }
             }
-            if ok {
-                EnforceOutcome::Enforced
-            } else {
-                EnforceOutcome::Failed
-            }
+            EnforceOutcome::Failed
         }
     }
 }
@@ -469,18 +618,23 @@ pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
 }
 
 /// Remove any force-install policy we may have written for `def`. Used when the
-/// user completes a 24-hour uninstall so the extension is no longer pinned and
-/// can actually be removed. Best-effort and idempotent — deleting an absent key
-/// is a harmless no-op (and it's a no-op anyway while enforcement is dormant).
+/// user completes an uninstall so the extension is no longer pinned and can
+/// actually be removed. Best-effort and idempotent.
+///
+/// For Chromium it deletes **only** the forcelist value(s) whose data is our own
+/// entry — never a fixed ordinal — so a co-existing managed extension on the
+/// same machine is left untouched (mirrors the collision-safe write above).
 #[cfg(target_os = "windows")]
 pub fn remove_policy(def: &BrowserDef) {
     match def.engine {
         Engine::Chromium => {
-            // Drop only our ordinal entry, leaving any other managed forcelist
-            // values (and the forcelist key itself) untouched.
             for root in ["HKLM", "HKCU"] {
                 let key = format!(r"{}\{}\ExtensionInstallForcelist", root, def.policy_subkey);
-                let _ = reg().args(["delete", &key, "/v", "1", "/f"]).output();
+                for (name, data) in read_reg_sz_values(&key) {
+                    if is_our_forcelist_entry(&data) {
+                        let _ = reg().args(["delete", &key, "/v", &name, "/f"]).output();
+                    }
+                }
             }
         }
         Engine::Gecko => {

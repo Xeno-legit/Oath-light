@@ -1,9 +1,11 @@
 mod browsers;
+mod friction;
 pub mod nsfw;
 pub mod nudenet;
 mod overlay;
 mod profiles;
 pub mod screen;
+mod settings;
 mod uninstall;
 mod watchdog;
 
@@ -18,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
+use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 // ============================================================================
@@ -763,6 +766,145 @@ fn start_tcp_server(app: AppHandle, state: Arc<Mutex<AppState>>) {
     });
 }
 
+// ============================================================================
+// Update server — serves the packed CRX + update manifest over localhost so the
+// Chromium force-install policy can pull the extension fully offline.
+// ============================================================================
+
+/// Port the update server binds. MUST match the port in `CHROMIUM_UPDATE_URL`
+/// (browsers.rs) and the codebase URL baked into `scripts/pack-extension.mjs`.
+const UPDATE_SERVER_PORT: u16 = 17244;
+
+/// Flipped true once the update server has bound its port AND holds the packed
+/// CRX + manifest. Enforcement MUST NOT write a force-install policy until this
+/// is true: a policy points browsers at our update URL, and if nothing answers
+/// there the browser locks itself to an extension it can never install —
+/// policy-forced and un-removable. Gating on this is what stops that brick.
+static UPDATE_SERVER_READY: AtomicBool = AtomicBool::new(false);
+
+/// Set after an elevated setup pass completes, to tell the monitor to flush its
+/// per-session enforcement memo and re-read the policy state (which the elevated
+/// pass just wrote). Without this the monitor would keep showing the pre-
+/// elevation "needs admin" result it had already memoized.
+static RE_ENFORCE_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Bind the localhost update server. The Chromium `ExtensionInstallForcelist`
+/// policy points browsers at `http://127.0.0.1:17244/update_manifest.xml`; this
+/// serves that manifest and the signed `purepath.crx` next to it. Two static
+/// files, hand-rolled HTTP/1.1, no dependency.
+///
+/// Reads both files once at startup (they're bundled Tauri resources produced by
+/// `pack-extension.mjs`). If they can't be found — e.g. the packer didn't run —
+/// it logs and does **not** bind, so browsers simply fail to resolve the update
+/// rather than being served a broken response.
+/// Load the packed CRX + update manifest, trying the bundled resource dir first
+/// (production) and then the dev source tree (`CARGO_MANIFEST_DIR/resources`,
+/// where `pack-extension.mjs` writes during `tauri dev` — the Resource base
+/// dir does not point there in dev). `None` if either file is missing anywhere.
+fn load_update_assets(app: &AppHandle) -> Option<(Vec<u8>, Vec<u8>)> {
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(p) = app.path().resolve("resources", BaseDirectory::Resource) {
+        roots.push(p);
+    }
+    roots.push(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources"));
+
+    let read_first = |name: &str| -> Option<Vec<u8>> {
+        roots.iter().find_map(|r| std::fs::read(r.join(name)).ok())
+    };
+    match (read_first("update_manifest.xml"), read_first("purepath.crx")) {
+        (Some(x), Some(c)) => Some((x, c)),
+        _ => None,
+    }
+}
+
+fn start_update_server(app: AppHandle) {
+    let (xml, crx) = match load_update_assets(&app) {
+        Some((x, c)) => (Arc::new(x), Arc::new(c)),
+        None => {
+            // Do not start, and leave UPDATE_SERVER_READY false so enforcement
+            // never points a browser at a URL nothing will answer.
+            log::error!(
+                "update server: packed extension resources not found — not starting (enforcement stays off)"
+            );
+            return;
+        }
+    };
+
+    std::thread::spawn(move || {
+        let addr = format!("127.0.0.1:{}", UPDATE_SERVER_PORT);
+        let listener = match TcpListener::bind(&addr) {
+            Ok(l) => {
+                log::info!("update server listening on {}", addr);
+                l
+            }
+            Err(e) => {
+                log::error!("update server: failed to bind {}: {}", addr, e);
+                return;
+            }
+        };
+        // Bound and holding the assets — only now is it safe for enforcement to
+        // point browsers at us.
+        UPDATE_SERVER_READY.store(true, Ordering::SeqCst);
+        for stream in listener.incoming() {
+            let stream = match stream {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let xml = xml.clone();
+            let crx = crx.clone();
+            std::thread::spawn(move || serve_update_conn(stream, &xml, &crx));
+        }
+    });
+}
+
+/// Handle one update-server request. We only need the request line's path; the
+/// two routes serve static bytes with `Connection: close`.
+fn serve_update_conn(mut stream: TcpStream, xml: &[u8], crx: &[u8]) {
+    use std::io::{Read, Write};
+    let peer = stream
+        .peer_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| "?".to_string());
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+    let mut buf = [0u8; 1024];
+    let n = match stream.read(&mut buf) {
+        Ok(n) if n > 0 => n,
+        _ => return,
+    };
+    let req = String::from_utf8_lossy(&buf[..n]);
+    let path = req
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .unwrap_or("");
+
+    let (status, ctype, body): (&str, &str, &[u8]) = if path.starts_with("/update_manifest.xml") {
+        ("200 OK", "application/xml", xml)
+    } else if path.starts_with("/purepath.crx") {
+        ("200 OK", "application/x-chrome-extension", crx)
+    } else {
+        ("404 Not Found", "text/plain", b"not found")
+    };
+
+    // These are the only signal we have that a real Chrome ever reached the
+    // localhost update endpoint, vs. the policy silently not taking effect.
+    if status == "200 OK" {
+        log::info!("update server: {} GET {} -> 200 ({} bytes)", peer, path, body.len());
+    } else {
+        log::warn!("update server: {} GET {} -> 404", peer, path);
+    }
+
+    let header = format!(
+        "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        status,
+        ctype,
+        body.len()
+    );
+    let _ = stream.write_all(header.as_bytes());
+    let _ = stream.write_all(body);
+    let _ = stream.flush();
+}
+
 /// One native-host connection. The host sends `host_hello` first (identifying
 /// the browser that spawned it), then relays the extension's messages (which
 /// carry the per-profile id).
@@ -874,7 +1016,11 @@ fn engine_str(engine: Engine) -> &'static str {
 fn enforce_str(outcome: EnforceOutcome) -> &'static str {
     match outcome {
         EnforceOutcome::Dormant => "dormant",
-        EnforceOutcome::Enforced => "enforced",
+        // "enforced" = machine-wide HKLM hard lock (Stage 2, elevated).
+        EnforceOutcome::EnforcedMachine => "enforced",
+        // "enforced_user" = HKCU user-scope lock (Stage 1 default). Real, but
+        // the UI must not claim it's un-removable — the user can delete it.
+        EnforceOutcome::EnforcedUser => "enforced_user",
         EnforceOutcome::Failed => "failed",
         EnforceOutcome::Unsupported => "unsupported",
     }
@@ -1074,9 +1220,13 @@ fn build_status(
 
 fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
     std::thread::spawn(move || {
-        // Browsers we've already enforced this session (don't re-write policy
-        // every tick); cleared when the browser becomes healthy again.
-        let mut enforced: HashSet<String> = HashSet::new();
+        // Browsers we've already enforced this session, remembering the outcome
+        // (which hive/scope the write landed in) so each tick can report it
+        // without touching the registry again. Write-once: once the policy is
+        // present, the browser reinstalls a removed extension on its own next
+        // launch, so there's nothing to re-do until the guard is toggled off.
+        // (Re-asserting a *deleted* policy key is Stage 2, the SYSTEM service.)
+        let mut enforced: HashMap<String, EnforceOutcome> = HashMap::new();
 
         loop {
             let now = now_unix_ms();
@@ -1086,31 +1236,78 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
 
             let mut statuses = build_status(&state, &running, &proc_names, now);
 
-            // Run enforcement when a browser's extension is gone entirely, or
-            // missing from some profile (force-install covers every profile).
+            // An elevated setup pass just wrote policy — drop the memo so every
+            // browser re-reads its (now written) state this tick.
+            if RE_ENFORCE_REQUESTED.swap(false, Ordering::SeqCst) {
+                enforced.clear();
+            }
+
+            // Proactive force-install: lock every Chromium browser present on
+            // this machine while the guard is on — not only ones whose extension
+            // already went missing — so a fresh, healthy install is pinned
+            // before any removal attempt.
             for st in statuses.iter_mut() {
-                if st.state != "extension_missing" && st.state != "running_partial" {
-                    enforced.remove(&st.key);
-                    continue;
-                }
                 let def = match browsers::browser_by_key(&st.key) {
                     Some(d) => d,
                     None => continue,
                 };
-                st.enforcement = if guard_enabled {
-                    if enforced.contains(&st.key) {
-                        if browsers::enforcement_configured(def.engine) { "enforced" } else { "dormant" }
-                            .to_string()
-                    } else {
-                        let outcome = browsers::enforce_policy(def);
-                        if outcome == EnforceOutcome::Enforced {
-                            enforced.insert(st.key.clone());
-                            log::warn!("[{}] extension missing — force-install policy applied", st.key);
-                        }
-                        enforce_str(outcome).to_string()
-                    }
+                if !guard_enabled {
+                    enforced.remove(&st.key);
+                    st.enforcement = "off".to_string();
+                    continue;
+                }
+                if !browsers::enforcement_configured(def.engine) {
+                    // Gecko while Firefox is on hold.
+                    st.enforcement = "dormant".to_string();
+                    continue;
+                }
+                if !(st.installed || st.running) {
+                    // Not present on this machine — nothing to pin.
+                    st.enforcement = "off".to_string();
+                    continue;
+                }
+                // Chrome/Edge silently drop an off-Web-Store force-install on an
+                // unmanaged consumer machine (see `offstore_forceinstall_supported`).
+                // Writing the policy there only produces a "managed by your
+                // organization" browser and a dead forcelist entry that never
+                // installs anything — so we don't write it, and we report the
+                // truth. This is a hard platform limit, not a retryable failure.
+                if !browsers::offstore_forceinstall_supported() {
+                    enforced.remove(&st.key);
+                    st.enforcement = "unsupported_device".to_string();
+                    continue;
+                }
+                if !UPDATE_SERVER_READY.load(Ordering::SeqCst) {
+                    // The update server isn't serving (still starting, or its
+                    // assets are missing). Writing a policy now would point the
+                    // browser at a dead URL and lock it there — so we don't.
+                    st.enforcement = "off".to_string();
+                    continue;
+                }
+                let outcome = if let Some(&cached) = enforced.get(&st.key) {
+                    cached
                 } else {
-                    "off".to_string()
+                    let o = browsers::enforce_policy(def);
+                    // Memoize EVERY decisive outcome, including Failed, so we
+                    // don't re-run `reg` every tick. Toggling the guard clears
+                    // this memo; the Restore button calls enforce_policy directly.
+                    enforced.insert(st.key.clone(), o);
+                    log::warn!("[{}] force-install policy write: {}", st.key, enforce_str(o));
+                    o
+                };
+                // "enforced"/"locked" must mean the extension is actually present,
+                // not merely that the policy was written — that conflation is what
+                // made the UI claim "locked" while nothing was installed. Re-derive
+                // the reported status from profile ground truth each tick: a written
+                // policy with no real install is "pending" (a managed device may
+                // still be fetching the CRX), never a green "locked".
+                st.enforcement = match outcome {
+                    EnforceOutcome::EnforcedMachine | EnforceOutcome::EnforcedUser
+                        if !st.installed =>
+                    {
+                        "pending".to_string()
+                    }
+                    other => enforce_str(other).to_string(),
                 };
             }
 
@@ -1259,21 +1456,105 @@ fn check_domain_blocked(state: tauri::State<'_, Arc<Mutex<AppState>>>, domain: S
 /// down to every connected extension, and cache + persist them so a freshly-
 /// connecting profile (or a restart) still has them — the renderer's
 /// localStorage stays the source of truth; this is just the sync mechanism.
+///
+/// ADDITIONS-ONLY (4.1): the incoming list is unioned into the existing one —
+/// any domain currently blocked but missing from `domains` is deliberately
+/// left blocked rather than dropped. Dropping a block is a weakening, and
+/// weakenings only happen through the friction-gated `remove_custom_domain`.
+/// This matters because the renderer sends its FULL `customSites` list on
+/// every change: if this command removed anything absent from that list, a
+/// stale/wiped renderer `localStorage` (or just a race on startup) would
+/// silently unblock every custom site with no delay at all.
 #[tauri::command]
-fn set_custom_domains(app: AppHandle, state: tauri::State<'_, Arc<Mutex<AppState>>>, domains: Vec<String>) {
-    let normalized = normalize_domain_list(&domains);
-    {
+fn set_custom_domains(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Mutex<AppState>>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    domains: Vec<String>,
+) {
+    let incoming = normalize_domain_list(&domains);
+    let merged = {
         let mut s = state.lock().unwrap();
-        s.custom_domains = normalized.clone();
-    }
+        let dropped = s.custom_domains.iter().filter(|d| !incoming.contains(d)).count();
+        if dropped > 0 {
+            log::info!(
+                "set_custom_domains: ignoring {dropped} removal(s) implied by the incoming list — \
+                 use remove_custom_domain to actually unblock a site"
+            );
+        }
+        let mut merged = s.custom_domains.clone();
+        for d in &incoming {
+            if !merged.contains(d) {
+                merged.push(d.clone());
+            }
+        }
+        s.custom_domains = merged.clone();
+        merged
+    };
     if let Ok(dir) = app.path().app_data_dir() {
         let _ = std::fs::create_dir_all(&dir);
-        if let Ok(json) = serde_json::to_string_pretty(&normalized) {
+        if let Ok(json) = serde_json::to_string_pretty(&merged) {
             let _ = std::fs::write(dir.join("custom_domains.json"), json);
         }
     }
-    let msg = serde_json::json!({ "type": "set_custom_domains", "domains": normalized });
+    let msg = serde_json::json!({ "type": "set_custom_domains", "domains": merged });
     let _ = broadcast_to_extensions(state.inner(), &msg);
+
+    // Re-adding a domain withdraws any pending removal of it — a
+    // strengthening, so it is never gated.
+    for d in &incoming {
+        friction.cancel(&format!("custom_block.remove:{d}"));
+    }
+}
+
+/// Request removal of a custom-blocked domain (a weakening, gated behind the
+/// friction store — see `friction.rs`). The domain stays blocked until the
+/// delay elapses and the applier thread (in `setup`) actually removes it and
+/// re-broadcasts the updated list; this only registers the request.
+#[tauri::command]
+fn remove_custom_domain(
+    state: tauri::State<'_, Arc<Mutex<AppState>>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    domain: String,
+) -> Result<friction::PendingView, String> {
+    let norm = normalize_domain(&domain);
+    if norm.is_empty() {
+        return Err("Not a valid domain.".to_string());
+    }
+    let present = state.lock().unwrap().custom_domains.iter().any(|d| *d == norm);
+    if !present {
+        return Err(format!("{norm} is not in the custom blocklist."));
+    }
+    let action_id = format!("custom_block.remove:{norm}");
+    let view = friction.request(&action_id, &format!("Unblock {norm}"), serde_json::json!({ "domain": norm }));
+    log::warn!(
+        "custom-block removal requested for {norm} — {}s cool-off started (still blocked)",
+        view.delay_secs
+    );
+    Ok(view)
+}
+
+/// Every currently pending weakening (across the uninstall guard, the AI
+/// monitor, and any custom-block removals) — the settings page's "Pending
+/// changes" card and the blocking/blocklist pages' inline notes all read from
+/// this same list.
+#[tauri::command]
+fn get_pending_weakenings(friction: tauri::State<'_, Arc<friction::FrictionStore>>) -> Vec<friction::PendingView> {
+    friction.list()
+}
+
+/// Cancel a pending weakening outright — always a strengthening, so it is
+/// never gated by its own delay. Refuses `"uninstall"`: that flow has its own
+/// dedicated commands (`cancel_uninstall`) which additionally keep
+/// `uninstall.json` in sync for the watchdog/guardian — routing it through
+/// here instead would skip that mirror write.
+#[tauri::command]
+fn cancel_weakening(friction: tauri::State<'_, Arc<friction::FrictionStore>>, action_id: String) -> Result<(), String> {
+    if action_id == "uninstall" {
+        return Err("Use the uninstall page's own cancel action instead.".to_string());
+    }
+    friction.cancel(&action_id);
+    Ok(())
 }
 
 /// Current per-browser status (same shape as the `browsers-status` event).
@@ -1293,11 +1574,48 @@ fn set_app_streak(state: tauri::State<'_, Arc<Mutex<AppState>>>, streak: u64) {
     broadcast_app_data(state.inner());
 }
 
-/// Toggle the "keep the extension installed" guard (the uninstall-guard switch).
+/// Outcome of a request to weaken protection (turn something off). `applied`
+/// is true when the change took effect immediately (either it was a
+/// strengthening, or nothing needed to change); when false, `pending` carries
+/// the friction-gated request that must elapse before it actually applies —
+/// the caller (Rust or JS) must treat the protection as still ON in that case.
+#[derive(Debug, Clone, Serialize)]
+pub struct WeakeningOutcome {
+    pub applied: bool,
+    pub pending: Option<friction::PendingView>,
+}
+
+/// Toggle the "keep the extension installed" guard (the uninstall-guard
+/// switch). Turning it ON is always instant (a strengthening) and withdraws
+/// any pending disable. Turning it OFF is a weakening (4.1): the guard stays
+/// ON until the friction delay elapses and the applier thread (in `setup`)
+/// actually flips it — this only registers the request and returns it.
 #[tauri::command]
-fn set_guard_enabled(state: tauri::State<'_, Arc<Mutex<AppState>>>, enabled: bool) {
-    state.lock().unwrap().guard_enabled = enabled;
-    log::info!("Guard enabled set to {}", enabled);
+fn set_guard_enabled(
+    state: tauri::State<'_, Arc<Mutex<AppState>>>,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    enabled: bool,
+) -> WeakeningOutcome {
+    if enabled {
+        state.lock().unwrap().guard_enabled = true;
+        settings.update(|s| s.guard_enabled = true);
+        friction.cancel("guard.disable");
+        log::info!("Guard enabled set to true");
+        return WeakeningOutcome { applied: true, pending: None };
+    }
+
+    let already_off = !state.lock().unwrap().guard_enabled;
+    if already_off {
+        return WeakeningOutcome { applied: true, pending: None };
+    }
+
+    let view = friction.request("guard.disable", "Turn off the uninstall guard", serde_json::json!({}));
+    log::warn!(
+        "guard disable requested — {}s cool-off started (guard stays on until it elapses)",
+        view.delay_secs
+    );
+    WeakeningOutcome { applied: false, pending: Some(view) }
 }
 
 /// Push the desktop app's selected theme/palette to every connected extension,
@@ -1359,8 +1677,117 @@ fn enforce_extension(browser_key: Option<String>) -> Vec<(String, String)> {
     };
     targets
         .into_iter()
-        .map(|def| (def.key.to_string(), enforce_str(browsers::enforce_policy(def)).to_string()))
+        .map(|def| {
+            // Same honesty gate as the monitor: on an unmanaged device an
+            // off-store force-install can't take, so don't write a dead policy —
+            // report why instead.
+            let status = if def.engine == Engine::Chromium
+                && browsers::enforcement_configured(def.engine)
+                && !browsers::offstore_forceinstall_supported()
+            {
+                "unsupported_device".to_string()
+            } else {
+                enforce_str(browsers::enforce_policy(def)).to_string()
+            };
+            (def.key.to_string(), status)
+        })
         .collect()
+}
+
+/// Ask for admin once and lock the extension. Writing a browser force-install
+/// policy requires elevation (the `Software\Policies` registry key is admin-only
+/// in *both* hives), so an unelevated app can't do it. This relaunches ourselves
+/// elevated (a single UAC prompt) with `--elevated-setup`; that short-lived
+/// instance writes the policy and registers an elevated login task, then exits.
+/// When it finishes we flush the monitor's memo so the UI flips to "locked".
+///
+/// Fire-and-forget from the UI's side: it returns immediately and a background
+/// thread waits on the elevated pass. Windows-only; a no-op error elsewhere.
+#[tauri::command]
+fn request_elevated_setup() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        // Single-quote for PowerShell, escaping embedded quotes by doubling.
+        let exe_ps = exe.to_string_lossy().replace('\'', "''");
+        std::thread::spawn(move || {
+            let ps = format!(
+                "Start-Process -FilePath '{}' -ArgumentList '--elevated-setup' -Verb RunAs -Wait",
+                exe_ps
+            );
+            let status = std::process::Command::new("powershell")
+                .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps])
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
+            match status {
+                Ok(s) if s.success() => {
+                    RE_ENFORCE_REQUESTED.store(true, Ordering::SeqCst);
+                    log::warn!("elevated setup completed — flushing enforcement memo");
+                }
+                _ => log::warn!("elevated setup declined or failed"),
+            }
+        });
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Elevation is only supported on Windows".to_string())
+    }
+}
+
+/// The elevated one-shot (`--elevated-setup`). Runs with admin rights, writes the
+/// force-install policy for every Chromium browser, and registers an elevated
+/// logon task so future sessions re-assert the lock without a prompt. Then exits.
+///
+/// BRICK SAFETY: it writes a policy **only** if the localhost update server is
+/// actually answering (the running unelevated app serves it — binding a high
+/// port needs no admin). If nothing is serving, no policy is written, so a
+/// browser is never locked to a dead update URL.
+#[cfg(target_os = "windows")]
+fn elevated_setup() {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let addr: std::net::SocketAddr = match format!("127.0.0.1:{}", UPDATE_SERVER_PORT).parse() {
+        Ok(a) => a,
+        Err(_) => return,
+    };
+    let serving =
+        TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2)).is_ok();
+
+    if !browsers::offstore_forceinstall_supported() {
+        // Admin doesn't help here: Chrome/Edge won't honor an off-store
+        // force-install on an unmanaged device no matter who writes the key.
+        // Writing HKLM policy would just brand the browser "managed by your
+        // organization" for nothing, so skip it.
+        log::error!(
+            "elevated-setup: unmanaged device — Chrome/Edge won't honor an off-store force-install; skipping policy write"
+        );
+    } else if !serving {
+        log::error!("elevated-setup: update server not reachable — skipping policy write (no brick)");
+    } else {
+        for def in BROWSERS {
+            if def.engine == Engine::Chromium {
+                let _ = browsers::enforce_policy(def); // elevated -> writes HKLM
+            }
+        }
+    }
+
+    // Elevated logon task: re-asserts the lock on future logins with no prompt.
+    // Best-effort — the policy just written persists regardless, so the lock
+    // holds even if the task never runs.
+    if let Ok(exe) = std::env::current_exe() {
+        let tr = format!("\"{}\" --autostart", exe.display());
+        let _ = std::process::Command::new("schtasks")
+            .args([
+                "/Create", "/TN", "PurePathElevated", "/TR", &tr, "/SC", "ONLOGON",
+                "/RL", "HIGHEST", "/F",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
 }
 
 #[tauri::command]
@@ -1424,16 +1851,16 @@ fn classify_image(
     classifier.classify_path(std::path::Path::new(&path))
 }
 
-/// Start the background screen monitor (loads the model on first start). Emits a
-/// `nsfw-scan` event whenever the screen changes meaningfully. Idempotent.
-#[tauri::command]
-fn start_nsfw_monitor(
-    app: AppHandle,
-    nsfw_state: tauri::State<'_, NsfwState>,
-    monitor: tauri::State<'_, MonitorState>,
-    state: tauri::State<'_, Arc<Mutex<AppState>>>,
-    overlay_state: tauri::State<'_, Arc<overlay::OverlayState>>,
-) -> Result<(), String> {
+/// Shared implementation behind the `start_nsfw_monitor` command AND the
+/// setup-time auto-start (when `settings.monitor_enabled` was true on the
+/// previous run — see `run()`'s `.setup()`). Fetches every managed state it
+/// needs straight off the `AppHandle` so both call sites share one code path.
+fn start_nsfw_monitor_impl(app: &AppHandle) -> Result<(), String> {
+    let nsfw_state = app.state::<NsfwState>();
+    let monitor = app.state::<MonitorState>();
+    let state = app.state::<Arc<Mutex<AppState>>>();
+    let overlay_state = app.state::<Arc<overlay::OverlayState>>();
+
     if monitor.running.load(Ordering::SeqCst) {
         return Ok(());
     }
@@ -1475,10 +1902,45 @@ fn start_nsfw_monitor(
     Ok(())
 }
 
-/// Stop the background screen monitor.
+/// Start the background screen monitor (loads the model on first start). Emits a
+/// `nsfw-scan` event whenever the screen changes meaningfully. Idempotent.
+///
+/// Starting is always a strengthening — instant, never gated. It also persists
+/// the "auto-start on launch" preference and withdraws any pending
+/// `monitor.disable` weakening, the same rule `set_guard_enabled` follows for
+/// the uninstall guard: re-enabling something withdraws a pending disable of
+/// that same thing.
 #[tauri::command]
-fn stop_nsfw_monitor(monitor: tauri::State<'_, MonitorState>) {
-    monitor.running.store(false, Ordering::SeqCst);
+fn start_nsfw_monitor(
+    app: AppHandle,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+) -> Result<(), String> {
+    start_nsfw_monitor_impl(&app)?;
+    settings.update(|s| s.monitor_enabled = true);
+    friction.cancel("monitor.disable");
+    Ok(())
+}
+
+/// Stop the background screen monitor. A weakening (4.1): if it isn't running
+/// there's nothing to weaken, so this no-ops instant; otherwise it registers a
+/// `monitor.disable` request and returns it — the monitor keeps running until
+/// the delay elapses and the applier thread (in `setup`) actually flips it
+/// off.
+#[tauri::command]
+fn stop_nsfw_monitor(
+    monitor: tauri::State<'_, MonitorState>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+) -> WeakeningOutcome {
+    if !monitor.running.load(Ordering::SeqCst) {
+        return WeakeningOutcome { applied: true, pending: None };
+    }
+    let view = friction.request("monitor.disable", "Turn off the AI screen monitor", serde_json::json!({}));
+    log::warn!(
+        "monitor disable requested — {}s cool-off started (monitor keeps running until it elapses)",
+        view.delay_secs
+    );
+    WeakeningOutcome { applied: false, pending: Some(view) }
 }
 
 /// Whether the monitor is currently running.
@@ -1528,29 +1990,64 @@ fn stop_watchdog() {
 }
 
 // ============================================================================
-// 24-hour uninstall request (Phase 4 friction)
+// 24-hour uninstall request (Phase 4 friction) — now backed by the
+// generalized `friction::FrictionStore` under the `"uninstall"` action id,
+// rather than its own store. `uninstall.json` still gets written on every
+// request/reset/cancel (see `uninstall::write_marker`) purely as a mirror for
+// the release-build watchdog/guardian, which read it independently — see that
+// function's doc comment for why that protocol must not change.
 // ============================================================================
+
+/// Map the friction store's view of `"uninstall"` onto the exact
+/// `UninstallState` shape the renderer already consumes. `None` (no pending
+/// request) maps to the same "idle" shape the old dedicated store used to
+/// report: not requested, full delay remaining, not ready.
+fn uninstall_state_from(store: &friction::FrictionStore) -> uninstall::UninstallState {
+    match store.get("uninstall") {
+        Some(p) => uninstall::UninstallState {
+            requested: true,
+            requested_at: Some(p.requested_at),
+            delay_secs: p.delay_secs,
+            elapsed_secs: p.elapsed_secs,
+            remaining_secs: p.remaining_secs,
+            ready: p.ready,
+        },
+        None => {
+            let delay = friction::delay_for("uninstall");
+            uninstall::UninstallState {
+                requested: false,
+                requested_at: None,
+                delay_secs: delay,
+                elapsed_secs: 0,
+                remaining_secs: delay,
+                ready: false,
+            }
+        }
+    }
+}
 
 /// Current uninstall-request state (pending? ready? seconds remaining?).
 #[tauri::command]
-fn get_uninstall_state(
-    store: tauri::State<'_, Arc<uninstall::UninstallStore>>,
-) -> uninstall::UninstallState {
-    store.get()
+fn get_uninstall_state(friction: tauri::State<'_, Arc<friction::FrictionStore>>) -> uninstall::UninstallState {
+    uninstall_state_from(&friction)
 }
 
 /// Open an uninstall request, starting the cool-off countdown. Idempotent — an
 /// existing pending request keeps its original clock. Protection stays fully on.
 #[tauri::command]
 fn request_uninstall(
-    store: tauri::State<'_, Arc<uninstall::UninstallStore>>,
+    app: AppHandle,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
 ) -> uninstall::UninstallState {
-    let st = store.request();
+    let view = friction.request("uninstall", "Remove Pure Path from this computer", serde_json::json!({}));
+    if let Ok(dir) = app.path().app_data_dir() {
+        uninstall::write_marker(&dir, Some(view.requested_at));
+    }
     log::warn!(
         "uninstall requested — {}s cool-off started (protection stays active)",
-        st.delay_secs
+        view.delay_secs
     );
-    st
+    uninstall_state_from(&friction)
 }
 
 /// Restart the cool-off clock (available once the window has elapsed).
@@ -1566,13 +2063,19 @@ fn request_uninstall(
 /// touching the persisted state.
 #[tauri::command]
 fn reset_uninstall_timer(
-    store: tauri::State<'_, Arc<uninstall::UninstallStore>>,
+    app: AppHandle,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
 ) -> Result<uninstall::UninstallState, String> {
     if UNINSTALL_FIRED.load(Ordering::SeqCst) {
         return Err("Removal is already in progress — Pure Path is closing.".to_string());
     }
+    if let Some(view) = friction.reset("uninstall") {
+        if let Ok(dir) = app.path().app_data_dir() {
+            uninstall::write_marker(&dir, Some(view.requested_at));
+        }
+    }
     log::info!("uninstall timer reset");
-    Ok(store.reset())
+    Ok(uninstall_state_from(&friction))
 }
 
 /// Cancel the uninstall request and continue normally.
@@ -1584,13 +2087,18 @@ fn reset_uninstall_timer(
 /// self-delete worker is mid-teardown.
 #[tauri::command]
 fn cancel_uninstall(
-    store: tauri::State<'_, Arc<uninstall::UninstallStore>>,
+    app: AppHandle,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
 ) -> Result<uninstall::UninstallState, String> {
     if UNINSTALL_FIRED.load(Ordering::SeqCst) {
         return Err("Removal is already in progress — Pure Path is closing.".to_string());
     }
+    friction.cancel("uninstall");
+    if let Ok(dir) = app.path().app_data_dir() {
+        uninstall::write_marker(&dir, None);
+    }
     log::info!("uninstall request cancelled");
-    Ok(store.cancel())
+    Ok(uninstall_state_from(&friction))
 }
 
 /// Build the main window the way `tauri.conf.json`'s `app.windows[0]` used to
@@ -1762,7 +2270,7 @@ fn remove_uninstall_registry_entries() {}
 /// Ordering is deliberate and safety-critical: nothing is torn down until
 /// removal is guaranteed to actually proceed.
 ///   1. Win the `UNINSTALL_FIRED` latch, then immediately re-check
-///      `store.get().ready`. This closes a TOCTOU: the caller
+///      `friction.get("uninstall").ready`. This closes a TOCTOU: the caller
 ///      (`complete_uninstall`) checked readiness before calling in, but
 ///      `cancel_uninstall` / `reset_uninstall_timer` could in principle have
 ///      raced it in the gap between that check and winning the latch here (in
@@ -1797,7 +2305,7 @@ fn perform_uninstall(app: &AppHandle) -> Result<String, String> {
         return Ok("launched".to_string());
     }
 
-    // TOCTOU close: `complete_uninstall` checked `store.get().ready` before
+    // TOCTOU close: `complete_uninstall` checked `friction.get("uninstall").ready` before
     // calling here, but that check and this latch-win aren't atomic with each
     // other — a `cancel_uninstall`/`reset_uninstall_timer` call could in
     // principle land in the gap between them. Both of those commands are now
@@ -1807,8 +2315,8 @@ fn perform_uninstall(app: &AppHandle) -> Result<String, String> {
     // we're the confirmed sole winner of the latch, before anything is
     // touched. If it's no longer ready, unlatch so a future genuine attempt
     // isn't permanently blocked.
-    if let Some(store) = app.try_state::<Arc<uninstall::UninstallStore>>() {
-        if !store.get().ready {
+    if let Some(friction) = app.try_state::<Arc<friction::FrictionStore>>() {
+        if !friction.get("uninstall").map_or(false, |p| p.ready) {
             UNINSTALL_FIRED.store(false, Ordering::SeqCst);
             return Err("The waiting period hasn't elapsed yet.".to_string());
         }
@@ -1852,6 +2360,15 @@ fn perform_uninstall(app: &AppHandle) -> Result<String, String> {
         browsers::remove_policy(def);
     }
     browsers::unregister_all_hosts();
+    // Drop the elevated logon task, if we ever created one (best-effort).
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("schtasks")
+            .args(["/Delete", "/TN", "PurePathElevated", "/F"])
+            .creation_flags(0x0800_0000)
+            .status();
+    }
     // Best-effort: clear the NSIS Add/Remove Programs entry so it doesn't
     // linger in Settings -> Apps pointing at a deleted uninstaller. Purely
     // cosmetic — never blocks or fails the removal itself.
@@ -1884,9 +2401,9 @@ fn perform_uninstall(app: &AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn complete_uninstall(
     app: AppHandle,
-    store: tauri::State<'_, Arc<uninstall::UninstallStore>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
 ) -> Result<String, String> {
-    if !store.get().ready {
+    if !friction.get("uninstall").map_or(false, |p| p.ready) {
         return Err("The waiting period hasn't elapsed yet.".to_string());
     }
     perform_uninstall(&app)
@@ -1898,6 +2415,16 @@ fn complete_uninstall(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Elevated one-shot: this instance was relaunched with admin rights for the
+    // sole purpose of writing the force-install policy (which *requires*
+    // elevation — the `Software\Policies` key is admin-only) and registering the
+    // elevated login task. It must not launch the UI or take the watchdog mutex.
+    #[cfg(target_os = "windows")]
+    if std::env::args().any(|a| a == "--elevated-setup") {
+        elevated_setup();
+        return;
+    }
+
     // Dual-process watchdog (Phase 4 tamper resistance). Acquire the main-role
     // mutex and start guarding the guardian *before* the window comes up; this
     // also exits early if another main instance is already running.
@@ -1919,6 +2446,9 @@ pub fn run() {
             get_blocklist_counts,
             check_domain_blocked,
             set_custom_domains,
+            remove_custom_domain,
+            get_pending_weakenings,
+            cancel_weakening,
             get_browsers_status,
             set_guard_enabled,
             set_extension_theme,
@@ -1926,6 +2456,7 @@ pub fn run() {
             open_external,
             set_app_streak,
             enforce_extension,
+            request_elevated_setup,
             request_sync,
             update_blocklist_domains,
             update_blocklist_keywords,
@@ -2045,13 +2576,112 @@ pub fn run() {
             // so a release build can verify the cool-off before honoring the
             // shutdown sentinel, and so the guardian can be told the same path.
             watchdog::set_uninstall_json_path(udd.join("uninstall.json"));
-            let store = Arc::new(uninstall::UninstallStore::load(&udd));
-            app.manage(store);
-            // No background watcher here: the cool-off elapsing only flips
-            // `UninstallState.ready`, unlocking the explicit "Remove Pure Path
-            // now" action in the UI (`complete_uninstall`). Nothing removes
-            // itself automatically — see `perform_uninstall`.
 
+            // Generalized friction store (4.1/4.3) + backend-owned settings
+            // (A.3 seed). `friction::FrictionStore::load` migrates a legacy
+            // pending uninstall request out of `uninstall.json` on its own —
+            // see that function's doc comment.
+            let friction_store = Arc::new(friction::FrictionStore::load(&udd));
+            app.manage(friction_store.clone());
+            let settings_state = Arc::new(settings::SettingsState::load(&udd));
+            app.manage(settings_state.clone());
+            // AppState was constructed with the hardcoded pre-setup default
+            // (`guard_enabled: true`) before the persisted settings file could
+            // be read — now that it's loaded, the persisted value wins.
+            shared_state.lock().unwrap().guard_enabled = settings_state.get().guard_enabled;
+            // No background watcher for the uninstall request specifically:
+            // the cool-off elapsing only flips `UninstallState.ready`,
+            // unlocking the explicit "Remove Pure Path now" action in the UI
+            // (`complete_uninstall`). Nothing removes itself automatically —
+            // see `perform_uninstall`. Every OTHER weakening (guard/monitor
+            // disables, custom-block removals) DOES apply itself once ready —
+            // that's the applier thread below.
+
+            // Friction applier thread (4.1): once a weakening's delay has
+            // elapsed, actually apply it. Polls once a second — the friction
+            // store's own credited-time math (4.3) is what makes the delay
+            // itself clock-tamper immune, not this loop's cadence. Heartbeats
+            // (advance + persist) are throttled to every 30th tick; plain
+            // reads elsewhere already advance the in-memory copy, so this is
+            // just periodic flushing for stretches where nothing else happens
+            // to touch the store.
+            {
+                let app2 = app.handle().clone();
+                let friction2 = friction_store.clone();
+                let state2 = shared_state.clone();
+                let settings2 = settings_state.clone();
+                std::thread::spawn(move || {
+                    let mut tick: u64 = 0;
+                    loop {
+                        std::thread::sleep(Duration::from_secs(1));
+                        tick += 1;
+                        if tick % 30 == 0 {
+                            friction2.heartbeat();
+                        }
+                        for (action_id, payload) in friction2.take_ready() {
+                            if action_id == "guard.disable" {
+                                state2.lock().unwrap().guard_enabled = false;
+                                settings2.update(|s| s.guard_enabled = false);
+                                log::warn!("friction: uninstall guard disabled (weakening applied)");
+                            } else if action_id == "monitor.disable" {
+                                if let Some(monitor) = app2.try_state::<MonitorState>() {
+                                    monitor.running.store(false, Ordering::SeqCst);
+                                }
+                                settings2.update(|s| s.monitor_enabled = false);
+                                log::warn!("friction: AI monitor stopped (weakening applied)");
+                            } else if action_id.starts_with("custom_block.remove:") {
+                                let domain = payload
+                                    .get("domain")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or_default()
+                                    .to_string();
+                                if domain.is_empty() {
+                                    log::warn!(
+                                        "friction: '{action_id}' fired with no domain in its payload — dropping"
+                                    );
+                                    continue;
+                                }
+                                let merged = {
+                                    let mut s = state2.lock().unwrap();
+                                    s.custom_domains.retain(|d| *d != domain);
+                                    s.custom_domains.clone()
+                                };
+                                if let Ok(dir) = app2.path().app_data_dir() {
+                                    let _ = std::fs::create_dir_all(&dir);
+                                    if let Ok(json) = serde_json::to_string_pretty(&merged) {
+                                        let _ = std::fs::write(dir.join("custom_domains.json"), json);
+                                    }
+                                }
+                                let msg = serde_json::json!({ "type": "set_custom_domains", "domains": merged });
+                                let _ = broadcast_to_extensions(&state2, &msg);
+                                log::warn!("friction: custom block on {domain} removed (weakening applied)");
+                            } else {
+                                // Forward-compat hook: later items (4.2, 1.3)
+                                // add their own arms here as they gate new
+                                // weakenings behind the friction store.
+                                log::warn!("friction: unknown ready action id '{action_id}', dropping");
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Optional AI monitor auto-start: if it was running when the app
+            // last closed, bring it back — off the startup path (a short
+            // sleep keeps model loading from competing with window/tray/
+            // TCP-server startup) and never fatal (a missing model must not
+            // crash boot).
+            if settings_state.get().monitor_enabled {
+                let app3 = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(3));
+                    if let Err(e) = start_nsfw_monitor_impl(&app3) {
+                        log::warn!("AI monitor auto-start failed: {e}");
+                    }
+                });
+            }
+
+            start_update_server(app.handle().clone());
             start_tcp_server(app.handle().clone(), shared_state.clone());
             start_monitor(app.handle().clone(), shared_state.clone());
 

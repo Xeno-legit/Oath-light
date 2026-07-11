@@ -5,8 +5,8 @@
   "identifier": "com.purepath.desktop",
   "build": {
     "frontendDist": "../src/renderer",
-    "beforeDevCommand": "node scripts/bundle-sidecars.mjs",
-    "beforeBuildCommand": "node scripts/bundle-sidecars.mjs"
+    "beforeDevCommand": "node scripts/bundle-sidecars.mjs && node scripts/pack-extension.mjs",
+    "beforeBuildCommand": "node scripts/bundle-sidecars.mjs && node scripts/pack-extension.mjs"
   },
   "app": {
     "withGlobalTauri": true,
@@ -23,12 +23,21 @@
       "binaries/purepathguard",
       "binaries/pure-path-host"
     ],
+    "resources": [
+      "resources/purepath.crx",
+      "resources/update_manifest.xml"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine"
+      }
+    }
   }
 }

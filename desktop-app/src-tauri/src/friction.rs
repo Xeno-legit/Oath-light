@@ -1,0 +1,448 @@
+//! Generalized friction store (Phase 4 items 4.1 + 4.3).
+//!
+//! `uninstall.rs` used to be the only place that made a protection change
+//! wait before it could happen. This module generalizes that idea to *every*
+//! weakening of protection, not just removal: turning off the uninstall
+//! guard, stopping the AI screen monitor, unblocking a custom site, and
+//! whatever future item hooks in here. The rule is simple and one-directional:
+//!
+//!   * A change that WEAKENS protection registers a `PendingChange`, keyed by
+//!     a string `action_id`, and only actually applies once its delay has
+//!     elapsed (see `take_ready`, consumed by the applier thread in lib.rs).
+//!   * A change that STRENGTHENS protection is always instant — there is no
+//!     store entry for turning something back on; the caller just does it and
+//!     calls `cancel` to withdraw any pending weakening of the same thing.
+//!
+//! Everything here is persisted to `<app_data_dir>/friction.json` so a
+//! pending weakening survives an app restart *and* a wiped renderer
+//! `localStorage` — same reasoning as `uninstall.rs`'s original design, the
+//! renderer is deliberately never trusted to hold friction state on its own.
+//!
+//! One invariant is load-bearing everywhere in this module: `"uninstall"` is
+//! a `PendingChange` like any other for read purposes (`get`/`list`), but it
+//! is EXCLUDED from `take_ready` — see that function's doc comment. Uninstall
+//! only ever *unlocks* an explicit, separate destructive action; it must
+//! never auto-fire just because its delay elapsed.
+//!
+//! ## Clock-tamper immunity (4.3)
+//!
+//! A friction delay that can be defeated by moving the system clock forward
+//! is not friction at all. The wall clock (`SystemTime::now()`) is still
+//! *displayed* (it's what `requested_at` means to a human), but it is never
+//! the sole source of elapsed-time math. Instead each pending change carries
+//! a `credited_secs` counter that is advanced incrementally, once per
+//! observation, by the SMALLER of:
+//!
+//!   * how much the wall clock moved since the last observation, and
+//!   * how much a monotonic, boot-anchored tick counter moved since the last
+//!     observation (`GetTickCount64()` on Windows — counts up through sleep
+//!     and hibernate, and cannot be set by the user, unlike the wall clock).
+//!
+//! Forward-jumping the wall clock (the obvious attack: "set the date to next
+//! week") credits nothing beyond what ticks actually elapsed, because the
+//! minimum of the two deltas is used. Rolling the wall clock backward just
+//! stalls wall-clock credit until it catches back up to where it was — ticks
+//! keep advancing underneath regardless. A full reboot resets the tick
+//! counter to a smaller value than last seen; that's treated as "the machine
+//! rebooted" and only the post-boot ticks are credited — the shutdown/boot
+//! gap itself is deliberately NOT credited. That is the conservative choice:
+//! it makes a timer run a little long across a reboot, never short, and
+//! "friction takes slightly longer than advertised" is always the safe
+//! failure direction for a system whose entire job is to slow someone down.
+//!
+//! See `advance` for the actual arithmetic, and `monotonic` below for the
+//! platform-specific tick source.
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+// ============================================================================
+// Delays
+// ============================================================================
+
+/// Cool-off before a *weakening* action (anything other than `"uninstall"`,
+/// which keeps its own longer-standing constant in `uninstall.rs`) is allowed
+/// to apply.
+///
+/// TESTING: currently **10 seconds** — same rationale, and the same
+/// owner-decision guard, as `uninstall::DEFAULT_DELAY_SECS`: this is
+/// intentionally tiny so the whole request -> wait -> apply flow can be
+/// exercised in one sitting. Product-owner decision; do not "fix" it without
+/// checking with them first. Safe at this size because elapsing only ever
+/// hands the pending payload to the applier thread — nothing about *this*
+/// timer being short makes any single weakening more dangerous than it
+/// already is once applied. For production set this back to 24 hours
+/// (`24 * 60 * 60`).
+/// Overridable at runtime with `PUREPATH_FRICTION_SECS` (seconds) — **debug
+/// builds only**, see `weakening_delay_secs` below.
+const DEFAULT_WEAKENING_DELAY_SECS: u64 = 10; // ← production: 24 * 60 * 60
+
+/// Debug builds: honor `PUREPATH_FRICTION_SECS` so the cool-off can be dialed
+/// down for manual testing. Release builds ignore the env var entirely and
+/// always use `DEFAULT_WEAKENING_DELAY_SECS` — otherwise a user could zero
+/// out every weakening's friction timer with `set PUREPATH_FRICTION_SECS=1`,
+/// defeating the point of this module. Mirrors `uninstall::delay_secs`.
+#[cfg(debug_assertions)]
+fn weakening_delay_secs() -> u64 {
+    std::env::var("PUREPATH_FRICTION_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_WEAKENING_DELAY_SECS)
+}
+
+/// Release builds: no env override — see the doc comment on the debug variant.
+#[cfg(not(debug_assertions))]
+fn weakening_delay_secs() -> u64 {
+    DEFAULT_WEAKENING_DELAY_SECS
+}
+
+/// Resolve the cool-off length for a given action id. `"uninstall"` defers to
+/// `uninstall::delay_secs()` — its own, separately-tunable constant, kept
+/// distinct on purpose so the two systems can still be dialed independently
+/// even though they now share one persistence engine. Every other action id
+/// gets the shared weakening default above.
+pub(crate) fn delay_for(action_id: &str) -> u64 {
+    if action_id == "uninstall" {
+        crate::uninstall::delay_secs()
+    } else {
+        weakening_delay_secs()
+    }
+}
+
+fn now_wall() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+// ============================================================================
+// Monotonic tick source (4.3) — see the module doc for why this exists.
+// ============================================================================
+
+#[cfg(windows)]
+mod monotonic {
+    // Hand-rolled FFI, same house pattern as `watchdog.rs`'s kernel32 calls —
+    // one function, no new crate dependency.
+    extern "system" {
+        fn GetTickCount64() -> u64;
+    }
+
+    /// Seconds since boot, from a monotonic OS counter that keeps advancing
+    /// through sleep/hibernate and — unlike `SystemTime::now()` — cannot be
+    /// set by the user. This is the anchor `advance` credits elapsed time
+    /// against; see the module doc for the full reasoning.
+    pub fn now_tick_secs() -> u64 {
+        // SAFETY: GetTickCount64 takes no arguments, has no failure mode, and
+        // is safe to call from any thread at any time.
+        unsafe { GetTickCount64() / 1000 }
+    }
+}
+
+#[cfg(not(windows))]
+mod monotonic {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+
+    /// Non-Windows fallback: a process-lifetime monotonic anchor. NOT
+    /// cross-restart — Pure Path is Windows-first (see the master plan), and
+    /// this path exists only so the module builds and behaves sanely
+    /// elsewhere during development. A restart resets the anchor to zero, so
+    /// (unlike Windows' system-wide `GetTickCount64`) any credited progress
+    /// from a previous run is lost; the wall-clock-vs-tick minimum below
+    /// still holds *within* one process lifetime, it just can't defend
+    /// across a restart on this platform.
+    static ANCHOR: OnceLock<Instant> = OnceLock::new();
+
+    pub fn now_tick_secs() -> u64 {
+        let anchor = ANCHOR.get_or_init(Instant::now);
+        anchor.elapsed().as_secs()
+    }
+}
+
+// ============================================================================
+// Persisted shape + the view the renderer sees
+// ============================================================================
+
+/// On-disk shape of one pending weakening, keyed by `action_id` in the map
+/// `friction.json` holds at its root.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PendingChange {
+    /// Wall-clock unix seconds the request was made. Display only — never
+    /// used for the ready/elapsed math, see `credited_secs`.
+    requested_at: u64,
+    delay_secs: u64,
+    /// Human sentence for the UI, e.g. "Turn off the uninstall guard".
+    label: String,
+    /// Data the applier thread needs once this fires, e.g. `{"domain": "x.com"}`.
+    payload: serde_json::Value,
+    /// Tamper-immune accumulated elapsed credit — see the module doc.
+    credited_secs: u64,
+    /// Last-seen wall-clock reading, for computing the next `advance` delta.
+    last_wall: u64,
+    /// Last-seen monotonic-tick reading, for computing the next `advance` delta.
+    last_tick: u64,
+}
+
+/// What the renderer sees for one pending change. The countdown is computed
+/// on the backend from `credited_secs`, not the JS clock.
+#[derive(Debug, Clone, Serialize)]
+pub struct PendingView {
+    pub action_id: String,
+    pub label: String,
+    pub requested_at: u64,
+    pub delay_secs: u64,
+    /// = `credited_secs`, capped at `delay_secs`.
+    pub elapsed_secs: u64,
+    pub remaining_secs: u64,
+    pub ready: bool,
+}
+
+fn view_of(action_id: &str, p: &PendingChange) -> PendingView {
+    let elapsed = p.credited_secs.min(p.delay_secs);
+    PendingView {
+        action_id: action_id.to_string(),
+        label: p.label.clone(),
+        requested_at: p.requested_at,
+        delay_secs: p.delay_secs,
+        elapsed_secs: elapsed,
+        remaining_secs: p.delay_secs.saturating_sub(elapsed),
+        ready: p.credited_secs >= p.delay_secs,
+    }
+}
+
+/// Advance every entry's `credited_secs` by exactly the amount of time that
+/// has genuinely passed since it was last observed. Called before every
+/// read/mutation and by the applier thread's heartbeat; does NOT persist —
+/// callers decide when to flush to disk (see `FrictionStore::heartbeat`).
+///
+/// The credited amount is `min(delta_wall, delta_tick)` — see the module doc
+/// for why that minimum is what makes this clock-tamper-immune:
+///   * a forward wall-clock jump can't credit more than ticks actually
+///     elapsed;
+///   * a backward wall-clock roll just stalls wall-clock credit until it
+///     catches up — ticks keep advancing underneath regardless.
+fn advance(map: &mut HashMap<String, PendingChange>) {
+    let now_w = now_wall();
+    let now_t = monotonic::now_tick_secs();
+
+    for (action_id, p) in map.iter_mut() {
+        let delta_wall = now_w.saturating_sub(p.last_wall);
+        // A tick reading lower than the last-seen one means the monotonic
+        // counter reset — i.e. the machine rebooted (GetTickCount64 only
+        // ever counts up otherwise). Credit only the ticks accumulated since
+        // that boot; the shutdown-to-boot gap is deliberately NOT credited —
+        // conservative, runs the timer long rather than short, which is the
+        // correct failure direction for a friction system.
+        let tick_reset = now_t < p.last_tick;
+        let delta_tick = if tick_reset { now_t } else { now_t - p.last_tick };
+        let credited_advance = delta_wall.min(delta_tick);
+
+        // Flag a suspicious forward wall-clock jump that isn't explained by a
+        // reboot: item 4.5's hash-chained event log is the intended
+        // long-term consumer of this warning; for now it's just logged.
+        if !tick_reset && delta_wall > delta_tick + 120 {
+            log::warn!(
+                "friction: clock anomaly on '{action_id}' — wall clock advanced {delta_wall}s but only \
+                 {delta_tick}s of monotonic ticks elapsed; crediting {credited_advance}s, not {delta_wall}s"
+            );
+        }
+
+        p.credited_secs += credited_advance;
+        p.last_wall = now_w;
+        p.last_tick = now_t;
+    }
+}
+
+// ============================================================================
+// The store
+// ============================================================================
+
+/// Persisted owner of every pending weakening. Cheap to clone the path; the
+/// actual state is behind a mutex and mirrored to disk on every mutation
+/// (plain reads only advance the in-memory copy — see `heartbeat`).
+pub struct FrictionStore {
+    path: PathBuf,
+    inner: Mutex<HashMap<String, PendingChange>>,
+}
+
+impl FrictionStore {
+    /// Load `<app_data_dir>/friction.json` (defaults to an empty map when
+    /// absent or unreadable).
+    ///
+    /// Migration: if the map has no `"uninstall"` entry yet and a legacy
+    /// `<app_data_dir>/uninstall.json` exists with a `requested_at`, import
+    /// it as a pending `"uninstall"` change — grandfathered with
+    /// `credited_secs` set to the wall-clock elapsed time at import (exactly
+    /// what the old `UninstallStore` would have shown), so nobody's countdown
+    /// silently jumps just because this module shipped.
+    pub fn load(app_data_dir: &Path) -> Self {
+        let path = app_data_dir.join("friction.json");
+        let mut map: HashMap<String, PendingChange> = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+
+        let mut migrated = false;
+        if !map.contains_key("uninstall") {
+            let legacy_path = app_data_dir.join("uninstall.json");
+            if let Ok(s) = std::fs::read_to_string(&legacy_path) {
+                if let Ok(p) = serde_json::from_str::<crate::uninstall::Persisted>(&s) {
+                    if let Some(at) = p.requested_at {
+                        let now_w = now_wall();
+                        let now_t = monotonic::now_tick_secs();
+                        map.insert(
+                            "uninstall".to_string(),
+                            PendingChange {
+                                requested_at: at,
+                                delay_secs: crate::uninstall::delay_secs(),
+                                label: "Remove Pure Path from this computer".to_string(),
+                                payload: serde_json::json!({}),
+                                credited_secs: now_w.saturating_sub(at),
+                                last_wall: now_w,
+                                last_tick: now_t,
+                            },
+                        );
+                        migrated = true;
+                        log::info!("friction: migrated pending uninstall request from uninstall.json");
+                    }
+                }
+            }
+        }
+
+        let store = Self { path, inner: Mutex::new(map) };
+        if migrated {
+            let map = store.inner.lock().unwrap();
+            store.save(&map);
+        }
+        store
+    }
+
+    fn save(&self, map: &HashMap<String, PendingChange>) {
+        if let Some(dir) = self.path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Ok(s) = serde_json::to_string_pretty(map) {
+            let _ = std::fs::write(&self.path, s);
+        }
+    }
+
+    /// Register a weakening request. Idempotent — an existing entry keeps its
+    /// original clock and credited time; re-requesting never extends OR
+    /// shortens the remaining wait.
+    pub fn request(&self, action_id: &str, label: &str, payload: serde_json::Value) -> PendingView {
+        let mut map = self.inner.lock().unwrap();
+        advance(&mut map);
+        let entry = map.entry(action_id.to_string()).or_insert_with(|| {
+            let now_w = now_wall();
+            let now_t = monotonic::now_tick_secs();
+            PendingChange {
+                requested_at: now_w,
+                delay_secs: delay_for(action_id),
+                label: label.to_string(),
+                payload,
+                credited_secs: 0,
+                last_wall: now_w,
+                last_tick: now_t,
+            }
+        });
+        let view = view_of(action_id, entry);
+        self.save(&map);
+        view
+    }
+
+    /// Withdraw a pending weakening outright (a strengthening — never
+    /// gated). Returns whether anything was actually removed.
+    pub fn cancel(&self, action_id: &str) -> bool {
+        let mut map = self.inner.lock().unwrap();
+        let removed = map.remove(action_id).is_some();
+        if removed {
+            self.save(&map);
+        }
+        removed
+    }
+
+    /// Restart the clock and credited time from now, for an existing pending
+    /// change (used by the uninstall "Reset timer" button). No-op (returns
+    /// `None`) if nothing is pending under `action_id`.
+    pub fn reset(&self, action_id: &str) -> Option<PendingView> {
+        let mut map = self.inner.lock().unwrap();
+        advance(&mut map);
+        let now_w = now_wall();
+        let now_t = monotonic::now_tick_secs();
+        let entry = map.get_mut(action_id)?;
+        entry.requested_at = now_w;
+        entry.credited_secs = 0;
+        entry.last_wall = now_w;
+        entry.last_tick = now_t;
+        let view = view_of(action_id, entry);
+        self.save(&map);
+        Some(view)
+    }
+
+    /// Current view of one pending change, if any. Advances credit in-memory
+    /// (not persisted — see `heartbeat`) before reading.
+    pub fn get(&self, action_id: &str) -> Option<PendingView> {
+        let mut map = self.inner.lock().unwrap();
+        advance(&mut map);
+        map.get(action_id).map(|p| view_of(action_id, p))
+    }
+
+    /// Every pending change, sorted by request time (oldest first).
+    pub fn list(&self) -> Vec<PendingView> {
+        let mut map = self.inner.lock().unwrap();
+        advance(&mut map);
+        let mut views: Vec<PendingView> = map.iter().map(|(id, p)| view_of(id, p)).collect();
+        views.sort_by_key(|v| v.requested_at);
+        views
+    }
+
+    /// Remove and return every entry whose delay has elapsed, EXCEPT
+    /// `"uninstall"`.
+    ///
+    /// `"uninstall"` never auto-fires: reaching its delay only flips
+    /// `PendingView::ready`, which unlocks the explicit, separately-gated
+    /// "Remove Pure Path now" action (`complete_uninstall` in lib.rs). If
+    /// this function ever swept it up like any other weakening, removal
+    /// would silently execute itself the moment the cool-off elapsed —
+    /// exactly the impulsive, no-second-thought outcome the whole uninstall
+    /// flow exists to prevent. This exclusion is the one invariant this
+    /// entire module exists to protect; do not remove it.
+    pub fn take_ready(&self) -> Vec<(String, serde_json::Value)> {
+        let mut map = self.inner.lock().unwrap();
+        advance(&mut map);
+        let ready_ids: Vec<String> = map
+            .iter()
+            .filter(|(id, p)| id.as_str() != "uninstall" && p.credited_secs >= p.delay_secs)
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut out = Vec::with_capacity(ready_ids.len());
+        for id in ready_ids {
+            if let Some(p) = map.remove(&id) {
+                out.push((id, p.payload));
+            }
+        }
+        if !out.is_empty() {
+            self.save(&map);
+        }
+        out
+    }
+
+    /// Advance every entry's credited time and flush to disk. Called
+    /// periodically (throttled) by the applier thread in lib.rs.
+    ///
+    /// Plain reads (`get`/`list`) advance the in-memory copy only and never
+    /// persist, so a crash between heartbeats loses at most the credit
+    /// accumulated since the last one — the on-disk timer can only end up a
+    /// little behind reality, never ahead. That is the safe direction: it
+    /// makes a restored timer run slightly long, never short.
+    pub fn heartbeat(&self) {
+        let mut map = self.inner.lock().unwrap();
+        advance(&mut map);
+        self.save(&map);
+    }
+}

@@ -11,8 +11,6 @@
 //! deliberately not trusted to hold friction state.
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Cool-off window before an uninstall can complete.
@@ -33,7 +31,7 @@ const DEFAULT_DELAY_SECS: u64 = 10; // ← production: 24 * 60 * 60
 /// friction timer with `set PUREPATH_UNINSTALL_SECS=1` and an impulsive uninstall
 /// would face no cool-off at all, defeating the point of this module.
 #[cfg(debug_assertions)]
-fn delay_secs() -> u64 {
+pub(crate) fn delay_secs() -> u64 {
     std::env::var("PUREPATH_UNINSTALL_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
@@ -43,7 +41,7 @@ fn delay_secs() -> u64 {
 
 /// Release builds: no env override — see the doc comment on the debug variant.
 #[cfg(not(debug_assertions))]
-fn delay_secs() -> u64 {
+pub(crate) fn delay_secs() -> u64 {
     DEFAULT_DELAY_SECS
 }
 
@@ -54,11 +52,14 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-/// On-disk shape — a tiny JSON file in the app data dir.
+/// On-disk shape — a tiny JSON file in the app data dir. `pub(crate)` (and its
+/// field) so `friction.rs` can read/write the same shape directly — see
+/// `write_marker` below for why this file still exists at all now that
+/// `friction::FrictionStore` owns the actual request state.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct Persisted {
+pub(crate) struct Persisted {
     /// Unix seconds the request was made; `None` = no pending request.
-    requested_at: Option<u64>,
+    pub(crate) requested_at: Option<u64>,
 }
 
 /// What the renderer sees. The countdown is computed on the backend (the system
@@ -79,103 +80,38 @@ pub struct UninstallState {
     pub ready: bool,
 }
 
-/// Persisted owner of the uninstall request. Cheap to clone the path; the actual
-/// state is behind a mutex and mirrored to disk on every change.
-pub struct UninstallStore {
-    path: PathBuf,
-    inner: Mutex<Persisted>,
-}
-
-impl UninstallStore {
-    /// Load the persisted request from `<app_data_dir>/uninstall.json` (defaults
-    /// to "no request" when the file is absent or unreadable).
-    pub fn load(app_data_dir: &std::path::Path) -> Self {
-        let path = app_data_dir.join("uninstall.json");
-        let inner = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str::<Persisted>(&s).ok())
-            .unwrap_or_default();
-        Self {
-            path,
-            inner: Mutex::new(inner),
-        }
-    }
-
-    fn save(&self, p: &Persisted) {
-        if let Some(dir) = self.path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        if let Ok(s) = serde_json::to_string_pretty(p) {
-            let _ = std::fs::write(&self.path, s);
-        }
-    }
-
-    fn state_from(p: &Persisted) -> UninstallState {
-        let delay = delay_secs();
-        match p.requested_at {
-            Some(at) => {
-                let elapsed = now_secs().saturating_sub(at);
-                let remaining = delay.saturating_sub(elapsed);
-                UninstallState {
-                    requested: true,
-                    requested_at: Some(at),
-                    delay_secs: delay,
-                    elapsed_secs: elapsed,
-                    remaining_secs: remaining,
-                    ready: remaining == 0,
-                }
-            }
-            None => UninstallState {
-                requested: false,
-                requested_at: None,
-                delay_secs: delay,
-                elapsed_secs: 0,
-                remaining_secs: delay,
-                ready: false,
-            },
-        }
-    }
-
-    pub fn get(&self) -> UninstallState {
-        Self::state_from(&self.inner.lock().unwrap())
-    }
-
-    /// Start a request. Idempotent — if one is already pending the original clock
-    /// is kept (re-requesting never extends the wait).
-    pub fn request(&self) -> UninstallState {
-        let mut p = self.inner.lock().unwrap();
-        if p.requested_at.is_none() {
-            p.requested_at = Some(now_secs());
-            self.save(&p);
-        }
-        Self::state_from(&p)
-    }
-
-    /// Restart the cool-off clock from now.
-    pub fn reset(&self) -> UninstallState {
-        let mut p = self.inner.lock().unwrap();
-        p.requested_at = Some(now_secs());
-        self.save(&p);
-        Self::state_from(&p)
-    }
-
-    /// Drop the request entirely (continue normally).
-    pub fn cancel(&self) -> UninstallState {
-        let mut p = self.inner.lock().unwrap();
-        p.requested_at = None;
-        self.save(&p);
-        Self::state_from(&p)
+/// Write `<app_data_dir>/uninstall.json` in the exact `Persisted` shape.
+///
+/// WHY this file still exists even though `friction::FrictionStore` is now
+/// the actual source of truth for the uninstall request (it replaced the old
+/// `UninstallStore` that used to live in this module): the release-build
+/// watchdog's `shutdown_requested` check (`watchdog.rs`) and the separate
+/// `guardian` crate both independently verify the cool-off by reading
+/// `uninstall.json` straight off disk — deliberately, so neither depends on
+/// this crate's in-memory state (see `cooloff_elapsed_at` below and the
+/// watchdog module doc for why that independence matters). That two-reader
+/// protocol must not change, so every place that used to own `requested_at`
+/// directly (now `friction::FrictionStore`, keyed under the `"uninstall"`
+/// action id) mirrors it here on every request/reset/cancel via this
+/// function. `uninstall.json` is a mirrored marker for those two readers, not
+/// the source of truth anymore.
+pub(crate) fn write_marker(app_data_dir: &std::path::Path, requested_at: Option<u64>) {
+    let path = app_data_dir.join("uninstall.json");
+    let _ = std::fs::create_dir_all(app_data_dir);
+    if let Ok(s) = serde_json::to_string_pretty(&Persisted { requested_at }) {
+        let _ = std::fs::write(&path, s);
     }
 }
 
 /// Standalone reader for the watchdog: true if the persisted request at `path`
 /// (an `uninstall.json`) both exists and has actually elapsed the cool-off,
-/// straight off disk. Deliberately independent of `UninstallStore` (no shared
-/// mutex, no in-memory cache) so it reflects exactly what's on disk *right now* —
-/// this is what the release-build shutdown-sentinel check in `watchdog.rs` calls
-/// instead of duplicating the JSON shape there. The guardian process (a separate
-/// crate with no dependency on this one) re-implements the same reasoning with
-/// its own tiny hand-parser; keep the two in sync.
+/// straight off disk. Deliberately independent of `friction::FrictionStore`
+/// (no shared mutex, no in-memory cache) so it reflects exactly what's on
+/// disk *right now* — this is what the release-build shutdown-sentinel check
+/// in `watchdog.rs` calls instead of duplicating the JSON shape there. The
+/// guardian process (a separate crate with no dependency on this one)
+/// re-implements the same reasoning with its own tiny hand-parser; keep the
+/// two in sync.
 ///
 /// Residual, accepted weakness: `uninstall.json` lives in the app data dir and
 /// is plain user-writable JSON, so a determined user can hand-edit or backdate

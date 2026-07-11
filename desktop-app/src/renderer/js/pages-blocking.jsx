@@ -23,6 +23,15 @@ function SettingRow({ icon: I, title, desc, on, onToggle, accent }) {
 function BlockingPage({ s, PP }) {
   const b = s.blocking;
   const set = (patch) => PP.set({ blocking: patch });
+  // Friction (4.1): if the uninstall guard has a pending "turn off" request,
+  // it's still fully ON (the backend never flips it early) — this is purely
+  // an honest heads-up, not a countdown that gates anything here. `fmtDur` is
+  // a plain top-level `function` declared in pages-settings.jsx; even though
+  // that file loads AFTER this one (see index.html's script order), globals
+  // resolve at *render* time, not at script-parse time, and by the time this
+  // component actually renders every script has already run — so this is
+  // safe. See pages-settings.jsx for the definition.
+  const guardPending = (window.usePendingWeakenings || (() => []))().find((p) => p.action_id === 'guard.disable');
   const toggle = (k) => set({ [k]: !b[k] });
   // Block-screen mode toggles are mutually exclusive — enabling one disables
   // the others; toggling the active one off leaves them all disabled.
@@ -185,10 +194,15 @@ function BlockingPage({ s, PP }) {
           <div className="ico"><IconShield size={20} /></div>
           <div className="txt">
             <b>Uninstall guard</b>
-            <span>Arms the monitor that re-applies the extension's force-install policy if it's removed — full auto-restore switches on at release</span>
+            <span>Force-installs the extension on Chromium browsers and re-applies the policy if it's removed (user-level lock now; machine-wide hardening later)</span>
           </div>
           <Switch on={b.uninstallGuard} onClick={() => toggle('uninstallGuard')} />
         </div>
+        {guardPending &&
+          <div style={{ fontSize: 12, color: 'var(--muted)', margin: '-6px 0 10px 54px' }}>
+            Turning off in {fmtDur(guardPending.remaining_secs)} — cancel from Settings → Pending changes
+          </div>
+        }
 
         {/* SafeSearch is enforced unconditionally by the extension — there's
             genuinely no switch for this, so we don't pretend there is one. */}

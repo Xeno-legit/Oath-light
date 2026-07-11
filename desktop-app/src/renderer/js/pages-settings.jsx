@@ -13,6 +13,12 @@ function fmtDur(secs) {
   out.push(h + 'h', m + 'm', (s < 10 ? '0' : '') + s + 's');
   return out.join(' ');
 }
+// Used cross-file (pages-blocking/blocklist/monitor pending-weakening notes).
+// Babel-standalone injects each file as a real <script>, so this top-level
+// function is already a global — the explicit assignment just follows the
+// house convention (`window.X = X`) every other shared symbol uses, so a
+// future loader/strict-mode change can't silently break the bare references.
+window.fmtDur = fmtDur;
 
 // Human cool-off length, e.g. "10 minutes" / "24 hours" (kept in step with the
 // backend's actual delay so the copy never lies, even while testing).
@@ -157,6 +163,60 @@ function UninstallCard() {
   );
 }
 
+// --- Pending weakenings (Phase 4 friction, 4.1) ------------------------------
+
+// Every OTHER pending weakening besides uninstall (which has its own
+// dedicated card above) — turning off the uninstall guard, stopping the AI
+// monitor, or unblocking a custom site all wait out the same friction delay
+// before they actually apply. Hidden entirely when nothing is pending.
+function PendingChangesCard({ PP }) {
+  const all = (window.usePendingWeakenings || (() => []))();
+  const pending = all.filter((p) => p.action_id !== 'uninstall');
+  const [busy, setBusy] = React.useState(null);
+
+  if (!pending.length) return null;
+
+  const cancel = (p) => {
+    setBusy(p.action_id);
+    window.PPNative.cancelWeakening(p.action_id).then(() => {
+      // The backend is the source of truth; this just keeps the renderer's
+      // own copy from lying about the toggle/list in the meantime.
+      if (p.action_id === 'guard.disable') {
+        PP.set({ blocking: { uninstallGuard: true } });
+      } else if (p.action_id.indexOf('custom_block.remove:') === 0) {
+        const domain = p.action_id.slice('custom_block.remove:'.length);
+        const bl = PP.get().blocklist;
+        if (!bl.customSites.some((x) => x.url === domain)) {
+          PP.put('blocklist', { ...bl, customSites: [...bl.customSites, { id: Date.now(), url: domain, added: 'restored' }] });
+        }
+      }
+    }).finally(() => setBusy(null));
+  };
+
+  return (
+    <div className="card fade-up" style={{ marginTop: 18 }}>
+      <b style={{ fontSize: 14.5, fontWeight: 800 }}>Pending changes</b>
+      <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, lineHeight: 1.5, maxWidth: '64ch' }}>
+        Changes that weaken Pure Path's protection take effect only after a short delay — the same kind of
+        friction that applies to uninstalling. Canceling here leaves your protection exactly as it is now.
+      </div>
+      <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {pending.map((p) => (
+          <div className="setting" key={p.action_id}>
+            <div className="txt">
+              <b>{p.label}</b>
+              <span>{p.ready ? 'Ready to apply any moment now' : ('Applies in ' + fmtDur(p.remaining_secs))}</span>
+            </div>
+            <button className="btn btn-ghost btn-sm" disabled={busy === p.action_id} onClick={() => cancel(p)}>
+              Cancel
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SettingsPage({ s, PP }) {
   const p = s.profile;
   const setP = (patch) => PP.set({ profile: patch });
@@ -248,6 +308,9 @@ function SettingsPage({ s, PP }) {
         </div>
         <button className="btn btn-ghost" onClick={() => { if (confirm('Reset all app data?')) PP.reset(); }}>Reset</button>
       </div>
+
+      {/* pending weakenings (4.1) — guard/monitor disables, custom-block removals */}
+      <PendingChangesCard PP={PP} />
 
       {/* uninstall — 24-hour friction request */}
       <UninstallCard />
