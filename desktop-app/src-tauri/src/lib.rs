@@ -1214,6 +1214,159 @@ fn build_status(
 }
 
 // ============================================================================
+// Process-level app blocking + evasion-browser detection (plan item 1.3)
+// ============================================================================
+
+/// How long a "killed <name>" / "evasion-detected" event stays suppressed
+/// after it fires once, so a process that respawns every tick (or a browser
+/// left running) doesn't spam the UI/log every 3 seconds. The underlying
+/// enforcement (the actual `kill()`) is never throttled by this — only the
+/// noise is; see the two call sites below.
+const PROCESS_KILL_LOG_THROTTLE: Duration = Duration::from_secs(60);
+const EVASION_EMIT_THROTTLE: Duration = Duration::from_secs(5 * 60);
+
+/// Called once per `start_monitor` tick with the process names that tick
+/// already scanned (`browsers::running_process_names()` — no extra syscall
+/// just to feed this). Two independent, deliberately asymmetric responses:
+///
+///   a) BLOCKED-LIST KILL — anything the user explicitly named in
+///      `cfg.blocked_processes` (Settings -> Blocking -> App blocking) is
+///      force-killed on sight, every tick it's seen. This is friction, not a
+///      sandbox: a renamed exe slips straight past a name-based check, which
+///      the plan accepts as a known limitation rather than a bug to fix here.
+///
+///   b) EVASION-BROWSER DETECTION — a browser whose whole point on this
+///      machine would be dodging the extension: something in
+///      `browsers::EVASION_BROWSERS` (Tor, LibreWolf, ...), a running
+///      process whose exe path contains "tor browser", or a *portable* copy
+///      of a browser we otherwise support (installed outside Program
+///      Files/AppData/WindowsApps — see `browsers::is_standard_install_path`).
+///      A browser we've *learned* over the native host (`AppState.custom_browsers`
+///      — it's running our extension right now) is never flagged, no matter
+///      which of the above lists its process name also happens to match.
+///      Response is TIERED (plan §1.3): always logged + emitted as an
+///      `evasion-detected` event; only actually killed when
+///      `cfg.block_unknown_browsers` is on. A merely-portable copy of a KNOWN
+///      browser is never killed unless that toggle is set — log-and-warn is
+///      the default, because false positives here cost someone their real
+///      browser. VPN detection is explicitly out of scope until Lockdown
+///      Mode (plan item 4.4) exists.
+///
+/// Hot-path rule: when nothing is configured (`blocked_processes` empty) and
+/// nothing running even looks like it could be an evasion browser, this
+/// function costs nothing beyond the two `Vec` scans already needed to check
+/// that — no fresh `sysinfo::System`, no extra syscalls, ever.
+fn enforce_processes(
+    app: &AppHandle,
+    state: &Arc<Mutex<AppState>>,
+    cfg: &settings::SettingsV1,
+    proc_names: &[String],
+    memo: &mut HashMap<String, Instant>,
+) {
+    let any_evasion_candidate = proc_names.iter().any(|n| {
+        browsers::EVASION_BROWSERS.contains(&n.as_str()) || browsers::match_browser_process(n).is_some()
+    });
+    if cfg.blocked_processes.is_empty() && !any_evasion_candidate {
+        return;
+    }
+
+    // --- a) blocked-list kill ------------------------------------------------
+    if !cfg.blocked_processes.is_empty()
+        && cfg.blocked_processes.iter().any(|b| proc_names.iter().any(|n| n == b))
+    {
+        use sysinfo::{ProcessRefreshKind, System};
+        let mut sys = System::new();
+        sys.refresh_processes_specifics(ProcessRefreshKind::new());
+        for proc in sys.processes().values() {
+            let name = proc.name().to_lowercase();
+            if !cfg.blocked_processes.iter().any(|b| *b == name) {
+                continue;
+            }
+            // The kill itself is never throttled — only the log/event noise.
+            proc.kill();
+            let now = Instant::now();
+            let should_log =
+                memo.get(&name).map_or(true, |t| now.duration_since(*t) >= PROCESS_KILL_LOG_THROTTLE);
+            if should_log {
+                memo.insert(name.clone(), now);
+                log::warn!("process enforcement: killed blocked process '{name}'");
+                let _ = app.emit(
+                    "process-enforcement",
+                    serde_json::json!({ "action": "killed", "name": name, "reason": "blocked_list" }),
+                );
+            }
+        }
+    }
+
+    // --- b) evasion-browser detection ----------------------------------------
+    // Never flag a browser we've learned is actually running our extension
+    // over the native host (see `AppState.custom_browsers`).
+    let learned_procs: HashSet<String> = {
+        let s = state.lock().unwrap();
+        s.custom_browsers.values().map(|c| c.process.clone()).collect()
+    };
+    let candidates: HashSet<String> = proc_names
+        .iter()
+        .filter(|n| {
+            !learned_procs.contains(n.as_str())
+                && (browsers::EVASION_BROWSERS.contains(&n.as_str())
+                    || browsers::match_browser_process(n.as_str()).is_some())
+        })
+        .cloned()
+        .collect();
+    if candidates.is_empty() {
+        return;
+    }
+
+    use sysinfo::{ProcessRefreshKind, System, UpdateKind};
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(ProcessRefreshKind::new().with_exe(UpdateKind::OnlyIfNotSet));
+
+    for proc in sys.processes().values() {
+        let name = proc.name().to_lowercase();
+        if !candidates.contains(&name) {
+            continue;
+        }
+        let exe_path = proc.exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        let exe_lower = exe_path.to_lowercase();
+
+        let reason = if browsers::EVASION_BROWSERS.contains(&name.as_str()) {
+            "evasion_browser"
+        } else if exe_lower.contains("tor browser") {
+            "tor_browser"
+        } else if !exe_path.is_empty() && !browsers::is_standard_install_path(&exe_lower) {
+            "portable_browser"
+        } else {
+            // A known browser running from a standard install path — not evasion.
+            continue;
+        };
+
+        // Killing follows the toggle every tick it's seen; only the
+        // log/event emission below is throttled.
+        let killed = cfg.block_unknown_browsers;
+        if killed {
+            proc.kill();
+        }
+
+        let memo_key = format!("{name}|{exe_path}");
+        let now = Instant::now();
+        let should_emit =
+            memo.get(&memo_key).map_or(true, |t| now.duration_since(*t) >= EVASION_EMIT_THROTTLE);
+        if should_emit {
+            memo.insert(memo_key, now);
+            log::warn!(
+                "evasion detection: '{name}' ({reason}) at '{exe_path}' — {}",
+                if killed { "killed" } else { "logged only (block_unknown_browsers is off)" }
+            );
+            let _ = app.emit(
+                "evasion-detected",
+                serde_json::json!({ "name": name, "path": exe_path, "reason": reason, "killed": killed }),
+            );
+        }
+    }
+}
+
+// ============================================================================
 // Monitor — reconcile running browsers against live connections, emit status,
 // and (when configured + guard on) enforce reinstallation of a missing ext.
 // ============================================================================
@@ -1227,12 +1380,22 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
         // launch, so there's nothing to re-do until the guard is toggled off.
         // (Re-asserting a *deleted* policy key is Stage 2, the SYSTEM service.)
         let mut enforced: HashMap<String, EnforceOutcome> = HashMap::new();
+        // Process-blocking / evasion-detection noise memo (1.3) — see
+        // `enforce_processes`'s doc comment for what's throttled and why.
+        let mut process_memo: HashMap<String, Instant> = HashMap::new();
 
         loop {
             let now = now_unix_ms();
             let proc_names = browsers::running_process_names();
             let running = browsers::detect_running_from(&proc_names);
             let guard_enabled = state.lock().unwrap().guard_enabled;
+
+            // Process-level app blocking + evasion-browser detection (1.3),
+            // reusing this tick's process-name scan — see `enforce_processes`.
+            // `SettingsState` is managed in `setup()` well before this thread
+            // is spawned, so this is never actually unmanaged in practice.
+            let cfg = app.state::<Arc<settings::SettingsState>>().get();
+            enforce_processes(&app, &state, &cfg, &proc_names, &mut process_memo);
 
             let mut statuses = build_status(&state, &running, &proc_names, now);
 
@@ -1616,6 +1779,117 @@ fn set_guard_enabled(
         view.delay_secs
     );
     WeakeningOutcome { applied: false, pending: Some(view) }
+}
+
+// ============================================================================
+// Process-level app blocking + evasion-browser detection (plan item 1.3) —
+// commands. Enforcement itself lives in `enforce_processes`, run every
+// `start_monitor` tick; these just read/mutate the persisted config it reads.
+// ============================================================================
+
+/// Backend-owned settings, for the renderer's "App blocking" section (and
+/// anywhere else that wants an honest read of what's actually persisted,
+/// rather than the renderer's own possibly-stale localStorage copy).
+#[tauri::command]
+fn get_app_settings(settings: tauri::State<'_, Arc<settings::SettingsState>>) -> settings::SettingsV1 {
+    settings.get()
+}
+
+/// Add a process image name to the blocked-process list. A strengthening —
+/// instant, never gated. Normalizes (trim + lowercase) and rejects anything
+/// that isn't a bare image name (containing a path separator would mean this
+/// is silently comparing against the wrong thing everywhere `proc_names` is a
+/// flat list of image names, not paths — see `browsers::running_process_names`).
+/// No-op if already present. Re-adding a name withdraws any pending removal of
+/// that same name (a strengthening always cancels the matching weakening).
+#[tauri::command]
+fn add_blocked_process(
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    name: String,
+) -> Result<Vec<String>, String> {
+    let norm = name.trim().to_lowercase();
+    if norm.is_empty() {
+        return Err("Enter a process name, e.g. discord.exe".to_string());
+    }
+    if norm.contains('\\') || norm.contains('/') {
+        return Err("Enter a bare process image name (e.g. discord.exe), not a path.".to_string());
+    }
+    let mut list = settings.get().blocked_processes;
+    if !list.iter().any(|p| *p == norm) {
+        list.push(norm.clone());
+        settings.update(|s| s.blocked_processes = list.clone());
+        log::info!("process blocking: added '{norm}' to the blocked-process list");
+    }
+    friction.cancel(&format!("process_block.remove:{norm}"));
+    Ok(list)
+}
+
+/// Request removal of a blocked process (a weakening, gated behind the
+/// friction store like every other weakening — see `friction.rs`). The
+/// process stays enforced until the delay elapses and the applier thread (in
+/// `setup`) actually removes it from the list. Requires the master password
+/// if one is set (`crate::auth::require_auth` — see 4.2).
+#[tauri::command]
+fn remove_blocked_process(
+    app: AppHandle,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    name: String,
+    auth: Option<String>,
+) -> Result<friction::PendingView, String> {
+    crate::auth::require_auth(&app, &auth)?;
+    let norm = name.trim().to_lowercase();
+    let present = settings.get().blocked_processes.iter().any(|p| *p == norm);
+    if !present {
+        return Err(format!("{norm} is not in the blocked-process list."));
+    }
+    let action_id = format!("process_block.remove:{norm}");
+    let view = friction.request(&action_id, &format!("Stop blocking {norm}"), serde_json::json!({ "process": norm }));
+    log::warn!(
+        "process-block removal requested for {norm} — {}s cool-off started (still blocked)",
+        view.delay_secs
+    );
+    Ok(view)
+}
+
+/// Toggle blocking of unknown/evasion browsers outright (kill on sight,
+/// rather than the default log-only tier — see `enforce_processes`). Turning
+/// it ON is always instant (a strengthening) and withdraws any pending
+/// disable. Turning it OFF is a weakening: the setting stays ON until the
+/// friction delay elapses and the applier thread actually flips it. Requires
+/// the master password to turn off, if one is set.
+#[tauri::command]
+fn set_block_unknown_browsers(
+    app: AppHandle,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    enabled: bool,
+    auth: Option<String>,
+) -> Result<WeakeningOutcome, String> {
+    if enabled {
+        settings.update(|s| s.block_unknown_browsers = true);
+        friction.cancel("evasion_kill.disable");
+        log::info!("block_unknown_browsers set to true");
+        return Ok(WeakeningOutcome { applied: true, pending: None });
+    }
+
+    let already_off = !settings.get().block_unknown_browsers;
+    if already_off {
+        return Ok(WeakeningOutcome { applied: true, pending: None });
+    }
+
+    crate::auth::require_auth(&app, &auth)?;
+    let view = friction.request(
+        "evasion_kill.disable",
+        "Stop blocking unknown browsers",
+        serde_json::json!({}),
+    );
+    log::warn!(
+        "evasion-kill disable requested — {}s cool-off started (unknown browsers stay blocked until it elapses)",
+        view.delay_secs
+    );
+    Ok(WeakeningOutcome { applied: false, pending: Some(view) })
 }
 
 /// Push the desktop app's selected theme/palette to every connected extension,
@@ -2451,6 +2725,10 @@ pub fn run() {
             cancel_weakening,
             get_browsers_status,
             set_guard_enabled,
+            get_app_settings,
+            add_blocked_process,
+            remove_blocked_process,
+            set_block_unknown_browsers,
             set_extension_theme,
             set_blocking_settings,
             open_external,
@@ -2655,10 +2933,31 @@ pub fn run() {
                                 let msg = serde_json::json!({ "type": "set_custom_domains", "domains": merged });
                                 let _ = broadcast_to_extensions(&state2, &msg);
                                 log::warn!("friction: custom block on {domain} removed (weakening applied)");
+                            } else if action_id.starts_with("process_block.remove:") {
+                                // 1.3: actually drop the process from the
+                                // blocked list now that the delay elapsed.
+                                let name = payload
+                                    .get("process")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or_default()
+                                    .to_string();
+                                if name.is_empty() {
+                                    log::warn!(
+                                        "friction: '{action_id}' fired with no process in its payload — dropping"
+                                    );
+                                    continue;
+                                }
+                                settings2.update(|s| s.blocked_processes.retain(|p| *p != name));
+                                log::warn!("friction: process block on {name} removed (weakening applied)");
+                            } else if action_id == "evasion_kill.disable" {
+                                // 1.3: unknown/evasion browsers drop back to
+                                // the default log-only tier.
+                                settings2.update(|s| s.block_unknown_browsers = false);
+                                log::warn!("friction: evasion-browser kill switch disabled (weakening applied)");
                             } else {
-                                // Forward-compat hook: later items (4.2, 1.3)
-                                // add their own arms here as they gate new
-                                // weakenings behind the friction store.
+                                // Forward-compat hook: later items add their
+                                // own arms here as they gate new weakenings
+                                // behind the friction store.
                                 log::warn!("friction: unknown ready action id '{action_id}', dropping");
                             }
                         }
