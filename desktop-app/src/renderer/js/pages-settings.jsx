@@ -75,11 +75,26 @@ function UninstallCard() {
       .finally(() => setBusy(false));
   };
 
+  // Master-password gated (4.2) when one is set — opening the request is the
+  // first step of a weakening, even though protection stays fully on the
+  // whole time it's pending. `PPAuth.acquire()` resolves the session token
+  // (or `null` outside a password) to pass through, or rejects
+  // `Error('cancelled')` if the prompt was dismissed, which aborts silently
+  // here rather than showing the generic error message.
   const doRequest = () => {
     if (!st) return;
     if (!confirm('Start the ' + delayWords(st.delay_secs) + ' uninstall waiting period?\n\n'
       + 'Pure Path stays fully active the whole time. You can cancel whenever you like.')) return;
-    setMsg(''); run(() => window.PPNative.requestUninstall());
+    setMsg('');
+    setBusy(true);
+    (window.PPAuth ? PPAuth.acquire() : Promise.resolve(null))
+      .then((auth) => window.PPNative.requestUninstall(auth))
+      .then(apply)
+      .catch((e) => {
+        if (e && e.message === 'cancelled') return;
+        setMsg('Something went wrong: ' + (e && e.message ? e.message : e) + ' — please try again.');
+      })
+      .finally(() => setBusy(false));
   };
   const doCancel = () => { setMsg(''); run(() => window.PPNative.cancelUninstall()); };
   const doReset = () => { setMsg(''); run(() => window.PPNative.resetUninstallTimer()); };
@@ -157,6 +172,167 @@ function UninstallCard() {
           {!available &&
             <div className="ut-msg" style={{ color: 'var(--muted)' }}>Uninstall controls are available in the desktop app.</div>
           }
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Master password (Phase 4 item 4.2) --------------------------------------
+
+// Settings card for setting/changing/removing the master password that gates
+// every weakening request (turning off the uninstall guard/AI monitor,
+// unblocking a custom site, opening an uninstall request). The real gate is
+// entirely server-side (`auth::require_auth` in lib.rs) — this card is just
+// the UI for managing the password itself via `window.PPAuth`.
+//
+// Honest recovery story, stated plainly in the "Remove password" copy below:
+// removing the password normally needs the CURRENT password plus the
+// friction delay (`requestRemoval`). If you've genuinely forgotten it, the
+// "Forgot it?" link starts the same delay without the password
+// (`requestRemovalForgotten`) — it can't skip the wait, only skip proving you
+// know a password you don't remember.
+function SecurityCard() {
+  const available = !!(window.PPNative && window.PPNative.available);
+  const [set, setSet] = React.useState(null); // null = still loading
+  const [mode, setMode] = React.useState('idle'); // idle | set | change | remove
+  const [current, setCurrent] = React.useState('');
+  const [pw1, setPw1] = React.useState('');
+  const [pw2, setPw2] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const [msg, setMsg] = React.useState('');
+
+  const refresh = React.useCallback(() => {
+    if (!available) { setSet(false); return; }
+    (window.PPAuth ? PPAuth.status() : Promise.resolve({ set: false }))
+      .then((s) => setSet(!!(s && s.set)));
+  }, [available]);
+
+  React.useEffect(() => { refresh(); }, [refresh]);
+
+  const resetFields = () => { setCurrent(''); setPw1(''); setPw2(''); setErr(''); };
+  const cancel = () => { setMode('idle'); resetFields(); };
+  const open = (m) => { setMode(m); setMsg(''); resetFields(); };
+
+  const submitSetOrChange = () => {
+    setErr('');
+    if (pw1.length < 6) { setErr('Password must be at least 6 characters.'); return; }
+    if (pw1 !== pw2) { setErr('Passwords do not match.'); return; }
+    setBusy(true);
+    window.PPAuth.setPassword(set ? current : null, pw1)
+      .then(() => {
+        setMsg(set ? 'Password changed.' : 'Master password set.');
+        setSet(true);
+        setMode('idle');
+        resetFields();
+      })
+      .catch((e) => setErr(e && e.message ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+
+  const submitRemove = () => {
+    setErr('');
+    setBusy(true);
+    window.PPAuth.requestRemoval(current)
+      .then(() => {
+        setMsg('Removal requested — see "Pending changes" below for the countdown.');
+        setMode('idle');
+        resetFields();
+      })
+      .catch((e) => setErr(e && e.message ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+
+  const forgotIt = () => {
+    if (!confirm(
+      "Forgot your master password?\n\n"
+      + "This starts the same waiting-period removal every other protection change goes through. "
+      + "You don't need the old password for this — but you do still have to wait out the delay. "
+      + "Continue?"
+    )) return;
+    setErr('');
+    setBusy(true);
+    window.PPAuth.requestRemovalForgotten()
+      .then(() => {
+        setMsg('Removal requested — see "Pending changes" below for the countdown.');
+        setMode('idle');
+        resetFields();
+      })
+      .catch((e) => setErr(e && e.message ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div className="card fade-up" style={{ marginTop: 18 }}>
+      <div className="row" style={{ gap: 14, alignItems: 'flex-start' }}>
+        <div className="ut-ico"><IconLock size={20} /></div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <b style={{ fontSize: 14.5, fontWeight: 800 }}>Master password</b>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, lineHeight: 1.5, maxWidth: '64ch' }}>
+            {set
+              ? 'Set. Turning off a protection — the uninstall guard, the AI monitor, a custom site block, or '
+                + 'starting an uninstall request — needs this password before the usual waiting period even starts.'
+              : "Not set. Turning off a protection still waits out the usual delay, but anyone at this computer "
+                + 'can start that countdown. Add a password to require it first.'}
+          </div>
+
+          {!available &&
+            <div className="ut-msg" style={{ color: 'var(--muted)', marginTop: 12 }}>Available in the desktop app.</div>}
+
+          {available && set === null &&
+            <div style={{ marginTop: 12, fontSize: 13, color: 'var(--muted)' }}>Loading…</div>}
+
+          {available && set !== null && mode === 'idle' &&
+            <div className="row" style={{ gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+              <button className="btn btn-primary btn-sm" onClick={() => open(set ? 'change' : 'set')}>
+                {set ? 'Change password' : 'Set a password'}
+              </button>
+              {set &&
+                <button className="btn btn-ghost btn-sm" onClick={() => open('remove')}>Remove password</button>}
+            </div>}
+
+          {(mode === 'set' || mode === 'change') &&
+            <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 320 }}>
+              {mode === 'change' &&
+                <input type="password" className="input" placeholder="Current password" value={current}
+                       onChange={(e) => setCurrent(e.target.value)} />}
+              <input type="password" className="input" placeholder="New password (min. 6 characters)" value={pw1}
+                     onChange={(e) => setPw1(e.target.value)} />
+              <input type="password" className="input" placeholder="Confirm new password" value={pw2}
+                     onChange={(e) => setPw2(e.target.value)} />
+              {err && <div style={{ fontSize: 12.5, color: '#ef4444' }}>{err}</div>}
+              <div className="row" style={{ gap: 10 }}>
+                <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancel}>Cancel</button>
+                <button className="btn btn-primary btn-sm"
+                        disabled={busy || !pw1 || !pw2 || (mode === 'change' && !current)}
+                        onClick={submitSetOrChange}>
+                  {busy ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>}
+
+          {mode === 'remove' &&
+            <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 320 }}>
+              <div style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 }}>
+                Requires your current password, then the same waiting period as any other weakening —
+                this doesn't skip it, it only starts it.
+              </div>
+              <input type="password" className="input" placeholder="Current password" value={current}
+                     onChange={(e) => setCurrent(e.target.value)} />
+              {err && <div style={{ fontSize: 12.5, color: '#ef4444' }}>{err}</div>}
+              <div className="row" style={{ gap: 10 }}>
+                <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancel}>Cancel</button>
+                <button className="btn btn-danger btn-sm" disabled={busy || !current} onClick={submitRemove}>
+                  {busy ? 'Requesting…' : 'Request removal'}
+                </button>
+              </div>
+              <button className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-start' }} disabled={busy} onClick={forgotIt}>
+                Forgot it?
+              </button>
+            </div>}
+
+          {msg && mode === 'idle' && <div className="ut-msg" style={{ marginTop: 12 }}>{msg}</div>}
         </div>
       </div>
     </div>
@@ -308,6 +484,9 @@ function SettingsPage({ s, PP }) {
         </div>
         <button className="btn btn-ghost" onClick={() => { if (confirm('Reset all app data?')) PP.reset(); }}>Reset</button>
       </div>
+
+      {/* master password (4.2) — gates every weakening request below */}
+      <SecurityCard />
 
       {/* pending weakenings (4.1) — guard/monitor disables, custom-block removals */}
       <PendingChangesCard PP={PP} />

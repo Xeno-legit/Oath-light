@@ -84,15 +84,31 @@ function BlocklistPage({ s, PP }) {
     setNewSite('');
   }
   function removeSite(site) {
-    if (window.PPNative && window.PPNative.available) {
-      // Fire the removal request — the backend keeps actually enforcing the
-      // block until the friction delay elapses (4.1). This only registers
-      // the request; it does not wait for it.
-      window.PPNative.removeCustomDomain(site.url).catch(() => {});
+    if (!(window.PPNative && window.PPNative.available)) {
+      // No native bridge (standalone preview) — nothing to gate, just update
+      // the local cosmetic copy.
+      PP.put('blocklist', { ...bl, customSites: bl.customSites.filter((x) => x.id !== site.id) });
+      return;
     }
-    // Local list update happens either way, same as before removeCustomDomain
-    // existed — this is the renderer's own cosmetic copy, not the enforcement.
-    PP.put('blocklist', { ...bl, customSites: bl.customSites.filter((x) => x.id !== site.id) });
+    // Master-password gated (4.2) when one is set. Acquire BEFORE touching
+    // the local store: if the user cancels the prompt, the site must stay
+    // exactly where it was in the list, not disappear and then silently
+    // reappear on the next backend poll.
+    (window.PPAuth ? PPAuth.acquire() : Promise.resolve(null))
+      .then((auth) => {
+        // Fire the removal request — the backend keeps actually enforcing the
+        // block until the friction delay elapses (4.1). This only registers
+        // the request; it does not wait for it.
+        window.PPNative.removeCustomDomain(site.url, auth).catch(() => {});
+        // Local list update happens once acquisition succeeded — same as
+        // before removeCustomDomain existed, this is the renderer's own
+        // cosmetic copy, not the enforcement.
+        PP.put('blocklist', { ...bl, customSites: bl.customSites.filter((x) => x.id !== site.id) });
+      })
+      .catch((e) => {
+        // Cancelled prompt: leave the list untouched, silently abort.
+        if (!e || e.message !== 'cancelled') console.warn('[PurePath] removeSite failed:', e);
+      });
   }
   function removeAllow(id) {
     PP.put('blocklist', { ...bl, allow: bl.allow.filter((x) => x.id !== id) });

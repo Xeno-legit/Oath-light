@@ -67,6 +67,29 @@ struct AuthFile {
     hash: String,
 }
 
+/// Shared implementation behind both `AuthState::read_hash` and the
+/// standalone `password_is_set` below — one place that defines "missing",
+/// "corrupt JSON", and "empty hash" as the same "no password" outcome (see
+/// the fail-closed rule in the module doc).
+fn read_hash_at(path: &Path) -> Option<String> {
+    let s = std::fs::read_to_string(path).ok()?;
+    let f: AuthFile = serde_json::from_str(&s).ok()?;
+    if f.hash.is_empty() {
+        None
+    } else {
+        Some(f.hash)
+    }
+}
+
+/// Whether a master password is currently configured, checked straight off
+/// disk without needing a live `AuthState` — for call sites that only have
+/// an `app_data_dir` (e.g. an early boot-time check before `AuthState` is
+/// managed). `AuthState::password_set` is the equivalent for callers that
+/// already have the managed state; both funnel through `read_hash_at`.
+pub fn password_is_set(app_data_dir: &Path) -> bool {
+    read_hash_at(&app_data_dir.join("auth.json")).is_some()
+}
+
 /// Owner of the master-password hash file and every live session token.
 /// Cheap to construct (`load` just remembers the app data dir — the hash
 /// itself is read off disk fresh on every check, so a password
@@ -79,6 +102,11 @@ pub struct AuthState {
     /// Timestamp of the last verification attempt (success or failure) —
     /// see `MIN_ATTEMPT_GAP`.
     last_attempt: Mutex<Option<Instant>>,
+    /// Running count of failed verification attempts this process lifetime.
+    /// Never persisted, never used to lock anything out — purely a counter
+    /// for the log line in `verify_only` so item 4.5's (not yet built)
+    /// hash-chained event log has a number to key off once it exists.
+    failed_attempts: Mutex<u64>,
 }
 
 impl AuthState {
@@ -87,6 +115,7 @@ impl AuthState {
             app_data_dir: app_data_dir.to_path_buf(),
             sessions: Mutex::new(HashMap::new()),
             last_attempt: Mutex::new(None),
+            failed_attempts: Mutex::new(0),
         }
     }
 
@@ -99,13 +128,7 @@ impl AuthState {
     /// the same "no password set" outcome everywhere this is called, per
     /// the fail-closed rule in the module doc above.
     fn read_hash(&self) -> Option<String> {
-        let s = std::fs::read_to_string(self.auth_path()).ok()?;
-        let f: AuthFile = serde_json::from_str(&s).ok()?;
-        if f.hash.is_empty() {
-            None
-        } else {
-            Some(f.hash)
-        }
+        read_hash_at(&self.auth_path())
     }
 
     fn write_hash(&self, hash: &str) -> Result<(), String> {
@@ -153,9 +176,14 @@ impl AuthState {
             Ok(()) => Ok(()),
             Err(_) => {
                 // Never log the password itself — only that an attempt was
-                // made and failed. Item 4.5's event log is the intended
-                // long-term consumer of this line.
-                log::warn!("auth: failed master-password attempt");
+                // made and failed, plus a running count. Item 4.5's event
+                // log is the intended long-term consumer of this line.
+                let count = {
+                    let mut n = self.failed_attempts.lock().unwrap();
+                    *n += 1;
+                    *n
+                };
+                log::warn!("auth: failed master-password attempt (#{count} this session)");
                 Err("Wrong password.".to_string())
             }
         }

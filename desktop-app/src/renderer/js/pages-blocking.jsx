@@ -33,6 +33,33 @@ function BlockingPage({ s, PP }) {
   // safe. See pages-settings.jsx for the definition.
   const guardPending = (window.usePendingWeakenings || (() => []))().find((p) => p.action_id === 'guard.disable');
   const toggle = (k) => set({ [k]: !b[k] });
+  // Turning the uninstall guard OFF is a weakening, gated behind the master
+  // password (4.2) when one is set — turning it back ON is a strengthening
+  // and stays instant/ungated (`toggle` above), same asymmetry as every
+  // other friction rule in this codebase. Only the off-and-currently-on
+  // click goes through `PPAuth.acquire()`.
+  //
+  // This calls `PPNative.setGuard` directly with the acquired token, rather
+  // than just flipping the local store and letting app.jsx's reconciliation
+  // effect push it — that effect deliberately passes no token (it's a
+  // reconciler, not a user action; see its comment in app.jsx), so it alone
+  // could never get past the backend's gate. The local store only flips
+  // after the direct, gated call actually succeeds; a cancelled prompt or a
+  // real error leaves the switch exactly where it was. (The reconciliation
+  // effect still fires afterward when the store changes — redundant but
+  // harmless: the friction request already exists, so its own ungated call
+  // just gets rejected by the backend gate and is swallowed there.)
+  const toggleGuard = () => {
+    if (!b.uninstallGuard) { toggle('uninstallGuard'); return; }
+    (window.PPAuth ? PPAuth.acquire() : Promise.resolve(null))
+      .then((auth) => (window.PPNative && PPNative.available
+        ? PPNative.setGuard(false, auth)
+        : Promise.resolve({ applied: true })))
+      .then(() => toggle('uninstallGuard'))
+      .catch((e) => {
+        if (!e || e.message !== 'cancelled') console.warn('[PurePath] toggleGuard failed:', e);
+      });
+  };
   // Block-screen mode toggles are mutually exclusive — enabling one disables
   // the others; toggling the active one off leaves them all disabled.
   const modeKeys = ['redirectLinkOn', 'redirectOffline', 'bgSongEnabled'];
@@ -196,7 +223,7 @@ function BlockingPage({ s, PP }) {
             <b>Uninstall guard</b>
             <span>Force-installs the extension on Chromium browsers and re-applies the policy if it's removed (user-level lock now; machine-wide hardening later)</span>
           </div>
-          <Switch on={b.uninstallGuard} onClick={() => toggle('uninstallGuard')} />
+          <Switch on={b.uninstallGuard} onClick={toggleGuard} />
         </div>
         {guardPending &&
           <div style={{ fontSize: 12, color: 'var(--muted)', margin: '-6px 0 10px 54px' }}>

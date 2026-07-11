@@ -68,9 +68,19 @@ function App() {
   }, [JSON.stringify(customSiteUrls)]);
 
   // push the uninstall-guard toggle down to the backend so it actually (dis)arms
-  // the reinstall-enforcement monitor, not just the UI switch.
+  // the reinstall-enforcement monitor, not just the UI switch. This is pure
+  // reconciliation (mirroring the store's current value down to the backend,
+  // not a user-initiated toggle), so it deliberately passes no master-
+  // password token (4.2) — a rejected weakening here is the CORRECT outcome
+  // when a password is set: it means the actual toggle-off click already
+  // went through the gated path in pages-blocking.jsx, and if that path
+  // itself was cancelled, the store's own value never changed, so this
+  // effect wouldn't even fire. The catch just keeps a rejected weakening
+  // from surfacing as an unhandled promise rejection.
   useEffect(() => {
-    if (window.PPNative && PPNative.available) PPNative.setGuard(!!s.blocking.uninstallGuard);
+    if (window.PPNative && PPNative.available) {
+      PPNative.setGuard(!!s.blocking.uninstallGuard).catch(() => {});
+    }
   }, [s.blocking.uninstallGuard]);
 
   // Panic / SOS entry (5.1): the tray "I need help now" item, the global
@@ -105,6 +115,7 @@ function App() {
 
   return (
     <div className="window">
+      <PasswordGate />
       <TitleBar s={s} />
       <div className="body">
         <AnimatedBG bg={t.bg} intensity={t.intensity} />
