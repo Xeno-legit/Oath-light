@@ -1256,18 +1256,29 @@ const EVASION_EMIT_THROTTLE: Duration = Duration::from_secs(5 * 60);
 /// Hot-path rule: when nothing is configured (`blocked_processes` empty) and
 /// nothing running even looks like it could be an evasion browser, this
 /// function costs nothing beyond the two `Vec` scans already needed to check
-/// that — no fresh `sysinfo::System`, no extra syscalls, ever.
+/// that — no fresh `sysinfo::System`, no extra syscalls, ever. And because a
+/// KNOWN browser being open is the normal state of any session, the
+/// portable-path check for known browsers only runs on `deep_scan` ticks
+/// (every ~30s) — otherwise it alone would force a full exe-path process
+/// enumeration every 3 seconds for the life of the app.
 fn enforce_processes(
     app: &AppHandle,
     state: &Arc<Mutex<AppState>>,
     cfg: &settings::SettingsV1,
     proc_names: &[String],
     memo: &mut HashMap<String, Instant>,
+    deep_scan: bool,
 ) {
-    let any_evasion_candidate = proc_names.iter().any(|n| {
-        browsers::EVASION_BROWSERS.contains(&n.as_str()) || browsers::match_browser_process(n).is_some()
-    });
-    if cfg.blocked_processes.is_empty() && !any_evasion_candidate {
+    // Split the candidate classes by cost/urgency: a name on
+    // `EVASION_BROWSERS` is rare and always worth an immediate exe-path
+    // look, but "some known browser is running" is true on basically every
+    // tick of every session — checking those for portable install paths
+    // needs a full process enumeration *with exe paths*, so it only runs on
+    // the caller's `deep_scan` ticks (every 10th tick ≈ 30s; a portable
+    // browser doesn't appear and vanish inside that window).
+    let any_evasion_named = proc_names.iter().any(|n| browsers::EVASION_BROWSERS.contains(&n.as_str()));
+    let any_known_browser = deep_scan && proc_names.iter().any(|n| browsers::match_browser_process(n).is_some());
+    if cfg.blocked_processes.is_empty() && !any_evasion_named && !any_known_browser {
         return;
     }
 
@@ -1302,16 +1313,21 @@ fn enforce_processes(
     // --- b) evasion-browser detection ----------------------------------------
     // Never flag a browser we've learned is actually running our extension
     // over the native host (see `AppState.custom_browsers`).
+    if !any_evasion_named && !any_known_browser {
+        return;
+    }
     let learned_procs: HashSet<String> = {
         let s = state.lock().unwrap();
         s.custom_browsers.values().map(|c| c.process.clone()).collect()
     };
+    // Named evasion browsers are always candidates; known browsers (portable-
+    // path check) only on deep-scan ticks — see the cost note at the top.
     let candidates: HashSet<String> = proc_names
         .iter()
         .filter(|n| {
             !learned_procs.contains(n.as_str())
                 && (browsers::EVASION_BROWSERS.contains(&n.as_str())
-                    || browsers::match_browser_process(n.as_str()).is_some())
+                    || (deep_scan && browsers::match_browser_process(n.as_str()).is_some()))
         })
         .cloned()
         .collect();
@@ -1384,6 +1400,10 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
         // Process-blocking / evasion-detection noise memo (1.3) — see
         // `enforce_processes`'s doc comment for what's throttled and why.
         let mut process_memo: HashMap<String, Instant> = HashMap::new();
+        // Tick counter for the portable-browser deep scan (exe-path
+        // enumeration is only worth paying every ~10th tick; named evasion
+        // browsers are still checked on every tick regardless).
+        let mut enforce_tick: u64 = 0;
 
         loop {
             let now = now_unix_ms();
@@ -1395,8 +1415,11 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
             // reusing this tick's process-name scan — see `enforce_processes`.
             // `SettingsState` is managed in `setup()` well before this thread
             // is spawned, so this is never actually unmanaged in practice.
+            // `% 10 == 1` (not 0) so the very first tick after launch already
+            // runs a deep scan instead of waiting 30s.
+            enforce_tick += 1;
             let cfg = app.state::<Arc<settings::SettingsState>>().get();
-            enforce_processes(&app, &state, &cfg, &proc_names, &mut process_memo);
+            enforce_processes(&app, &state, &cfg, &proc_names, &mut process_memo, enforce_tick % 10 == 1);
 
             let mut statuses = build_status(&state, &running, &proc_names, now);
 
