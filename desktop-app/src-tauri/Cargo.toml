@@ -36,6 +36,14 @@ xcap = "0.9"
 # Base64-encode the scan thumbnail sent to the UI as a data URL.
 base64 = "0.22"
 
+# --- Master password (Phase 4 item 4.2) ---
+# Argon2id password hashing for the optional master password that gates
+# weakening requests (turning off protections) in Rust — see auth.rs. Default
+# features are kept on purpose: they pull in `password-hash` (PHC string
+# encoding, `SaltString`) and `rand` (`OsRng`), both used directly there, with
+# no extra crate needed for random bytes or salt generation.
+argon2 = "0.5"
+
 # Windows API access for the action-layer overlay (overlay.rs): marks the
 # overlay window WDA_EXCLUDEFROMCAPTURE so the screen monitor never scans its
 # own interrupt. Version pinned to match what `tauri` itself already pulls in
