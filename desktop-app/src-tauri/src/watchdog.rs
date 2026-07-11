@@ -179,6 +179,18 @@ mod imp {
     /// Locate `purepathguard.exe`: next to our own exe (production), then walking
     /// up the dev tree to `guardian/target/{debug,release}/`. Mirrors
     /// `resolve_host_binary` in lib.rs.
+    ///
+    /// A.1 workspace note: since `guardian` became a workspace member, `cargo
+    /// build` deposits its binary in the shared `desktop-app/target/...`, not
+    /// `desktop-app/guardian/target/...` — and because the main app is *also*
+    /// built into that same shared dir, the very first candidate below
+    /// (`exe_dir.join(GUARDIAN_BIN)`, i.e. "next to our own exe") now matches
+    /// in a workspace dev build too, same as production. The old per-crate
+    /// `guardian/target/...` candidates are kept (harmless — `.exists()` just
+    /// fails) for anyone still holding a pre-workspace build tree, and the new
+    /// `target/...` (workspace-root-relative) candidates are added so the
+    /// search also succeeds if this exe is ever run from somewhere other than
+    /// the shared target dir.
     fn resolve_guardian_binary() -> PathBuf {
         let exe_dir = std::env::current_exe()
             .ok()
@@ -188,6 +200,8 @@ mod imp {
         let mut candidates: Vec<PathBuf> = vec![exe_dir.join(GUARDIAN_BIN)];
         let mut dir = exe_dir.clone();
         for _ in 0..6 {
+            candidates.push(dir.join("target").join("debug").join(GUARDIAN_BIN));
+            candidates.push(dir.join("target").join("release").join(GUARDIAN_BIN));
             candidates.push(dir.join("guardian").join("target").join("debug").join(GUARDIAN_BIN));
             candidates.push(dir.join("guardian").join("target").join("release").join(GUARDIAN_BIN));
             if !dir.pop() {

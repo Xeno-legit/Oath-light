@@ -11,7 +11,6 @@ path = "src/main.rs"
 
 # No dependencies: pure std + a handful of kernel32 FFI calls. Tiny binary.
 
-[profile.release]
-opt-level = "s"
-lto = true
-strip = true
+# Release profile (opt-level="s" + lto/strip) moved to the workspace root
+# Cargo.toml (A.1) — Cargo ignores `[profile.*]` in non-root members. See the
+# comment there for the small lto/strip deviation this move causes.

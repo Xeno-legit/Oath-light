@@ -14,7 +14,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sysinfo = "0.30"
 
-[profile.release]
-opt-level = "s"
-lto = true
-strip = true
+# Release profile (opt-level="s" + lto/strip) moved to the workspace root
+# Cargo.toml (A.1) — Cargo ignores `[profile.*]` in non-root members. See the
+# comment there for the small lto/strip deviation this move causes.

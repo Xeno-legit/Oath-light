@@ -24,6 +24,9 @@ log = "0.4"
 tauri = { version = "2.10.3", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 sysinfo = "0.30"
+# Shared blocklist embedding + domain/keyword matching (A.1/A.2) — the same
+# crate the DNS resolver (1.1) and any future mobile binding will consume.
+purepath-core = { path = "../core" }
 
 # --- NSFW AI layer (Phase 4 optional monitoring) ---
 # ort = ONNX Runtime bindings; pinned (prerelease, API still churns). image =
@@ -68,13 +71,6 @@ features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"]
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
 
-# The exe embeds ~10MB of blocklists plus the ORT runtime; a smaller binary
-# means less disk I/O at login, which is part of what Windows' startup-impact
-# score measures. opt-level stays at its default (3) — image
-# preprocessing/inference for the NSFW layer wants it — and panic stays at the
-# default (unwind): abort would change failure behavior for no meaningful size
-# win on a binary dominated by embedded data.
-[profile.release]
-codegen-units = 1
-lto = "thin"
-strip = "symbols"
+# Release profile (codegen-units/lto/strip) moved to the workspace root
+# Cargo.toml (A.1) — Cargo ignores `[profile.*]` in non-root members. See the
+# comment there for the size rationale.

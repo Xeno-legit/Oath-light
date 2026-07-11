@@ -42,7 +42,12 @@ for (const { dir, bin } of crates) {
     { stdio: 'inherit' },
   );
 
-  const src = join(root, dir, 'target', triple, 'release', bin + ext);
+  // A.1: guardian/native-host are now workspace members (desktop-app/Cargo.toml),
+  // so `cargo build --manifest-path <dir>/Cargo.toml` resolves the workspace and
+  // places output under the WORKSPACE root's target dir, not <dir>/target —
+  // even though the command is invoked with a per-crate --manifest-path. The
+  // per-crate `<dir>/target` dirs from before the workspace move are now stale.
+  const src = join(root, 'target', triple, 'release', bin + ext);
   if (!existsSync(src)) throw new Error(`[sidecars] built binary missing: ${src}`);
 
   const dst = join(outDir, `${bin}-${triple}${ext}`);

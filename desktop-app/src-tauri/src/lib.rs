@@ -63,43 +63,19 @@ pub struct ExtensionStats {
     pub days_protected: u64,
 }
 
-const BUILT_IN_DOMAINS_P1: &str = include_str!("../../../extension/blocklists/domains_part1.json");
-const BUILT_IN_DOMAINS_P2: &str = include_str!("../../../extension/blocklists/domains_part2.json");
-const BUILT_IN_DOMAINS_P3: &str = include_str!("../../../extension/blocklists/domains_part3.json");
-// AI-erotica category (AI-girlfriend/companion sites, NSFW AI image
-// generators, NSFW character-chat frontends, jailbroken chat UIs) — same
-// {"domains": [...]} shape as the other parts, just its own category file.
-const BUILT_IN_DOMAINS_AI: &str = include_str!("../../../extension/blocklists/domains_ai.json");
-const BUILT_IN_KEYWORDS_JSON: &str = include_str!("../../../extension/blocklists/keywords.json");
-
-/// Parses the ~10.5MB of bundled built-in domain/keyword JSON exactly once,
-/// on first access, instead of at `AppState::default()` construction time —
-/// which used to run before Tauri even starts, on every launch including the
-/// hidden login-autostart one. Cached behind a `OnceLock` so the parse cost
-/// (and the resulting heap allocation) is paid only if/when something actually
-/// asks for the built-in lists (see `get_extension_blocklists`), never on the
-/// startup path itself.
-fn built_in_lists() -> &'static (Vec<String>, Vec<String>) {
-    static LISTS: std::sync::OnceLock<(Vec<String>, Vec<String>)> = std::sync::OnceLock::new();
-    LISTS.get_or_init(|| {
-        let mut built_in_domains: Vec<String> = Vec::new();
-        for json_str in [BUILT_IN_DOMAINS_P1, BUILT_IN_DOMAINS_P2, BUILT_IN_DOMAINS_P3, BUILT_IN_DOMAINS_AI] {
-            if let Ok(v) = serde_json::from_str::<Value>(json_str) {
-                if let Some(arr) = v.get("domains").and_then(|a| a.as_array()) {
-                    built_in_domains.extend(arr.iter().filter_map(|x| x.as_str().map(String::from)));
-                }
-            }
-        }
-
-        let mut built_in_keywords: Vec<String> = Vec::new();
-        if let Ok(v) = serde_json::from_str::<Value>(BUILT_IN_KEYWORDS_JSON) {
-            if let Some(arr) = v.get("keywords").and_then(|a| a.as_array()) {
-                built_in_keywords = arr.iter().filter_map(|x| x.as_str().map(String::from)).collect();
-            }
-        }
-
-        (built_in_domains, built_in_keywords)
-    })
+// Built-in blocklist/keyword embedding + parsing moved to `purepath-core`
+// (plan A.1) — the DNS resolver (1.1) and any future mobile binding need the
+// same parsed table this app uses, and a shared `OnceLock` (in core) means
+// it's parsed once per process regardless of how many callers ask for it.
+// `built_in_lists()` below is a thin app-local wrapper kept for the existing
+// call sites' convenience: it hands back `&Vec<String>` (not core's `&[String]`
+// slice view) specifically so `.clone()` at each call site keeps resolving to
+// `Vec::clone` (an owned `Vec<String>`) rather than the reference's own
+// `Clone` impl — `[String]` itself isn't `Clone` (unsized), so a `&[String]`
+// here would make `fill_built_in_lists`'s `.clone()` calls stop compiling.
+fn built_in_lists() -> (&'static Vec<String>, &'static Vec<String>) {
+    let lists = purepath_core::lists::built_in();
+    (&lists.domains_vec, &lists.keywords)
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -127,45 +103,11 @@ fn fill_built_in_lists(bl: &mut ExtensionBlocklists) {
     }
 }
 
-/// Normalize a user-entered domain the same way everywhere one is compared or
-/// stored: trim, lowercase, strip a leading `http(s)://` and `www.`, and cut
-/// at the first path separator. Mirrors the extension-side normalization in
-/// `background.js`'s `addCustomDomain`/`checkDomainBlocked` handlers, so a
-/// domain typed in the desktop UI and one typed into the extension's own
-/// blocklist page collapse to the same string.
-fn normalize_domain(raw: &str) -> String {
-    let mut d = raw.trim().to_lowercase();
-    if let Some(rest) = d.strip_prefix("https://") {
-        d = rest.to_string();
-    } else if let Some(rest) = d.strip_prefix("http://") {
-        d = rest.to_string();
-    }
-    if let Some(rest) = d.strip_prefix("www.") {
-        d = rest.to_string();
-    }
-    if let Some(idx) = d.find('/') {
-        d.truncate(idx);
-    }
-    d
-}
-
-/// Normalize a whole list, dropping empties and deduping while preserving
-/// first-seen order (order doesn't matter for blocking, but it keeps the
-/// persisted file and re-pushed messages stable/diffable).
-fn normalize_domain_list(domains: &[String]) -> Vec<String> {
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut out = Vec::new();
-    for raw in domains {
-        let d = normalize_domain(raw);
-        if d.is_empty() {
-            continue;
-        }
-        if seen.insert(d.clone()) {
-            out.push(d);
-        }
-    }
-    out
-}
+// normalize_domain / normalize_domain_list moved to purepath-core (plan A.1)
+// — brought into scope here so every existing call site keeps working
+// unqualified; behavior is byte-for-byte the same function, now shared with
+// the DNS resolver (1.1) and any future mobile binding.
+use purepath_core::lists::{normalize_domain, normalize_domain_list};
 
 /// One live native-host connection = one browser profile's extension.
 struct ConnState {
@@ -1536,6 +1478,16 @@ fn register_native_host(app: &AppHandle) {
 
 /// Find the native host binary: next to the Tauri exe (production), then the
 /// dev build dirs, then the app data dir.
+///
+/// A.1 workspace note: `native-host` is now a workspace member, so `cargo
+/// build` deposits its binary in the shared `desktop-app/target/...`, not
+/// `desktop-app/native-host/target/...` — and since the main app is *also*
+/// built into that same shared dir, the first candidate below (next to our
+/// own exe) now matches in a workspace dev build too. The old per-crate
+/// `native-host/target/...` candidates are kept (harmless) for a pre-
+/// workspace build tree; the new `target/...` (workspace-root-relative)
+/// candidates cover the shared-target case if this exe ever runs from
+/// somewhere other than that shared dir.
 fn resolve_host_binary(app_data_dir: &std::path::Path) -> std::path::PathBuf {
     let host_binary_name = if cfg!(windows) { "pure-path-host.exe" } else { "pure-path-host" };
 
@@ -1548,6 +1500,8 @@ fn resolve_host_binary(app_data_dir: &std::path::Path) -> std::path::PathBuf {
 
     let mut dir = exe_dir.clone();
     for _ in 0..6 {
+        candidates.push(dir.join("target").join("debug").join(host_binary_name));
+        candidates.push(dir.join("target").join("release").join(host_binary_name));
         candidates.push(dir.join("native-host").join("target").join("debug").join(host_binary_name));
         candidates.push(dir.join("native-host").join("target").join("release").join(host_binary_name));
         if !dir.pop() {
