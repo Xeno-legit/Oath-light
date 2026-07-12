@@ -50,12 +50,13 @@ Until every stage is complete or before it by one stage.
 * optional Ai monitoring (in progress)
 * Pre-Alpha launch test. (Testing everything again at full scale, pushing the app to its absolute limits.)
 * Blocking certain desktop versions of apps (Discord, etc.)
-* Desktop Alpha launch.
+* Finishing development of everything in the Frontier plan.
 
 ## Phase 5:
 
 ▶ Phase 5 will focus on phones, Pure path will come to android only with an integrated Ai to see and monitor the user screen.
 
+* Desktop Alpha launch.
 * Phone support
 * built-in ai scanner
 * Access to permissions to prevent app deletion at weak moments
