@@ -4,6 +4,7 @@ mod dns_filter;
 mod friction;
 pub mod nsfw;
 pub mod nudenet;
+mod ota;
 mod overlay;
 mod profiles;
 pub mod screen;
@@ -68,16 +69,11 @@ pub struct ExtensionStats {
 // (plan A.1) — the DNS resolver (1.1) and any future mobile binding need the
 // same parsed table this app uses, and a shared `OnceLock` (in core) means
 // it's parsed once per process regardless of how many callers ask for it.
-// `built_in_lists()` below is a thin app-local wrapper kept for the existing
-// call sites' convenience: it hands back `&Vec<String>` (not core's `&[String]`
-// slice view) specifically so `.clone()` at each call site keeps resolving to
-// `Vec::clone` (an owned `Vec<String>`) rather than the reference's own
-// `Clone` impl — `[String]` itself isn't `Clone` (unsized), so a `&[String]`
-// here would make `fill_built_in_lists`'s `.clone()` calls stop compiling.
-fn built_in_lists() -> (&'static Vec<String>, &'static Vec<String>) {
-    let lists = purepath_core::lists::built_in();
-    (&lists.domains_vec, &lists.keywords)
-}
+// Since OTA updates (plan 3.5, ota.rs) the app reads the *effective* view —
+// `purepath_core::lists::effective()`: the verified OTA overlay when one is
+// installed, the baked built-ins otherwise. Callers that specifically want
+// the immutable baked lists would call `lists::built_in()` directly; nothing
+// in the app should, so counts/checks/pushes all follow updates.
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExtensionBlocklists {
@@ -90,17 +86,19 @@ pub struct ExtensionBlocklists {
 }
 
 /// Fill in `built_in_domains`/`built_in_keywords` from the lazily-parsed
-/// bundled lists, but only where a field is still empty — a `blocklist_sync`
-/// message from an extension can legitimately overwrite these with its own
-/// (possibly newer) built-in tables, and that value must always win over the
-/// bundled default.
+/// effective lists (OTA overlay if installed, bundled otherwise), but only
+/// where a field is still empty — a `blocklist_sync` message from an
+/// extension can legitimately overwrite these with its own (possibly newer)
+/// built-in tables, and that value must always win over our default. (After
+/// an OTA install, `ota::push_lists_to_extensions` overwrites these fields
+/// directly — the emptiness guard here never blocks an update.)
 fn fill_built_in_lists(bl: &mut ExtensionBlocklists) {
-    let (domains, keywords) = built_in_lists();
+    let eff = purepath_core::lists::effective();
     if bl.built_in_domains.is_empty() {
-        bl.built_in_domains = domains.clone();
+        bl.built_in_domains = eff.domains_vec().clone();
     }
     if bl.built_in_keywords.is_empty() {
-        bl.built_in_keywords = keywords.clone();
+        bl.built_in_keywords = eff.keywords().clone();
     }
 }
 
@@ -2293,6 +2291,37 @@ fn update_blocklist_keywords(
     if n > 0 { Ok(()) } else { Err("No connected extensions".to_string()) }
 }
 
+/// OTA blocklist updates (plan 3.5): current status for the Settings card —
+/// installed/loaded list version, last check time + outcome, whether a check
+/// is running right now.
+#[tauri::command]
+fn get_ota_status(state: tauri::State<'_, Arc<ota::OtaState>>) -> ota::OtaStatusView {
+    state.status()
+}
+
+/// OTA blocklist updates (plan 3.5): run a check right now (the Settings
+/// "Check now" button). The check itself — network fetch + hashing a ~10MB
+/// download — runs on its own thread so this command returns immediately;
+/// the UI follows progress via the `ota-status` event `ota::check_now` emits
+/// on completion (and can poll `get_ota_status`). Checking for (or applying)
+/// an update only ever *strengthens* the lists — monotonic versions, verified
+/// content — so this is deliberately ungated (no auth/friction).
+#[tauri::command]
+fn check_lists_update_now(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<ota::OtaState>>,
+) -> ota::OtaStatusView {
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        let _ = ota::check_now(&app2);
+    });
+    let mut view = state.status();
+    // The spawned thread may not have flipped the flag yet — report the
+    // truth of what this command just started.
+    view.checking = true;
+    view
+}
+
 /// Classify an image file with the NSFW model. Loads the model on first call.
 /// Returns per-label probabilities plus `nsfw_score` / `sensitive_score`
 /// aggregates the blocking policy can threshold on.
@@ -2956,6 +2985,8 @@ pub fn run() {
             request_sync,
             update_blocklist_domains,
             update_blocklist_keywords,
+            get_ota_status,
+            check_lists_update_now,
             classify_image,
             start_nsfw_monitor,
             stop_nsfw_monitor,
@@ -3106,6 +3137,13 @@ pub fn run() {
             // (or by hand) takes effect immediately; see auth.rs's module doc.
             let auth_state = Arc::new(auth::AuthState::load(&udd));
             app.manage(auth_state.clone());
+            // OTA blocklist updates (3.5): load any installed, signed list
+            // set from <app_data_dir>/lists/ into the effective view (before
+            // the TCP server starts serving handshakes, so the very first
+            // extension sync already sees updated lists), then start the
+            // weekly background checker. Runs in the app, not the watchdog —
+            // updates are not liveness-critical.
+            ota::init(app.handle(), &udd);
             // AppState was constructed with the hardcoded pre-setup default
             // (`guard_enabled: true`) before the persisted settings file could
             // be read — now that it's loaded, the persisted value wins.

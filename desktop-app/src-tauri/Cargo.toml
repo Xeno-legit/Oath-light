@@ -60,6 +60,19 @@ argon2 = "0.5"
 # (rand_core 0.6.4) so no second version enters the tree.
 rand_core = { version = "0.6", features = ["getrandom"] }
 
+# --- OTA blocklist updates (Phase 4 item 3.5, see src/ota.rs) ---
+# ureq: small blocking HTTP client — deliberately NOT reqwest: no tokio
+# runtime enters the tree, and the weekly check runs on a plain background
+# thread anyway. Default features (rustls TLS) cover the two GitHub
+# release-asset GETs.
+ureq = "2"
+# ed25519-dalek v2: verify the raw-Ed25519 manifest signature against the two
+# pubkeys baked into purepath-core (core/src/ota.rs). Verification only — no
+# signing key ever exists on a user machine — so default features suffice.
+ed25519-dalek = "2"
+# sha256 for the per-file integrity hashes listed in the signed manifest.
+sha2 = "0.10"
+
 # Windows API access for the action-layer overlay (overlay.rs): marks the
 # overlay window WDA_EXCLUDEFROMCAPTURE so the screen monitor never scans its
 # own interrupt. Version pinned to match what `tauri` itself already pulls in
