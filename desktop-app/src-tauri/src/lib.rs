@@ -2,6 +2,8 @@ mod auth;
 mod browsers;
 mod dns_filter;
 mod friction;
+mod lockdown;
+mod notify;
 pub mod nsfw;
 pub mod nudenet;
 mod ota;
@@ -11,6 +13,8 @@ pub mod screen;
 mod settings;
 mod uninstall;
 mod watchdog;
+
+use purepath_core::eventlog::{self, EventLog};
 
 use browsers::{BrowserDef, Engine, EnforceOutcome, BROWSERS};
 use serde::{Deserialize, Serialize};
@@ -179,6 +183,12 @@ pub struct AppState {
     /// handshake too. Persisted to `custom_domains.json` so a restart doesn't
     /// silently drop them back to nothing (see `set_custom_domains`).
     custom_domains: Vec<String>,
+    /// Domains the user additively allowed WHILE a lockdown was active (4.4's
+    /// anti-brick mitigation). Pushed to extensions inside the lockdown field
+    /// so `shouldBlockUrl` lets them through even in allowlist-only mode.
+    /// Persisted to `lockdown_allow.json`. Additions go through a short (60s)
+    /// friction delay (`lockdown.allow:` action id) — see `request_lockdown_allow`.
+    lockdown_allow: Vec<String>,
 }
 
 /// Lazily-loaded NSFW models (Phase 4 optional AI monitoring). Both are loaded
@@ -475,6 +485,11 @@ fn run_monitor(
 
             if effective == Escalation::Acting && prev != Escalation::Acting {
                 log::warn!("monitor {monitor_id}: persistent NSFW verdict — escalating to Acting");
+                // Event log (4.5): record the ESCALATION only — never the
+                // thumbnail, the scores, or any content (plan 4.5: "event
+                // only, no content"). The monitor id is the machine's display
+                // index, not anything identifying.
+                log_event(&app, "monitor_escalated", serde_json::json!({ "monitor_id": monitor_id }));
                 if let Err(e) = overlay::open(&app, &overlay_state, monitor_id) {
                     log::warn!("could not open overlay for monitor {monitor_id}: {e}");
                 }
@@ -671,6 +686,168 @@ fn broadcast_app_data(state: &Arc<Mutex<AppState>>) {
     };
     let msg = serde_json::json!({ "type": "set_app_data", "streak": streak, "globalBlocks": blocks });
     let _ = broadcast_to_extensions(state, &msg);
+}
+
+// ============================================================================
+// Tamper-evident event log (plan item 4.5) — thin app-side helpers around the
+// `purepath-core::eventlog::EventLog` managed in `setup()`. Every writer in
+// this file goes through `log_event`; the core module owns the hash-chaining
+// and tamper-evidence, this is just the wiring.
+// ============================================================================
+
+/// Append one protective event, if the log is managed (it always is after
+/// `setup()`; `try_state` so a pre-setup caller degrades to a no-op instead
+/// of panicking). NEVER pass content/scores/URLs in `data` — event only.
+fn log_event(app: &AppHandle, kind: &str, data: Value) {
+    if let Some(el) = app.try_state::<Arc<EventLog>>() {
+        el.append(kind, data);
+    }
+}
+
+// ============================================================================
+// Lockdown Mode (plan item 4.4) — pushing state to extensions. The desktop is
+// the authority for whether a lockdown is active; extensions enforce it and
+// self-expire off `ends_at_hint` only as a fallback if the connection dies.
+// ============================================================================
+
+/// The `lockdown` sub-object the extension stores inside `ppBlocking`
+/// (`{active, frozen, ends_at_hint}`) — `ends_at_hint` is a wall-clock unix
+/// seconds ESTIMATE the extension uses only to self-expire if the desktop
+/// connection drops; while connected, the desktop's explicit pushes are
+/// authoritative (a clock roll can't shorten a lockdown, only the desktop
+/// ending it can).
+fn lockdown_field(view: &lockdown::LockdownView, allow: &[String]) -> Value {
+    serde_json::json!({
+        "active": view.active,
+        "frozen": view.frozen,
+        "ends_at_hint": view.active_until,
+        "allow": allow,
+    })
+}
+
+/// Broadcast the current blocking settings to every extension WITH the live
+/// lockdown state merged in. The renderer's own blocking settings
+/// (`ext_blocking`: redirect target + reminder schedule) stay the base; the
+/// lockdown field is injected fresh on every push so the extension's stored
+/// `ppBlocking.lockdown` always reflects the desktop's authoritative view.
+/// Called from `set_blocking_settings`, the lockdown commands, the applier
+/// heartbeat (on expiry), and the handshake — every path that could change
+/// either the base settings or the lockdown state.
+fn broadcast_blocking(state: &Arc<Mutex<AppState>>, lockdown: &lockdown::LockdownStore) -> usize {
+    let view = lockdown.view();
+    let (mut settings, allow) = {
+        let s = state.lock().unwrap();
+        (s.ext_blocking.clone().unwrap_or_else(|| serde_json::json!({})), s.lockdown_allow.clone())
+    };
+    if let Some(obj) = settings.as_object_mut() {
+        obj.insert("lockdown".to_string(), lockdown_field(&view, &allow));
+    }
+    let msg = serde_json::json!({ "type": "set_blocking", "settings": settings });
+    broadcast_to_extensions(state, &msg)
+}
+
+/// Persist the lockdown additive-allow list to `<app_data_dir>/lockdown_allow.json`.
+fn save_lockdown_allow(app: &AppHandle, allow: &[String]) {
+    if let Ok(dir) = app.path().app_data_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        if let Ok(json) = serde_json::to_string_pretty(allow) {
+            let _ = std::fs::write(dir.join("lockdown_allow.json"), json);
+        }
+    }
+}
+
+// ============================================================================
+// Trusted-contact notifier (plan item 5.2, Tier 2) — the OPTIONAL amplifier.
+// Solo-first: this whole path is unreachable unless the user has named a
+// contact. See notify.rs for the delivery mechanics; this is the app-side
+// glue (gate on the notify flag, send off-thread, event-log the outcome).
+// ============================================================================
+
+/// Notify the trusted contact of `event_kind` IF one is configured and has
+/// that event enabled. Never blocks: resolves the recipient synchronously,
+/// then does the actual SMTP/mailto delivery on a background thread. Every
+/// send or failure is event-logged (`notify_sent` / `notify_failed`) with
+/// only the recipient + kind — never content. A no-op (returns immediately)
+/// when no contact is set or the specific event is switched off, so a solo
+/// user never triggers any of this.
+fn notify_contact(app: &AppHandle, event_kind: &str) {
+    let Some(settings) = app.try_state::<Arc<settings::SettingsState>>() else { return };
+    let Some(contact) = settings.get().trusted_contact else { return };
+    let enabled = match event_kind {
+        "uninstall_requested" => contact.notify.uninstall_requested,
+        "lockdown_cancelled" => contact.notify.lockdown_cancelled,
+        "password_removal_requested" => contact.notify.password_removal_requested,
+        // The unwire notification (5.2's anti-weak-moment rule) and the
+        // monthly heartbeat always send when a contact exists — they're not
+        // per-event opt-outs.
+        "trusted_contact_removed" | "heartbeat" => true,
+        _ => false,
+    };
+    if !enabled || contact.email.trim().is_empty() {
+        return;
+    }
+    let Ok(app_data_dir) = app.path().app_data_dir() else { return };
+    let app2 = app.clone();
+    let kind = event_kind.to_string();
+    std::thread::spawn(move || {
+        let (subject, body) = notify::message_for(&kind, &contact.name);
+        let recipient = contact.email.trim().to_string();
+        match notify::deliver(&app_data_dir, &recipient, &subject, &body) {
+            notify::SendOutcome::Sent => {
+                log_event(&app2, "notify_sent", serde_json::json!({ "to": recipient, "event": kind, "via": "smtp" }));
+            }
+            notify::SendOutcome::MailtoDraft(url) => {
+                // SMTP unconfigured or failed — open the user's own mail
+                // client with a prefilled draft as the fallback. The draft
+                // still counts as a send *attempt*; log it as sent-via-mailto
+                // so a suppressed notification is still visible in the log.
+                let opened = open_external(url).is_ok();
+                log_event(
+                    &app2,
+                    if opened { "notify_sent" } else { "notify_failed" },
+                    serde_json::json!({ "to": recipient, "event": kind, "via": "mailto", "opened": opened }),
+                );
+            }
+            notify::SendOutcome::Failed(reason) => {
+                log_event(&app2, "notify_failed", serde_json::json!({ "to": recipient, "event": kind, "reason": reason }));
+            }
+        }
+    });
+}
+
+/// Monthly "still protecting" heartbeat (5.2's silent-failure mitigation): if
+/// a contact is configured and it's been more than 30 days since the last
+/// heartbeat, send one and stamp `last_heartbeat`. So even if every real
+/// event notification silently failed to deliver, thirty days of silence from
+/// Pure Path is itself a signal the contact would notice. Called from the
+/// applier thread's ~minute cadence; the 30-day gate makes the send rare.
+fn maybe_send_contact_heartbeat(app: &AppHandle, settings: &Arc<settings::SettingsState>) {
+    let Some(contact) = settings.get().trusted_contact else { return };
+    if contact.email.trim().is_empty() {
+        return;
+    }
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    const THIRTY_DAYS: u64 = 30 * 24 * 60 * 60;
+    // A never-sent (`last_heartbeat == 0`) contact is stamped WITHOUT sending
+    // on first sight — a freshly-wired contact shouldn't get a "still
+    // protecting" note the same minute they were added; the clock starts now.
+    if contact.last_heartbeat == 0 {
+        settings.update(|s| {
+            if let Some(c) = s.trusted_contact.as_mut() {
+                c.last_heartbeat = now;
+            }
+        });
+        return;
+    }
+    if now.saturating_sub(contact.last_heartbeat) < THIRTY_DAYS {
+        return;
+    }
+    settings.update(|s| {
+        if let Some(c) = s.trusted_contact.as_mut() {
+            c.last_heartbeat = now;
+        }
+    });
+    notify_contact(app, "heartbeat");
 }
 
 // ============================================================================
@@ -908,12 +1085,21 @@ fn handle_connection(app: AppHandle, state: Arc<Mutex<AppState>>, stream: TcpStr
                             &serde_json::json!({ "type": "set_theme", "display": display }),
                         );
                     }
-                    let blocking = state.lock().unwrap().ext_blocking.clone();
-                    if let Some(settings) = blocking {
-                        let _ = broadcast_to_extensions(
-                            &state,
-                            &serde_json::json!({ "type": "set_blocking", "settings": settings }),
-                        );
+                    // Push blocking settings WITH lockdown state merged in (4.4)
+                    // so a freshly-connecting profile enforces an active
+                    // lockdown from its very first navigation. Always pushed
+                    // (even with no base settings yet) when a lockdown store is
+                    // managed, so the lockdown field is never missing on connect.
+                    if let Some(ld) = app.try_state::<Arc<lockdown::LockdownStore>>() {
+                        let _ = broadcast_blocking(&state, ld.inner());
+                    } else {
+                        let blocking = state.lock().unwrap().ext_blocking.clone();
+                        if let Some(settings) = blocking {
+                            let _ = broadcast_to_extensions(
+                                &state,
+                                &serde_json::json!({ "type": "set_blocking", "settings": settings }),
+                            );
+                        }
                     }
                     // Always push the cached custom-site list, even when empty —
                     // an extension may have stale desktop-pushed entries that need
@@ -1247,6 +1433,11 @@ fn enforce_processes(
                     "process-enforcement",
                     serde_json::json!({ "action": "killed", "name": name, "reason": "blocked_list" }),
                 );
+                // Event log (4.5): the process image name is a policy artifact
+                // the user configured themselves, not browsing content —
+                // safe (and useful) to record. Throttled by the same `memo`
+                // as the emit above so a respawning process doesn't flood it.
+                log_event(app, "process_killed", serde_json::json!({ "name": name, "reason": "blocked_list" }));
             }
         }
     }
@@ -1338,6 +1529,12 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
         // launch, so there's nothing to re-do until the guard is toggled off.
         // (Re-asserting a *deleted* policy key is Stage 2, the SYSTEM service.)
         let mut enforced: HashMap<String, EnforceOutcome> = HashMap::new();
+        // Browsers currently seen in the `extension_missing` state, so the
+        // event log (4.5) records the EDGE (entering/leaving) rather than one
+        // entry every 3s tick for as long as a browser sits missing. Distinct
+        // from `enforced` (which tracks policy writes) — this is purely the
+        // missing/restored transition memo.
+        let mut missing_seen: HashSet<String> = HashSet::new();
         // Process-blocking / evasion-detection noise memo (1.3) — see
         // `enforce_processes`'s doc comment for what's throttled and why.
         let mut process_memo: HashMap<String, Instant> = HashMap::new();
@@ -1394,6 +1591,22 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
             }
 
             let mut statuses = build_status(&state, &running, &proc_names, now);
+
+            // extension_missing edge tracking (4.5): log only on the
+            // transition into/out of "extension_missing" (a browser is
+            // running but its extension isn't present), never every tick.
+            // Also the debounce source a later 5.2 "ext removed and not
+            // restored within N minutes" contact notification would build on
+            // (TODO(5.2 v2) — the notification itself is out of v1 scope).
+            for st in statuses.iter() {
+                let missing = st.state == "extension_missing";
+                if missing && !missing_seen.contains(&st.key) {
+                    missing_seen.insert(st.key.clone());
+                    log_event(&app, "extension_missing", serde_json::json!({ "browser": st.key }));
+                } else if !missing && missing_seen.remove(&st.key) {
+                    log_event(&app, "extension_restored", serde_json::json!({ "browser": st.key }));
+                }
+            }
 
             // An elevated setup pass just wrote policy — drop the memo so every
             // browser re-reads its (now written) state this tick.
@@ -1711,6 +1924,7 @@ fn remove_custom_domain(
         "custom-block removal requested for {norm} — {}s cool-off started (still blocked)",
         view.delay_secs
     );
+    log_event(&app, "friction_requested", serde_json::json!({ "action": "custom_block.remove" }));
     Ok(view)
 }
 
@@ -1729,11 +1943,17 @@ fn get_pending_weakenings(friction: tauri::State<'_, Arc<friction::FrictionStore
 /// `uninstall.json` in sync for the watchdog/guardian — routing it through
 /// here instead would skip that mirror write.
 #[tauri::command]
-fn cancel_weakening(friction: tauri::State<'_, Arc<friction::FrictionStore>>, action_id: String) -> Result<(), String> {
+fn cancel_weakening(
+    app: AppHandle,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    action_id: String,
+) -> Result<(), String> {
     if action_id == "uninstall" {
         return Err("Use the uninstall page's own cancel action instead.".to_string());
     }
-    friction.cancel(&action_id);
+    if friction.cancel(&action_id) {
+        log_event(&app, "friction_cancelled", serde_json::json!({ "action": action_id }));
+    }
     Ok(())
 }
 
@@ -1805,6 +2025,7 @@ fn set_guard_enabled(
         "guard disable requested — {}s cool-off started (guard stays on until it elapses)",
         view.delay_secs
     );
+    log_event(&app, "friction_requested", serde_json::json!({ "action": "guard.disable" }));
     Ok(WeakeningOutcome { applied: false, pending: Some(view) })
 }
 
@@ -1993,10 +2214,311 @@ fn set_extension_theme(state: tauri::State<'_, Arc<Mutex<AppState>>>, display: V
 /// focus-schedule reminder config) to every connected extension, and cache them
 /// so freshly-connecting profiles get them on handshake too.
 #[tauri::command]
-fn set_blocking_settings(state: tauri::State<'_, Arc<Mutex<AppState>>>, settings: Value) {
-    state.lock().unwrap().ext_blocking = Some(settings.clone());
-    let msg = serde_json::json!({ "type": "set_blocking", "settings": settings });
-    let _ = broadcast_to_extensions(state.inner(), &msg);
+fn set_blocking_settings(
+    state: tauri::State<'_, Arc<Mutex<AppState>>>,
+    lockdown: tauri::State<'_, Arc<lockdown::LockdownStore>>,
+    settings: Value,
+) {
+    state.lock().unwrap().ext_blocking = Some(settings);
+    // Re-broadcast WITH the live lockdown state merged in — the renderer's
+    // settings object never carries lockdown (that's desktop-authoritative),
+    // so `broadcast_blocking` injects it fresh on every push (4.4).
+    let _ = broadcast_blocking(state.inner(), lockdown.inner());
+}
+
+// ============================================================================
+// Lockdown Mode (plan item 4.4) — commands. See lockdown.rs for the clock-
+// immune credited-time engine; these drive it and push the result to the
+// extensions via `broadcast_blocking`.
+// ============================================================================
+
+/// Current lockdown state (credited-based remaining time, frozen flag, active
+/// flag) — the renderer's Lockdown card polls this for its live countdown.
+#[tauri::command]
+fn get_lockdown_state(lockdown: tauri::State<'_, Arc<lockdown::LockdownStore>>) -> lockdown::LockdownView {
+    lockdown.view()
+}
+
+/// Start (or extend/upgrade) a lockdown. STRENGTHENING — instant, never gated
+/// (the `auth` param is accepted for signature symmetry with the weakening
+/// commands and future-proofing, but a strengthening never actually requires
+/// it; see `lockdown.rs`). Extending never shortens; upgrading normal→frozen
+/// is allowed, frozen→normal is not. Pushed to extensions immediately so the
+/// wall goes up within a heartbeat. Event-logged.
+#[tauri::command]
+fn start_lockdown(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Mutex<AppState>>>,
+    lockdown: tauri::State<'_, Arc<lockdown::LockdownStore>>,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    duration_secs: u64,
+    frozen: bool,
+    #[allow(unused_variables)] auth: Option<String>,
+) -> Result<lockdown::LockdownView, String> {
+    if duration_secs == 0 {
+        return Err("Choose how long to lock down for.".to_string());
+    }
+    let view = lockdown.start(duration_secs, frozen);
+    // Mirror the display-only view into SettingsV1 so a restart's UI paints
+    // roughly right before the credited-time engine re-derives the exact
+    // remaining. `active_until` here is wall-clock display only (see 4.4).
+    settings.update(|s| {
+        s.lockdown.active_until = view.active_until;
+        s.lockdown.frozen = view.frozen;
+    });
+    let _ = broadcast_blocking(state.inner(), lockdown.inner());
+    log_event(&app, "lockdown_started", serde_json::json!({ "duration_secs": duration_secs, "frozen": frozen }));
+    Ok(view)
+}
+
+/// Cancel a lockdown early. WEAKENING:
+///   * NORMAL lockdown — requires the master password (if set) AND goes
+///     through the ordinary friction delay under the `"lockdown.cancel"`
+///     action id; the applier arm (in `setup`) actually ends it. This only
+///     registers the request. The unwire notification to a trusted contact
+///     (5.2) fires here, immediately, on the REQUEST — not on the eventual
+///     apply — so the weak-moment self can't cancel and then race to remove
+///     the contact before the apply.
+///   * FROZEN lockdown — refused outright. No friction entry is EVER
+///     registered for it, so `apply_ready` can't be tricked into ending one
+///     early. Returns a plain error string the UI shows as-is.
+/// Both outcomes are event-logged (the frozen refusal too — an attempt is
+/// itself worth recording).
+#[tauri::command]
+fn cancel_lockdown(
+    app: AppHandle,
+    lockdown: tauri::State<'_, Arc<lockdown::LockdownStore>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    auth: Option<String>,
+) -> Result<friction::PendingView, String> {
+    if lockdown.is_frozen_active() {
+        log_event(&app, "lockdown_cancel_refused", serde_json::json!({ "reason": "frozen" }));
+        return Err(
+            "This is a frozen lockdown — it cannot be cancelled, only waited out. That was the point when you started it."
+                .to_string(),
+        );
+    }
+    if !lockdown.is_cancellable_active() {
+        return Err("No lockdown is currently active.".to_string());
+    }
+    auth::require_auth(&app, &auth)?;
+    let view = friction.request("lockdown.cancel", "End lockdown early", serde_json::json!({}));
+    log::warn!("lockdown cancel requested — {}s cool-off (lockdown stays active until it elapses)", view.delay_secs);
+    log_event(&app, "friction_requested", serde_json::json!({ "action": "lockdown.cancel" }));
+    // 5.2: notify the contact of the REQUEST immediately (anti-weak-moment).
+    notify_contact(&app, "lockdown_cancelled");
+    Ok(view)
+}
+
+/// Additively allow a domain WHILE a lockdown is active (4.4's anti-brick
+/// mitigation). Goes through a short (60s) friction delay under the
+/// `"lockdown.allow:<domain>"` action id — enough to stop an impulsive "just
+/// let me through", not enough to brick a real workday (banking, work SSO).
+/// The applier arm adds it to the pushed allowlist. Requires the master
+/// password if one is set (opening any hole during a lockdown is sensitive).
+#[tauri::command]
+fn request_lockdown_allow(
+    app: AppHandle,
+    lockdown: tauri::State<'_, Arc<lockdown::LockdownStore>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    domain: String,
+    auth: Option<String>,
+) -> Result<friction::PendingView, String> {
+    if !lockdown.view().active {
+        return Err("No lockdown is active — add allowed sites from your normal blocklist instead.".to_string());
+    }
+    let norm = normalize_domain(&domain);
+    if norm.is_empty() {
+        return Err("Not a valid domain.".to_string());
+    }
+    auth::require_auth(&app, &auth)?;
+    let action_id = format!("lockdown.allow:{norm}");
+    let view = friction.request(&action_id, &format!("Allow {norm} during lockdown"), serde_json::json!({ "domain": norm }));
+    log_event(&app, "friction_requested", serde_json::json!({ "action": "lockdown.allow" }));
+    Ok(view)
+}
+
+// ============================================================================
+// Trusted contact / privacy-first accountability (plan item 5.2, Tier 2) —
+// commands. Solo-first: OFF by default, never nagged. See notify.rs.
+// ============================================================================
+
+/// The configured trusted contact, or `None`. The renderer's card reads this
+/// on load; `None` keeps the solo path first-class (nothing to show but the
+/// invitation).
+#[tauri::command]
+fn get_trusted_contact(
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+) -> Option<settings::TrustedContactV1> {
+    settings.get().trusted_contact
+}
+
+/// Wire (or re-wire / edit) a trusted contact. Wiring/editing TO a contact is
+/// instant (a strengthening — more accountability, not less). But editing
+/// AWAY from an existing contact (changing the email, or clearing it) is the
+/// weak-moment escape hatch 5.2 explicitly closes: it goes through
+/// `request_remove_trusted_contact` instead. So this command refuses to
+/// change the email of an already-configured contact to a *different*
+/// address or blank — that path must use the friction-gated removal. Name and
+/// notify-toggle edits (keeping the same email) are fine and instant.
+#[tauri::command]
+fn set_trusted_contact(
+    app: AppHandle,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    name: String,
+    email: String,
+    notify: settings::NotifyEventsV1,
+) -> Result<(), String> {
+    let new_email = email.trim().to_string();
+    if new_email.is_empty() {
+        return Err("Enter the contact's email, or use Remove to unwire the current one.".to_string());
+    }
+    if !new_email.contains('@') {
+        return Err("That doesn't look like an email address.".to_string());
+    }
+    let existing = settings.get().trusted_contact;
+    if let Some(cur) = &existing {
+        if cur.email.trim().eq_ignore_ascii_case(&new_email) {
+            // Same contact — a name/notify edit, instant.
+        } else {
+            // Changing to a DIFFERENT email is unwiring the old one — must go
+            // through the friction-gated removal first.
+            return Err(
+                "To point Pure Path at a different contact, remove the current one first (Settings → Trusted contact → Remove) — that's a waiting-period change, on purpose."
+                    .to_string(),
+            );
+        }
+    }
+    let last_heartbeat = existing.as_ref().map(|c| c.last_heartbeat).unwrap_or(0);
+    settings.update(|s| {
+        s.trusted_contact = Some(settings::TrustedContactV1 {
+            name: name.trim().to_string(),
+            email: new_email.clone(),
+            notify: notify.clone(),
+            last_heartbeat,
+        });
+    });
+    log_event(&app, "trusted_contact_set", serde_json::json!({ "to": new_email }));
+    Ok(())
+}
+
+/// Request removal of the trusted contact — a WEAKENING (5.2): friction-gated
+/// under `"trusted_contact.remove"` AND, per the plan's anti-weak-moment
+/// rule, the unwire REQUEST itself immediately notifies the contact (so the
+/// weak-moment self can't silently drop them first). Requires the master
+/// password if one is set. The applier arm actually clears the contact once
+/// the delay elapses.
+#[tauri::command]
+fn request_remove_trusted_contact(
+    app: AppHandle,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    auth: Option<String>,
+) -> Result<friction::PendingView, String> {
+    if settings.get().trusted_contact.is_none() {
+        return Err("No trusted contact is configured.".to_string());
+    }
+    auth::require_auth(&app, &auth)?;
+    // Notify BEFORE registering the delay — the message goes out the moment
+    // the request is made, not when it applies.
+    notify_contact(&app, "trusted_contact_removed");
+    let view = friction.request("trusted_contact.remove", "Remove the trusted contact", serde_json::json!({}));
+    log_event(&app, "friction_requested", serde_json::json!({ "action": "trusted_contact.remove" }));
+    Ok(view)
+}
+
+/// Read the saved SMTP config (password blanked for display — never round-trip
+/// the plaintext password back into the webview once saved). `None` when
+/// unconfigured.
+#[tauri::command]
+fn get_smtp_config(app: AppHandle) -> Option<notify::SmtpConfig> {
+    let dir = app.path().app_data_dir().ok()?;
+    let mut cfg = notify::load_smtp(&dir)?;
+    let had_password = !cfg.password.is_empty();
+    cfg.password = if had_password { "********".to_string() } else { String::new() };
+    Some(cfg)
+}
+
+/// Save SMTP credentials to `<app_data_dir>/smtp.json` (plaintext — the UI
+/// says so). A password of `"********"` (the sentinel `get_smtp_config`
+/// returns) means "keep the existing password", so re-saving other fields
+/// doesn't wipe it.
+#[tauri::command]
+fn set_smtp_config(app: AppHandle, config: notify::SmtpConfig) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let mut cfg = config;
+    if cfg.password == "********" {
+        let existing = notify::load_smtp(&dir);
+        cfg.password = existing.map(|c| c.password).unwrap_or_default();
+    }
+    notify::save_smtp(&dir, &cfg)
+}
+
+/// Send a test notification to the configured contact right now (bypasses the
+/// per-event toggles — it's an explicit user action). Uses the same delivery
+/// path as every real notification, so a working test means real ones will
+/// work too. Runs the send off-thread like all sends; resolves as soon as the
+/// send is dispatched.
+#[tauri::command]
+fn test_trusted_contact_send(
+    app: AppHandle,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+) -> Result<(), String> {
+    let contact = settings.get().trusted_contact.ok_or_else(|| "No trusted contact is configured.".to_string())?;
+    if contact.email.trim().is_empty() {
+        return Err("The trusted contact has no email address.".to_string());
+    }
+    let app2 = app.clone();
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::thread::spawn(move || {
+        let recipient = contact.email.trim().to_string();
+        let subject = "Pure Path: test message".to_string();
+        let body = format!(
+            "Hi {},\n\nThis is a test from Pure Path confirming your trusted-contact setup works. \
+             You'll only ever be told THAT a discrete event happened — never anything about what was browsed.\n\n— Pure Path",
+            if contact.name.trim().is_empty() { "there" } else { contact.name.trim() }
+        );
+        match notify::deliver(&dir, &recipient, &subject, &body) {
+            notify::SendOutcome::Sent =>
+                log_event(&app2, "notify_sent", serde_json::json!({ "to": recipient, "event": "test", "via": "smtp" })),
+            notify::SendOutcome::MailtoDraft(url) => {
+                let opened = open_external(url).is_ok();
+                log_event(&app2, if opened { "notify_sent" } else { "notify_failed" },
+                    serde_json::json!({ "to": recipient, "event": "test", "via": "mailto", "opened": opened }));
+            }
+            notify::SendOutcome::Failed(reason) =>
+                log_event(&app2, "notify_failed", serde_json::json!({ "to": recipient, "event": "test", "reason": reason })),
+        }
+    });
+    Ok(())
+}
+
+// ============================================================================
+// Tamper-evident event log (plan item 4.5) — read commands. Writes happen at
+// each protective event's own site via `log_event` (see above).
+// ============================================================================
+
+/// The most recent event-log entries (current file), newest first, capped at
+/// `limit`. The renderer's "Protection history" card renders these in plain
+/// language.
+#[tauri::command]
+fn get_event_log(app: AppHandle, limit: Option<usize>) -> Vec<eventlog::Entry> {
+    match app.try_state::<Arc<EventLog>>() {
+        Some(el) => el.recent(limit),
+        None => Vec::new(),
+    }
+}
+
+/// Verify the event log's hash chain from genesis — the "Verify" button.
+/// Returns `intact`, entry count, the first broken seq (if any), and when the
+/// current chain segment started (so the UI shows "intact since <date>", red
+/// on a break/restart).
+#[tauri::command]
+fn verify_event_log(app: AppHandle) -> eventlog::VerifyReport {
+    match app.try_state::<Arc<EventLog>>() {
+        Some(el) => el.verify(),
+        None => eventlog::VerifyReport { intact: true, entries: 0, first_break_seq: None, chain_started: None, restarts: 0 },
+    }
 }
 
 // ============================================================================
@@ -2025,10 +2547,24 @@ fn get_auth_status(auth_state: tauri::State<'_, Arc<auth::AuthState>>) -> AuthSt
 /// auth.rs); its error is surfaced to the caller as-is.
 #[tauri::command]
 fn verify_master_password(
+    app: AppHandle,
     auth_state: tauri::State<'_, Arc<auth::AuthState>>,
     password: String,
 ) -> Result<String, String> {
-    auth_state.verify(&password)
+    // auth.rs stays core-agnostic (no eventlog dependency, per Part J); the
+    // event-log wiring for a failed attempt lives here at the command layer.
+    // Rate-limit rejections ("Try again in a moment.") are NOT logged — only
+    // a genuine wrong-password attempt, so a scripted retry loop can't also
+    // flood the log.
+    match auth_state.verify(&password) {
+        Ok(token) => Ok(token),
+        Err(e) => {
+            if e == "Wrong password." {
+                log_event(&app, "auth_failed", serde_json::json!({}));
+            }
+            Err(e)
+        }
+    }
 }
 
 /// Set or change the master password. First-time set needs no `current`
@@ -2058,6 +2594,7 @@ fn set_master_password(
 /// registered, so a wrong password leaves no trace in the pending list.
 #[tauri::command]
 fn request_password_removal(
+    app: AppHandle,
     auth_state: tauri::State<'_, Arc<auth::AuthState>>,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
     current: String,
@@ -2068,6 +2605,8 @@ fn request_password_removal(
         "master-password removal requested — {}s cool-off started (password still required until it elapses)",
         view.delay_secs
     );
+    log_event(&app, "friction_requested", serde_json::json!({ "action": "password.remove" }));
+    notify_contact(&app, "password_removal_requested");
     Ok(view)
 }
 
@@ -2087,6 +2626,7 @@ fn request_password_removal(
 /// unattended moment can't be used to start this clock and walk away.
 #[tauri::command]
 fn request_password_removal_forgotten(
+    app: AppHandle,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
 ) -> friction::PendingView {
     let view = friction.request(
@@ -2098,6 +2638,8 @@ fn request_password_removal_forgotten(
         "master-password removal requested via the forgotten-password path — {}s cool-off started",
         view.delay_secs
     );
+    log_event(&app, "friction_requested", serde_json::json!({ "action": "password.remove", "forgotten": true }));
+    notify_contact(&app, "password_removal_requested");
     view
 }
 
@@ -2442,6 +2984,7 @@ fn stop_nsfw_monitor(
         "monitor disable requested — {}s cool-off started (monitor keeps running until it elapses)",
         view.delay_secs
     );
+    log_event(&app, "friction_requested", serde_json::json!({ "action": "monitor.disable" }));
     Ok(WeakeningOutcome { applied: false, pending: Some(view) })
 }
 
@@ -2549,6 +3092,7 @@ fn request_uninstall(
     auth: Option<String>,
 ) -> Result<uninstall::UninstallState, String> {
     auth::require_auth(&app, &auth)?;
+    let existing = friction.get("uninstall").is_some();
     let view = friction.request("uninstall", "Remove Pure Path from this computer", serde_json::json!({}));
     if let Ok(dir) = app.path().app_data_dir() {
         uninstall::write_marker(&dir, Some(view.requested_at));
@@ -2557,6 +3101,12 @@ fn request_uninstall(
         "uninstall requested — {}s cool-off started (protection stays active)",
         view.delay_secs
     );
+    // Event log (4.5) + trusted-contact notification (5.2) — only on a FRESH
+    // request, not an idempotent re-request of an already-pending one.
+    if !existing {
+        log_event(&app, "uninstall_requested", serde_json::json!({ "delay_secs": view.delay_secs }));
+        notify_contact(&app, "uninstall_requested");
+    }
     Ok(uninstall_state_from(&friction))
 }
 
@@ -2603,11 +3153,14 @@ fn cancel_uninstall(
     if UNINSTALL_FIRED.load(Ordering::SeqCst) {
         return Err("Removal is already in progress — Pure Path is closing.".to_string());
     }
-    friction.cancel("uninstall");
+    let had = friction.cancel("uninstall");
     if let Ok(dir) = app.path().app_data_dir() {
         uninstall::write_marker(&dir, None);
     }
     log::info!("uninstall request cancelled");
+    if had {
+        log_event(&app, "uninstall_cancelled", serde_json::json!({}));
+    }
     Ok(uninstall_state_from(&friction))
 }
 
@@ -2925,6 +3478,11 @@ fn complete_uninstall(
     if !friction.get("uninstall").map_or(false, |p| p.ready) {
         return Err("The waiting period hasn't elapsed yet.".to_string());
     }
+    // Event log (4.5): record that removal was actually executed, before the
+    // app tears itself down — the app-data dir (and this log with it) is
+    // about to be deleted, but the entry is fsync'd immediately, and a
+    // trusted contact / future self can still see it in any backup.
+    log_event(&app, "uninstall_completed", serde_json::json!({}));
     perform_uninstall(&app)
 }
 
@@ -3004,6 +3562,18 @@ pub fn run() {
             set_master_password,
             request_password_removal,
             request_password_removal_forgotten,
+            get_lockdown_state,
+            start_lockdown,
+            cancel_lockdown,
+            request_lockdown_allow,
+            get_trusted_contact,
+            set_trusted_contact,
+            request_remove_trusted_contact,
+            get_smtp_config,
+            set_smtp_config,
+            test_trusted_contact_send,
+            get_event_log,
+            verify_event_log,
         ])
         .setup(move |app| {
             if cfg!(debug_assertions) {
@@ -3103,6 +3673,15 @@ pub fn run() {
                 }
             }
 
+            // Load the lockdown additive-allow list (4.4) the same way, so an
+            // active lockdown's user-allowed sites survive a restart and are in
+            // the very first `set_blocking` push on reconnect.
+            if let Ok(json) = std::fs::read_to_string(udd.join("lockdown_allow.json")) {
+                if let Ok(allow) = serde_json::from_str::<Vec<String>>(&json) {
+                    shared_state.lock().unwrap().lockdown_allow = allow;
+                }
+            }
+
             // Tell the watchdog where uninstall.json lives now that we know the
             // app data dir (init_main() ran before this was knowable) — needed
             // so a release build can verify the cool-off before honoring the
@@ -3131,6 +3710,17 @@ pub fn run() {
                     }
                 });
             }
+            // Tamper-evident event log (4.5) — managed before anything that
+            // might append (the TCP server / monitor threads below), so the
+            // first protective event on this run always lands. Its own
+            // `load` appends a `chain_restarted` entry if it detects the file
+            // was edited/truncated/deleted since last run — see eventlog.rs.
+            let event_log = Arc::new(EventLog::load(&udd));
+            app.manage(event_log.clone());
+            // Lockdown Mode (4.4) — clock-immune credited-time engine, same
+            // pattern as the friction store.
+            let lockdown_store = Arc::new(lockdown::LockdownStore::load(&udd));
+            app.manage(lockdown_store.clone());
             // Master password (4.2). `AuthState::load` just remembers the app
             // data dir — the hash is re-read off disk on every check, so a
             // password set/changed/removed from a different running instance
@@ -3171,6 +3761,8 @@ pub fn run() {
                 let settings2 = settings_state.clone();
                 let auth2 = auth_state.clone();
                 let dns2 = dns_state.clone();
+                let lockdown2 = lockdown_store.clone();
+                let event_log2 = event_log.clone();
                 std::thread::spawn(move || {
                     let mut tick: u64 = 0;
                     loop {
@@ -3178,7 +3770,44 @@ pub fn run() {
                         tick += 1;
                         if tick % 30 == 0 {
                             friction2.heartbeat();
+                            // Drain any clock anomalies the friction store
+                            // detected (4.3) into the event log (4.5) — one
+                            // `clock_anomaly` entry each, exactly once.
+                            for a in friction2.drain_anomalies() {
+                                event_log2.append(
+                                    "clock_anomaly",
+                                    serde_json::json!({ "action": a.action_id, "delta_wall": a.delta_wall, "delta_tick": a.delta_tick }),
+                                );
+                            }
                         }
+
+                        // Lockdown heartbeat (4.4): advance its credited time
+                        // and, if it just reached full duration, end it and
+                        // push the (now inactive) state to extensions. A
+                        // natural expiry is NOT a friction weakening — the
+                        // whole duration was pre-committed at start time.
+                        let (ld_view, expired) = lockdown2.heartbeat();
+                        if expired {
+                            settings2.update(|s| { s.lockdown.active_until = None; s.lockdown.frozen = false; });
+                            let _ = broadcast_blocking(&state2, &lockdown2);
+                            event_log2.append("lockdown_ended", serde_json::json!({ "reason": "expired" }));
+                            log::info!("lockdown expired naturally (credited duration reached)");
+                        } else if ld_view.active && tick % 30 == 0 {
+                            // Re-push periodically so a reconnected extension
+                            // (or one that missed a push) re-syncs the live
+                            // remaining hint without waiting on a state change.
+                            let _ = broadcast_blocking(&state2, &lockdown2);
+                        }
+
+                        // Monthly trusted-contact heartbeat (5.2): if a contact
+                        // is configured and it's been >30 days since the last
+                        // one, send "still protecting <name>'s computer" so that
+                        // silence itself becomes a signal. Checked cheaply once a
+                        // minute; the 30-day gate makes the actual send rare.
+                        if tick % 60 == 0 {
+                            maybe_send_contact_heartbeat(&app2, &settings2);
+                        }
+
                         for (action_id, payload) in friction2.take_ready() {
                             if action_id == "guard.disable" {
                                 state2.lock().unwrap().guard_enabled = false;
@@ -3258,12 +3887,51 @@ pub fn run() {
                                     browsers::remove_dns_policy(def);
                                 }
                                 log::warn!("friction: system DNS filter disabled (weakening applied)");
+                            } else if action_id == "lockdown.cancel" {
+                                // 4.4: a NORMAL lockdown's early-end delay
+                                // elapsed — actually end it now and push the
+                                // (inactive) state to extensions. (A frozen
+                                // lockdown never registers this action id at
+                                // all, so this can only ever end a normal one.)
+                                lockdown2.cancel_now();
+                                settings2.update(|s| { s.lockdown.active_until = None; s.lockdown.frozen = false; });
+                                let _ = broadcast_blocking(&state2, &lockdown2);
+                                log::warn!("friction: lockdown cancelled (weakening applied)");
+                            } else if action_id.starts_with("lockdown.allow:") {
+                                // 4.4 anti-brick: the 60s delay elapsed — add
+                                // the domain to the pushed allowlist so it's
+                                // reachable even in allowlist-only mode.
+                                let domain = payload.get("domain").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                                if domain.is_empty() {
+                                    log::warn!("friction: '{action_id}' fired with no domain — dropping");
+                                    continue;
+                                }
+                                let allow = {
+                                    let mut s = state2.lock().unwrap();
+                                    if !s.lockdown_allow.iter().any(|d| *d == domain) {
+                                        s.lockdown_allow.push(domain.clone());
+                                    }
+                                    s.lockdown_allow.clone()
+                                };
+                                save_lockdown_allow(&app2, &allow);
+                                let _ = broadcast_blocking(&state2, &lockdown2);
+                                log::warn!("friction: lockdown-allowed {domain} (applied)");
+                            } else if action_id == "trusted_contact.remove" {
+                                // 5.2: the unwire delay elapsed — actually
+                                // clear the contact. The contact was already
+                                // notified at request time (anti-weak-moment).
+                                settings2.update(|s| s.trusted_contact = None);
+                                log::warn!("friction: trusted contact removed (weakening applied)");
                             } else {
                                 // Forward-compat hook: later items add their
                                 // own arms here as they gate new weakenings
                                 // behind the friction store.
                                 log::warn!("friction: unknown ready action id '{action_id}', dropping");
                             }
+                            // Event log (4.5): every applied weakening, one
+                            // `friction_applied` entry — the counterpart to the
+                            // `friction_requested` entries at each command site.
+                            event_log2.append("friction_applied", serde_json::json!({ "action": action_id }));
                         }
                     }
                 });

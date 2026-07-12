@@ -4,6 +4,7 @@
 //! purpose: no tauri types, no windows-only APIs.
 
 pub mod doh;
+pub mod eventlog;
 pub mod lists;
 pub mod matching;
 pub mod ota;

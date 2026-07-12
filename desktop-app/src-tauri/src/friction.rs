@@ -100,14 +100,28 @@ fn weakening_delay_secs() -> u64 {
     DEFAULT_WEAKENING_DELAY_SECS
 }
 
+/// Short anti-brick delay (plan 4.4) for adding a domain to the user
+/// allowlist WHILE a lockdown is active: enough friction to stop an impulsive
+/// "just let me through" click, not enough to actually lock someone out of a
+/// workday if they add something legitimate (banking, work SSO) mid-lockdown.
+/// Fixed at 60s regardless of build type — unlike the other delays this one
+/// isn't a stand-in for a much longer production value, so there's no debug
+/// override to speak of.
+const LOCKDOWN_ALLOW_DELAY_SECS: u64 = 60;
+
 /// Resolve the cool-off length for a given action id. `"uninstall"` defers to
 /// `uninstall::delay_secs()` — its own, separately-tunable constant, kept
 /// distinct on purpose so the two systems can still be dialed independently
-/// even though they now share one persistence engine. Every other action id
-/// gets the shared weakening default above.
+/// even though they now share one persistence engine. Any
+/// `"lockdown.allow:<domain>"` id gets the fixed short anti-brick delay
+/// (4.4). Every other action id gets the shared weakening default above —
+/// including `"lockdown.cancel"` and `"trusted_contact.remove"`, which are
+/// ordinary weakenings with no special-cased delay of their own.
 pub(crate) fn delay_for(action_id: &str) -> u64 {
     if action_id == "uninstall" {
         crate::uninstall::delay_secs()
+    } else if action_id.starts_with("lockdown.allow:") {
+        LOCKDOWN_ALLOW_DELAY_SECS
     } else {
         weakening_delay_secs()
     }
@@ -124,8 +138,13 @@ fn now_wall() -> u64 {
 // Monotonic tick source (4.3) — see the module doc for why this exists.
 // ============================================================================
 
+// `pub(crate)` (not private): item 4.4's Lockdown Mode needs the exact same
+// clock-tamper-immune anchor for its own credited-time math
+// (`lockdown::LockdownStore`), and duplicating a second copy of this FFI
+// would be the kind of "two write paths for one invariant" Part J's standing
+// rules call out as a design smell. Reused as-is, not reimplemented.
 #[cfg(windows)]
-mod monotonic {
+pub(crate) mod monotonic {
     // Hand-rolled FFI, same house pattern as `watchdog.rs`'s kernel32 calls —
     // one function, no new crate dependency.
     extern "system" {
@@ -144,7 +163,7 @@ mod monotonic {
 }
 
 #[cfg(not(windows))]
-mod monotonic {
+pub(crate) mod monotonic {
     use std::sync::OnceLock;
     use std::time::Instant;
 
@@ -215,6 +234,19 @@ fn view_of(action_id: &str, p: &PendingChange) -> PendingView {
     }
 }
 
+/// One detected clock-tamper anomaly (a forward wall-clock jump unexplained
+/// by a reboot) — see `advance` below. `purepath-core`'s event log (plan 4.5)
+/// is the intended long-term consumer, via `FrictionStore::drain_anomalies`;
+/// this module itself stays free of any eventlog dependency (Part J: keep
+/// `friction.rs` core-clean) and only ever hands the *fact* of the anomaly
+/// back to whichever caller wants to record it.
+#[derive(Debug, Clone)]
+pub struct ClockAnomaly {
+    pub action_id: String,
+    pub delta_wall: u64,
+    pub delta_tick: u64,
+}
+
 /// Advance every entry's `credited_secs` by exactly the amount of time that
 /// has genuinely passed since it was last observed. Called before every
 /// read/mutation and by the applier thread's heartbeat; does NOT persist —
@@ -226,9 +258,14 @@ fn view_of(action_id: &str, p: &PendingChange) -> PendingView {
 ///     elapsed;
 ///   * a backward wall-clock roll just stalls wall-clock credit until it
 ///     catches up — ticks keep advancing underneath regardless.
-fn advance(map: &mut HashMap<String, PendingChange>) {
+///
+/// Returns every anomaly detected THIS call (usually empty) so the caller
+/// can fold them into `FrictionStore`'s own anomaly buffer — see
+/// `drain_anomalies`.
+fn advance(map: &mut HashMap<String, PendingChange>) -> Vec<ClockAnomaly> {
     let now_w = now_wall();
     let now_t = monotonic::now_tick_secs();
+    let mut anomalies = Vec::new();
 
     for (action_id, p) in map.iter_mut() {
         let delta_wall = now_w.saturating_sub(p.last_wall);
@@ -244,18 +281,20 @@ fn advance(map: &mut HashMap<String, PendingChange>) {
 
         // Flag a suspicious forward wall-clock jump that isn't explained by a
         // reboot: item 4.5's hash-chained event log is the intended
-        // long-term consumer of this warning; for now it's just logged.
+        // long-term consumer of this — logged AND handed back to the caller.
         if !tick_reset && delta_wall > delta_tick + 120 {
             log::warn!(
                 "friction: clock anomaly on '{action_id}' — wall clock advanced {delta_wall}s but only \
                  {delta_tick}s of monotonic ticks elapsed; crediting {credited_advance}s, not {delta_wall}s"
             );
+            anomalies.push(ClockAnomaly { action_id: action_id.clone(), delta_wall, delta_tick });
         }
 
         p.credited_secs += credited_advance;
         p.last_wall = now_w;
         p.last_tick = now_t;
     }
+    anomalies
 }
 
 // ============================================================================
@@ -268,6 +307,11 @@ fn advance(map: &mut HashMap<String, PendingChange>) {
 pub struct FrictionStore {
     path: PathBuf,
     inner: Mutex<HashMap<String, PendingChange>>,
+    /// Clock anomalies detected by `advance` since the last `drain_anomalies`
+    /// call — see `ClockAnomaly` and `drain_anomalies`. Never persisted:
+    /// these are transient signals for the event log (4.5), not state that
+    /// needs to survive a restart.
+    anomalies: Mutex<Vec<ClockAnomaly>>,
 }
 
 impl FrictionStore {
@@ -314,7 +358,7 @@ impl FrictionStore {
             }
         }
 
-        let store = Self { path, inner: Mutex::new(map) };
+        let store = Self { path, inner: Mutex::new(map), anomalies: Mutex::new(Vec::new()) };
         if migrated {
             let map = store.inner.lock().unwrap();
             store.save(&map);
@@ -331,12 +375,28 @@ impl FrictionStore {
         }
     }
 
+    fn record_anomalies(&self, found: Vec<ClockAnomaly>) {
+        if found.is_empty() {
+            return;
+        }
+        self.anomalies.lock().unwrap().extend(found);
+    }
+
+    /// Every clock anomaly detected since the last call, drained (not just
+    /// peeked) so each one is reported exactly once. Callers (the applier
+    /// thread's heartbeat in lib.rs) fold each into the event log (4.5) as a
+    /// `clock_anomaly` entry.
+    pub fn drain_anomalies(&self) -> Vec<ClockAnomaly> {
+        std::mem::take(&mut self.anomalies.lock().unwrap())
+    }
+
     /// Register a weakening request. Idempotent — an existing entry keeps its
     /// original clock and credited time; re-requesting never extends OR
     /// shortens the remaining wait.
     pub fn request(&self, action_id: &str, label: &str, payload: serde_json::Value) -> PendingView {
         let mut map = self.inner.lock().unwrap();
-        advance(&mut map);
+        let found = advance(&mut map);
+        self.record_anomalies(found);
         let entry = map.entry(action_id.to_string()).or_insert_with(|| {
             let now_w = now_wall();
             let now_t = monotonic::now_tick_secs();
@@ -371,7 +431,8 @@ impl FrictionStore {
     /// `None`) if nothing is pending under `action_id`.
     pub fn reset(&self, action_id: &str) -> Option<PendingView> {
         let mut map = self.inner.lock().unwrap();
-        advance(&mut map);
+        let found = advance(&mut map);
+        self.record_anomalies(found);
         let now_w = now_wall();
         let now_t = monotonic::now_tick_secs();
         let entry = map.get_mut(action_id)?;
@@ -388,14 +449,16 @@ impl FrictionStore {
     /// (not persisted — see `heartbeat`) before reading.
     pub fn get(&self, action_id: &str) -> Option<PendingView> {
         let mut map = self.inner.lock().unwrap();
-        advance(&mut map);
+        let found = advance(&mut map);
+        self.record_anomalies(found);
         map.get(action_id).map(|p| view_of(action_id, p))
     }
 
     /// Every pending change, sorted by request time (oldest first).
     pub fn list(&self) -> Vec<PendingView> {
         let mut map = self.inner.lock().unwrap();
-        advance(&mut map);
+        let found = advance(&mut map);
+        self.record_anomalies(found);
         let mut views: Vec<PendingView> = map.iter().map(|(id, p)| view_of(id, p)).collect();
         views.sort_by_key(|v| v.requested_at);
         views
@@ -414,7 +477,8 @@ impl FrictionStore {
     /// entire module exists to protect; do not remove it.
     pub fn take_ready(&self) -> Vec<(String, serde_json::Value)> {
         let mut map = self.inner.lock().unwrap();
-        advance(&mut map);
+        let found = advance(&mut map);
+        self.record_anomalies(found);
         let ready_ids: Vec<String> = map
             .iter()
             .filter(|(id, p)| id.as_str() != "uninstall" && p.credited_secs >= p.delay_secs)
@@ -442,7 +506,49 @@ impl FrictionStore {
     /// makes a restored timer run slightly long, never short.
     pub fn heartbeat(&self) {
         let mut map = self.inner.lock().unwrap();
-        advance(&mut map);
+        let found = advance(&mut map);
+        self.record_anomalies(found);
         self.save(&map);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delay_for_lockdown_allow_prefix_is_short() {
+        assert_eq!(delay_for("lockdown.allow:example.com"), LOCKDOWN_ALLOW_DELAY_SECS);
+        assert_eq!(delay_for("lockdown.allow:"), LOCKDOWN_ALLOW_DELAY_SECS);
+    }
+
+    #[test]
+    fn delay_for_other_actions_unaffected() {
+        assert_eq!(delay_for("lockdown.cancel"), weakening_delay_secs());
+        assert_eq!(delay_for("trusted_contact.remove"), weakening_delay_secs());
+        assert_eq!(delay_for("guard.disable"), weakening_delay_secs());
+    }
+
+    #[test]
+    fn request_then_take_ready_round_trips_payload() {
+        let dir = std::env::temp_dir().join(format!("pp-friction-test-{}", std::process::id()));
+        let store = FrictionStore::load(&dir);
+        let view = store.request("test.weaken", "Test weakening", serde_json::json!({"k": "v"}));
+        assert!(!view.ready);
+        // Not ready yet (0 credited secs) — take_ready must not return it.
+        let ready = store.take_ready();
+        assert!(ready.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn drain_anomalies_is_empty_when_nothing_detected() {
+        let dir = std::env::temp_dir().join(format!("pp-friction-test-anom-{}", std::process::id()));
+        let store = FrictionStore::load(&dir);
+        store.request("test.weaken", "Test", serde_json::json!({}));
+        // No clock manipulation happened between calls in a unit test, so no
+        // anomaly should ever be recorded here.
+        assert!(store.drain_anomalies().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
