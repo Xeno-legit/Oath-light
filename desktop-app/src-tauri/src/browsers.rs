@@ -693,7 +693,93 @@ pub fn remove_policy(def: &BrowserDef) {
             }
         }
     }
+    // Also drop the DoH policy (1.2), so a completed uninstall leaves no
+    // "managed by your organization" DNS setting behind.
+    remove_dns_policy(def);
 }
 
 #[cfg(not(target_os = "windows"))]
 pub fn remove_policy(_def: &BrowserDef) {}
+
+// ============================================================================
+// DoH / DNS-over-HTTPS policy (plan item 1.2 layer 1)
+// ============================================================================
+//
+// Disabling browser DoH is what makes the system DNS filter (1.1) actually
+// contain a browser: a browser resolving names over its own DoH endpoint
+// never sends a plain UDP/TCP query to 127.0.0.1:53, so the resolver never
+// sees it. Turning DoH off forces the browser back onto the OS resolver —
+// which we've taken over. Unlike `enforce_policy`, this is deliberately NOT
+// gated on `CHROMIUM_UPDATE_URL`: it works today, pre-publication, because it
+// writes an ordinary policy value rather than force-installing an extension.
+
+/// Write the "disable DoH" policy for `def` — applied for every known browser
+/// while the DNS filter is on. Chromium hives get `DnsOverHttpsMode = "off"`
+/// (REG_SZ) directly under the existing `policy_subkey` (Chrome/Edge/Brave/
+/// Vivaldi/Opera all read it); Firefox gets a `DNSOverHTTPS` subkey with
+/// `Enabled = 0` (DWORD). Same `reg()` helper and same HKLM-then-HKCU
+/// fallback as `enforce_policy`, and the same "needs admin for HKLM, HKCU as
+/// a weaker fallback" reality — reported via the same `EnforceOutcome`.
+#[cfg(target_os = "windows")]
+pub fn enforce_dns_policy(def: &BrowserDef) -> EnforceOutcome {
+    const HIVES: [(&str, bool); 2] = [("HKLM", true), ("HKCU", false)];
+    match def.engine {
+        Engine::Chromium => {
+            for (root, strong) in HIVES {
+                let key = format!(r"{}\{}", root, def.policy_subkey);
+                let ok = reg()
+                    .args(["add", &key, "/v", "DnsOverHttpsMode", "/t", "REG_SZ", "/d", "off", "/f"])
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                if ok {
+                    return if strong { EnforceOutcome::EnforcedMachine } else { EnforceOutcome::EnforcedUser };
+                }
+            }
+            EnforceOutcome::Failed
+        }
+        Engine::Gecko => {
+            for (root, strong) in HIVES {
+                let key = format!(r"{}\{}\DNSOverHTTPS", root, def.policy_subkey);
+                let ok = reg()
+                    .args(["add", &key, "/v", "Enabled", "/t", "REG_DWORD", "/d", "0", "/f"])
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                if ok {
+                    return if strong { EnforceOutcome::EnforcedMachine } else { EnforceOutcome::EnforcedUser };
+                }
+            }
+            EnforceOutcome::Failed
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn enforce_dns_policy(_def: &BrowserDef) -> EnforceOutcome {
+    EnforceOutcome::Unsupported
+}
+
+/// Remove the "disable DoH" policy for `def`. Called when the DNS filter is
+/// turned off (the `dns.disable` weakening applies) and as part of
+/// `remove_policy` on sanctioned uninstall. Best-effort and idempotent.
+#[cfg(target_os = "windows")]
+pub fn remove_dns_policy(def: &BrowserDef) {
+    match def.engine {
+        Engine::Chromium => {
+            for root in ["HKLM", "HKCU"] {
+                let key = format!(r"{}\{}", root, def.policy_subkey);
+                let _ = reg().args(["delete", &key, "/v", "DnsOverHttpsMode", "/f"]).output();
+            }
+        }
+        Engine::Gecko => {
+            for root in ["HKLM", "HKCU"] {
+                let key = format!(r"{}\{}\DNSOverHTTPS", root, def.policy_subkey);
+                let _ = reg().args(["delete", &key, "/v", "Enabled", "/f"]).output();
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn remove_dns_policy(_def: &BrowserDef) {}

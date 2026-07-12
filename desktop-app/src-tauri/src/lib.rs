@@ -1,5 +1,6 @@
 mod auth;
 mod browsers;
+mod dns_filter;
 mod friction;
 pub mod nsfw;
 pub mod nudenet;
@@ -1346,6 +1347,11 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
         // enumeration is only worth paying every ~10th tick; named evasion
         // browsers are still checked on every tick regardless).
         let mut enforce_tick: u64 = 0;
+        // DoH-policy write memo (1.2): browsers whose "disable DoH" policy is
+        // already written this DNS-filter-on session, so `reg` isn't re-run
+        // every tick. Cleared when the DNS filter is off (so a re-enable
+        // rewrites it) and by `RE_ENFORCE_REQUESTED` (set on enable).
+        let mut dns_doh_enforced: HashSet<String> = HashSet::new();
 
         loop {
             let now = now_unix_ms();
@@ -1362,6 +1368,32 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
             enforce_tick += 1;
             let cfg = app.state::<Arc<settings::SettingsState>>().get();
             enforce_processes(&app, &state, &cfg, &proc_names, &mut process_memo, enforce_tick % 10 == 1);
+
+            // System DNS filter (1.1/1.2): while it's active, (a) health-check
+            // the resolver every tick and fail open if it dies (the failsafe),
+            // (b) revert adapter-DNS drift on a throttled cadence (~30s), and
+            // (c) keep the DoH-disable policy written for every browser. When
+            // it's off, drop the DoH memo so a later enable re-writes it.
+            if let Some(dns) = app.try_state::<Arc<dns_filter::DnsFilterState>>() {
+                if dns.is_active() {
+                    dns.tick_health_check();
+                    if enforce_tick % 10 == 1 {
+                        dns.tick_revert_drift();
+                    }
+                    if RE_ENFORCE_REQUESTED.load(Ordering::SeqCst) {
+                        dns_doh_enforced.clear();
+                    }
+                    for def in BROWSERS {
+                        if !dns_doh_enforced.contains(def.key) {
+                            let o = browsers::enforce_dns_policy(def);
+                            dns_doh_enforced.insert(def.key.to_string());
+                            log::info!("[{}] DoH-disable policy write: {}", def.key, enforce_str(o));
+                        }
+                    }
+                } else if !dns_doh_enforced.is_empty() {
+                    dns_doh_enforced.clear();
+                }
+            }
 
             let mut statuses = build_status(&state, &running, &proc_names, now);
 
@@ -1773,6 +1805,67 @@ fn set_guard_enabled(
     let view = friction.request("guard.disable", "Turn off the uninstall guard", serde_json::json!({}));
     log::warn!(
         "guard disable requested — {}s cool-off started (guard stays on until it elapses)",
+        view.delay_secs
+    );
+    Ok(WeakeningOutcome { applied: false, pending: Some(view) })
+}
+
+// ============================================================================
+// System-level DNS filtering (plan items 1.1 + 1.2) — commands.
+// Lifecycle/health/takeover live in `dns_filter.rs`; these mirror the
+// `set_guard_enabled` pattern exactly: enabling is a strengthening (instant),
+// disabling is a friction-gated weakening (`dns.disable`).
+// ============================================================================
+
+/// Live status the renderer's "System DNS filter" card reads:
+/// `{ running, taken_over, last_error, upstreams }`.
+#[tauri::command]
+fn get_dns_status(dns: tauri::State<'_, Arc<dns_filter::DnsFilterState>>) -> dns_filter::DnsStatus {
+    dns.status()
+}
+
+/// Turn the system DNS filter on or off.
+///
+/// ON is a strengthening — applied instantly: start the resolver, verify it's
+/// healthy, then capture + take over adapter DNS. Also cancels any pending
+/// `dns.disable` weakening. A bind conflict (port 53 already in use) or a
+/// failed takeover surfaces as an `Err` string the UI shows verbatim, and no
+/// adapter is touched in the bind-conflict case.
+///
+/// OFF is a weakening — `require_auth` (master password, 4.2) then a
+/// `dns.disable` friction entry; the filter stays fully ON until the delay
+/// elapses and the applier thread actually stops the resolver + restores DNS.
+#[tauri::command]
+fn set_dns_filter_enabled(
+    app: AppHandle,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    dns: tauri::State<'_, Arc<dns_filter::DnsFilterState>>,
+    enabled: bool,
+    auth: Option<String>,
+) -> Result<WeakeningOutcome, String> {
+    if enabled {
+        // Strengthening: bring the resolver up + take over now. If this
+        // fails (port conflict / no admin), report it and DON'T flip the
+        // persisted flag — the filter genuinely isn't on.
+        dns.enable()?;
+        settings.update(|s| s.dns_filter_enabled = true);
+        friction.cancel("dns.disable");
+        RE_ENFORCE_REQUESTED.store(true, Ordering::SeqCst); // reapply DoH policy this tick
+        log::info!("DNS filter enabled");
+        return Ok(WeakeningOutcome { applied: true, pending: None });
+    }
+
+    let already_off = !settings.get().dns_filter_enabled;
+    if already_off {
+        return Ok(WeakeningOutcome { applied: true, pending: None });
+    }
+
+    auth::require_auth(&app, &auth)?;
+
+    let view = friction.request("dns.disable", "Turn off the system DNS filter", serde_json::json!({}));
+    log::warn!(
+        "DNS filter disable requested — {}s cool-off started (filter stays on until it elapses)",
         view.delay_secs
     );
     Ok(WeakeningOutcome { applied: false, pending: Some(view) })
@@ -2738,12 +2831,21 @@ fn perform_uninstall(app: &AppHandle) -> Result<String, String> {
     if let Some(state) = app.try_state::<Arc<Mutex<AppState>>>() {
         state.lock().unwrap().guard_enabled = false;
     }
+    // System DNS filter (1.1): stop the resolver and restore adapter DNS to
+    // the captured upstreams, so uninstalling never leaves the machine
+    // pointing at a resolver that's about to be deleted. The guardian does
+    // the same as its last act (guardian/src/main.rs) — belt and suspenders,
+    // since this runs before the app exits and that runs after.
+    if let Some(dns) = app.try_state::<Arc<dns_filter::DnsFilterState>>() {
+        dns.disable();
+    }
     // Stand down the dual-process watchdog so neither process resurrects the
     // other while we delete the app, and drop the login autostart entry so it
     // cannot come back at the next boot.
     watchdog::request_shutdown();
     watchdog::unregister_autostart();
-    // Clear any force-install policy and native-host registrations we wrote.
+    // Clear any force-install policy (+ the DoH-disable policy, via
+    // remove_policy) and native-host registrations we wrote.
     for def in BROWSERS {
         browsers::remove_policy(def);
     }
@@ -2843,6 +2945,8 @@ pub fn run() {
             add_blocked_process,
             remove_blocked_process,
             set_block_unknown_browsers,
+            get_dns_status,
+            set_dns_filter_enabled,
             set_extension_theme,
             set_blocking_settings,
             open_external,
@@ -2982,6 +3086,20 @@ pub fn run() {
             app.manage(friction_store.clone());
             let settings_state = Arc::new(settings::SettingsState::load(&udd));
             app.manage(settings_state.clone());
+            // System DNS filter (1.1/1.2). Managed here so commands + the
+            // monitor tick share one instance. If it was on at last shutdown,
+            // start + re-takeover now (idempotent) — off the startup path so
+            // a couple of PowerShell spawns don't block the window coming up.
+            let dns_state = Arc::new(dns_filter::DnsFilterState::new(&udd));
+            app.manage(dns_state.clone());
+            if settings_state.get().dns_filter_enabled {
+                let dns2 = dns_state.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = dns2.enable() {
+                        log::warn!("DNS filter auto-start failed: {e}");
+                    }
+                });
+            }
             // Master password (4.2). `AuthState::load` just remembers the app
             // data dir — the hash is re-read off disk on every check, so a
             // password set/changed/removed from a different running instance
@@ -3014,6 +3132,7 @@ pub fn run() {
                 let state2 = shared_state.clone();
                 let settings2 = settings_state.clone();
                 let auth2 = auth_state.clone();
+                let dns2 = dns_state.clone();
                 std::thread::spawn(move || {
                     let mut tick: u64 = 0;
                     loop {
@@ -3090,6 +3209,17 @@ pub fn run() {
                                 // the default log-only tier.
                                 settings2.update(|s| s.block_unknown_browsers = false);
                                 log::warn!("friction: evasion-browser kill switch disabled (weakening applied)");
+                            } else if action_id == "dns.disable" {
+                                // 1.1/1.2: stop the resolver + restore adapter
+                                // DNS, persist the flag off, and drop the DoH
+                                // policy from every browser (the reason it was
+                                // written is gone).
+                                dns2.disable();
+                                settings2.update(|s| s.dns_filter_enabled = false);
+                                for def in BROWSERS {
+                                    browsers::remove_dns_policy(def);
+                                }
+                                log::warn!("friction: system DNS filter disabled (weakening applied)");
                             } else {
                                 // Forward-compat hook: later items add their
                                 // own arms here as they gate new weakenings

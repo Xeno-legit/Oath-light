@@ -188,6 +188,105 @@ function AppBlockingSection() {
   );
 }
 
+// System-level DNS filter (plan items 1.1 + 1.2). A coarse whole-domain
+// backstop for surfaces the browser extension can't reach — Tor, portable
+// browsers, Electron apps — enforced by a local DNS resolver the desktop app
+// points every network adapter at. The real gate lives in Rust
+// (`set_dns_filter_enabled`); this is a view onto `get_dns_status` plus the
+// instant-enable / friction-gated-disable requests.
+function DnsFilterSection() {
+  const available = !!(window.PPNative && window.PPNative.available);
+  const [status, setStatus] = React.useState(null); // { running, taken_over, last_error, upstreams }
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+
+  const pending = (window.usePendingWeakenings || (() => []))();
+  const disablePending = pending.find((p) => p.action_id === 'dns.disable');
+
+  const refresh = React.useCallback(() => {
+    if (!available) return;
+    window.PPNative.getDnsStatus().then((s) => { if (s) setStatus(s); });
+  }, [available]);
+
+  React.useEffect(() => { refresh(); }, [refresh]);
+  // Re-poll while active (health/takeover state can flip on its own — e.g. the
+  // failsafe restoring real DNS if the resolver dies) and whenever a pending
+  // weakening resolves.
+  React.useEffect(() => {
+    if (!available) return;
+    const id = setInterval(refresh, 3000);
+    return () => clearInterval(id);
+  }, [available, refresh]);
+  React.useEffect(() => { refresh(); }, [pending.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const on = !!(status && status.running);
+
+  function acquireAuth() {
+    return window.PPAuth ? window.PPAuth.acquire() : Promise.resolve(null);
+  }
+
+  function toggle() {
+    setErr('');
+    if (!on) {
+      // Turning it on is a strengthening — instant, no auth. A bind conflict
+      // or missing-admin failure rejects; surface it verbatim.
+      setBusy(true);
+      window.PPNative.setDnsFilter(true, null)
+        .then(() => refresh())
+        .catch((e) => setErr(e && e.message ? e.message : String(e)))
+        .finally(() => setBusy(false));
+      return;
+    }
+    // Turning it off is a weakening — password gate (4.2) then friction delay.
+    acquireAuth()
+      .then((token) => { setBusy(true); return window.PPNative.setDnsFilter(false, token); })
+      .then(() => refresh())
+      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
+      .finally(() => setBusy(false));
+  }
+
+  function keepOn() {
+    window.PPNative.cancelWeakening('dns.disable').then(refresh);
+  }
+
+  // Status line: off / active / active-but-not-taken-over / error.
+  let statusText, statusColor;
+  if (!status) { statusText = 'Loading…'; statusColor = 'var(--muted)'; }
+  else if (status.last_error && !on) { statusText = status.last_error; statusColor = '#d9534f'; }
+  else if (on && status.taken_over) {
+    statusText = 'Active — filtering at the network level' + (status.upstreams && status.upstreams.length ? ' · upstream ' + status.upstreams.join(', ') : '');
+    statusColor = 'var(--accent-2)';
+  }
+  else if (on && !status.taken_over) { statusText = status.last_error || 'Resolver running, but no network adapter could be redirected — needs administrator rights.'; statusColor = '#d9a441'; }
+  else { statusText = 'Off — only the browser extension is filtering.'; statusColor = 'var(--muted)'; }
+
+  return (
+    <React.Fragment>
+      <div className="setting" style={{ alignItems: 'flex-start' }}>
+        <div className="ico"><IconShield size={20} /></div>
+        <div className="txt" style={{ flex: 1 }}>
+          <b>System DNS filter</b>
+          <span>
+            Blocks explicit domains at the network level — for apps the browser extension can't reach, like Tor,
+            portable browsers and Electron apps. Requires administrator rights to take over your DNS, and disables
+            browser DNS-over-HTTPS by policy while active (otherwise a browser could resolve around it). Opt-in.
+          </span>
+          <div style={{ fontSize: 12.5, color: statusColor, marginTop: 8 }}>{statusText}</div>
+          {err && <div style={{ fontSize: 12, color: '#d9534f', marginTop: 6 }}>{err}</div>}
+          {!available && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>Available in the desktop app.</div>}
+        </div>
+        <Switch on={on} onClick={toggle} disabled={busy || !available} />
+      </div>
+      {disablePending &&
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '-6px 0 10px 54px' }}>
+          Turning off in {fmtDur(disablePending.remaining_secs)} — it stays fully active until then · cancel from Settings → Pending changes,{' '}
+          <a href="#" onClick={(e) => { e.preventDefault(); keepOn(); }} style={{ color: 'var(--accent-2)' }}>keep it on</a>
+        </div>
+      }
+    </React.Fragment>
+  );
+}
+
 function SettingRow({ icon: I, title, desc, on, onToggle, accent }) {
   return (
     <div className="setting">
@@ -441,6 +540,15 @@ function BlockingPage({ s, PP }) {
         </div>
 
         <AppBlockingSection />
+
+        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', margin: '22px 0 4px' }}>
+          Network-level DNS
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>
+          A coarse backstop for apps that never touch the browser extension. Requires administrator rights.
+        </div>
+
+        <DnsFilterSection />
 
         <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', margin: '22px 0 4px' }}>
           Coming soon

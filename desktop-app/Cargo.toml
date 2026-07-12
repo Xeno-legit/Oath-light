@@ -1,8 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["core", "src-tauri", "guardian", "native-host"]
-# A `dns` member (plan item 1.1, purepath-dns) is added by a later task — do
-# not add it here ahead of that work.
+members = ["core", "src-tauri", "guardian", "native-host", "dns"]
+# `dns` (plan item 1.1, purepath-dns): a dependency-free DNS forwarding proxy
+# (std::net only, plus purepath-core) — see dns/src/lib.rs for the module map.
 
 # Cargo silently ignores `[profile.*]` tables declared in a non-root workspace
 # member (with a build-time warning) — profile config is workspace-global and
