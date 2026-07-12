@@ -102,7 +102,7 @@ Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | ForEach-Object {
   $v6 = @((Get-DnsClientServerAddress -InterfaceAlias $alias -AddressFamily IPv6).ServerAddresses)
   $dhcpState = (Get-NetIPInterface -InterfaceAlias $alias -AddressFamily IPv4).Dhcp
   [PSCustomObject]@{ alias = $alias; guid = $guid; dhcp = ($dhcpState -eq 'Enabled'); servers_v4 = $v4; servers_v6 = $v6 }
-} | ConvertTo-Json -Depth 4 -AsArray
+} | ConvertTo-Json -Depth 4
 "#;
         let out = ps()
             .arg("-Command")
