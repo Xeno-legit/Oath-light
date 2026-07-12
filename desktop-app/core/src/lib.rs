@@ -3,5 +3,6 @@
 //! plan Part A / Part H). Kept dependency-light and framework-agnostic on
 //! purpose: no tauri types, no windows-only APIs.
 
+pub mod eventlog;
 pub mod lists;
 pub mod matching;

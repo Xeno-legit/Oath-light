@@ -39,6 +39,15 @@ xcap = "0.9"
 # Base64-encode the scan thumbnail sent to the UI as a data URL.
 base64 = "0.22"
 
+# --- Trusted-contact accountability (Phase 4 item 5.2, Tier 2) ---
+# SMTP delivery for the optional trusted-contact notifier — the user supplies
+# their own host/port/username/app-password (stored locally in plaintext;
+# the UI says so honestly). default-features = false keeps the async/tokio and
+# native-tls stacks out; we only need the blocking SMTP transport with
+# rustls-tls and the message builder. Sends always happen on a background
+# thread (see notify.rs) so they never block a Tauri command.
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "rustls-tls", "builder"] }
+
 # --- Master password (Phase 4 item 4.2) ---
 # Argon2id password hashing for the optional master password that gates
 # weakening requests (turning off protections) in Rust — see auth.rs. Default

@@ -1536,12 +1536,74 @@ function isBlockedPerchancePath(hostname, urlObj) {
          p.includes('character-chat') || p.includes('-chat') || p.includes('nsfw');
 }
 
+// LOCKDOWN MODE (plan item 4.4) — whitelist-only browsing.
+//
+// The desktop app pushes lockdown state on the same channel as the blocking
+// settings (`blockingSettings.lockdown = {active, frozen, ends_at_hint,
+// allow}` — see bg/native-bridge.js handleSetBlocking). While a lockdown is
+// active, `shouldBlockUrl` allows ONLY the mainstream whitelist plus whatever
+// the user additively allowed during the lockdown (each of those went through
+// a short 60s friction delay on the desktop side — 4.4's anti-brick rule);
+// everything else blocks with a dedicated lockdown reason.
+//
+// Self-expiry fallback: the desktop is the authority and pushes `active:false`
+// at the real end. Only if the desktop connection is DOWN do we fall back to
+// the wall-clock `ends_at_hint`, and only in the EXPIRY direction — a clock
+// roll can never SHORTEN a lockdown while the desktop is connected (it just
+// keeps pushing the authoritative state), and can never extend one either.
+function lockdownState() {
+  return (typeof blockingSettings === 'object' && blockingSettings && blockingSettings.lockdown) || null;
+}
+
+function isLockdownActive() {
+  const ld = lockdownState();
+  if (!ld || !ld.active) return false;
+  // While the desktop is connected it owns the clock — never self-expire.
+  const connected = (typeof NativeMessagingBridge !== 'undefined')
+    && typeof NativeMessagingBridge.isConnected === 'function'
+    && NativeMessagingBridge.isConnected();
+  if (!connected && typeof ld.ends_at_hint === 'number' && ld.ends_at_hint > 0) {
+    // Desktop is gone: honor the last-pushed end hint so a crashed companion
+    // app doesn't strand the user in a permanent lockdown. Never shortens a
+    // still-connected one (that branch is unreachable while connected).
+    if (Date.now() / 1000 > ld.ends_at_hint) return false;
+  }
+  return true;
+}
+
+// Is `hostname` reachable during a lockdown: a mainstream-whitelist domain
+// (exact or subdomain) OR one the user additively allowed for this lockdown.
+function lockdownAllows(hostname) {
+  for (const wd of WHITELIST_DOMAINS) {
+    if (hostname === wd || hostname.endsWith('.' + wd)) return true;
+  }
+  const ld = lockdownState();
+  const allow = (ld && Array.isArray(ld.allow)) ? ld.allow : [];
+  for (const raw of allow) {
+    const d = (raw || '').toString().toLowerCase();
+    if (d && (hostname === d || hostname.endsWith('.' + d))) return true;
+  }
+  return false;
+}
+
 // URL BLOCKING LOGIC — blocklist + keyword layer + bypass-vector
 
 function shouldBlockUrl(url, depth = 0) {
   try {
     const urlObj = new URL(url);
     const hostname = urlObj.hostname.toLowerCase();
+
+    // STEP -1: LOCKDOWN MODE (4.4) — the FIRST check, before everything.
+    // When active, only the whitelist + user allowlist get through; every
+    // other host blocks with a dedicated lockdown reason so blocked.html can
+    // show its "Lockdown active" message. Blocks still record stats normally
+    // (handleBlock → recordBlockAndRedirect runs on this `blocked: true`).
+    if (isLockdownActive()) {
+      if (lockdownAllows(hostname)) {
+        return { blocked: false, tier: 'lockdown_allow', hostname };
+      }
+      return { blocked: true, reason: 'lockdown', match: hostname, tier: 'lockdown', hostname };
+    }
 
     // STEP 0: Bypass-vector — unwrap proxy/translate/archive wrappers and
     // re-check the REAL target. Runs before the whitelist so wrappers hosted on

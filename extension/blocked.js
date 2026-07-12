@@ -184,8 +184,21 @@ const reasonMap = {
   explicit_domain: `Explicit domain blocked`,
   graylist_explicit: `NSFW content blocked on monitored site`,
   safesearch_bypass: `SafeSearch was disabled — bypass attempt blocked`,
+  // Lockdown Mode (plan 4.4) — allowlist-only browsing. Mentor-toned, not
+  // punitive: this is a wall the user chose to put up for themselves.
+  lockdown: `Lockdown is on — only your allowlist is reachable right now`,
 };
 reasonEl.textContent = reasonMap[reason] || 'This page was blocked to help you stay focused.';
+
+// During a lockdown, add a second line of context under the reason so it reads
+// as a chosen pre-commitment, not an error. Kept out of the reasonMap so the
+// existing one-line entries stay untouched.
+if (reason === 'lockdown') {
+  const note = document.createElement('div');
+  note.style.cssText = 'font-size:13px;opacity:.7;margin-top:8px;line-height:1.5;max-width:52ch';
+  note.textContent = "You set this up when you were thinking clearly. It lifts on its own when the timer ends — nothing to do but let it hold. If a site you genuinely need is blocked, you can add it from Pure Path (it takes effect after a short pause).";
+  if (reasonEl.parentNode) reasonEl.parentNode.insertBefore(note, reasonEl.nextSibling);
+}
 
 const quoteEl = document.getElementById('quote');
 const quoteTextEl = document.getElementById('quoteText');
