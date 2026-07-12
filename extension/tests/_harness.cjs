@@ -35,6 +35,11 @@ const BG_FILES = [
   'bg/graylist.js',
   'bg/native-bridge.js',
   'bg/reminders.js',
+  // Vendored @noble/ed25519 + the OTA consumer (plan 3.5). noble attaches
+  // globalThis.nobleEd25519; ota.js reads it (and WHITELIST_DOMAINS from
+  // matching.js) at runtime, so it loads after both.
+  'bg/noble-ed25519.js',
+  'bg/ota.js',
 ];
 const ENTRY_FILE = 'background.js';
 

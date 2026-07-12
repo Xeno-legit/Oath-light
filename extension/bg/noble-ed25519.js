@@ -1,4 +1,4 @@
-// extension/lib/noble-ed25519.js — vendored @noble/ed25519 v1.7.5 (MIT
+// extension/bg/noble-ed25519.js — vendored @noble/ed25519 v1.7.5 (MIT
 // License, (c) 2019 Paul Miller, paulmillr.com). Source: npm package
 // '@noble/ed25519' version 1.7.5, file lib/index.js (the CommonJS build) —
 // https://registry.npmjs.org/@noble/ed25519/-/ed25519-1.7.5.tgz.

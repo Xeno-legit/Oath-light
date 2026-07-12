@@ -214,5 +214,27 @@ async function loadBlocklistsFromStorage() {
 
 async function loadBlocklists() {
   await loadBlocklistsFromStorage();
+  await applyOtaListsIfPresent();
+}
+
+// OTA preference (plan 3.5): if bg/ota.js has a verified, whitelist-clean list
+// set stored (from the extension-only weekly fetch), prefer its domains over
+// whatever the bundled/cached load just installed. A missing/corrupt/rejected
+// OTA set leaves the bundled lists in place — the built-in lists are never
+// deleted, so this can only ever ADD freshness, never brick browsing (the
+// safety floor). No-op when the desktop app is driving lists, or before ota.js
+// / matching.js have loaded (both true only transiently at cold start).
+async function applyOtaListsIfPresent() {
+  try {
+    if (typeof PurePathOTA === 'undefined' || typeof WHITELIST_DOMAINS === 'undefined') return;
+    const ota = await PurePathOTA.loadStoredOta(chrome.storage.local, WHITELIST_DOMAINS);
+    if (!ota || !ota.domains.length) return;
+    blocklistDomains = ota.domains;
+    blocklistSet = new Set();
+    for (let i = 0; i < blocklistDomains.length; i++) blocklistSet.add(blocklistDomains[i].toLowerCase());
+    console.log(`Pure Path: applied OTA blocklist v${ota.version} (${blocklistDomains.length} domains)`);
+  } catch (error) {
+    console.error('Pure Path: OTA list apply failed (keeping bundled lists):', error);
+  }
 }
 

@@ -56,9 +56,9 @@ use std::collections::{BTreeMap, HashSet};
 /// backup) — never in this repository. See docs/OTA_KEYS.md for the rotation
 /// procedure and what to do before the first real release.
 pub const OTA_PUBKEY_ACTIVE_HEX: &str =
-    "1429490dd4a42c2ee42dc9ec2f0ac8b9aba8d002e676f9a5e7ad5c80f60132db";
+    "4522971bcbc8b48009e98ffa8dec7fa26d225ae9fd46c94449a88f61a65c85c9";
 pub const OTA_PUBKEY_SPARE_HEX: &str =
-    "3b945d43d7dd6623040d9be5c37cf59d89635f2f564d92462707bb51c86adae3";
+    "9900bb2b4e3b884c6e2dd0cdfa1b1bdcd075a9077bb79680ad4e63b672fb6c3d";
 
 /// Both baked keys, active first — verifiers accept a signature from either.
 pub const OTA_PUBKEYS_HEX: [&str; 2] = [OTA_PUBKEY_ACTIVE_HEX, OTA_PUBKEY_SPARE_HEX];

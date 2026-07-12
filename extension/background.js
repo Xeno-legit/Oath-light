@@ -15,7 +15,7 @@
 // sequentially into one shared global scope instead — the guard below simply
 // no-ops on Firefox.
 if (typeof importScripts === 'function') {
-  importScripts('bg/blocklists.js', 'bg/matching.js', 'bg/graylist.js', 'bg/native-bridge.js', 'bg/reminders.js');
+  importScripts('bg/blocklists.js', 'bg/matching.js', 'bg/graylist.js', 'bg/native-bridge.js', 'bg/reminders.js', 'bg/noble-ed25519.js', 'bg/ota.js');
 }
 
 // SHARED BLOCK HANDLER — single source of truth for blocking + stats

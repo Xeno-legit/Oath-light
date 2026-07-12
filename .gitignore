@@ -89,3 +89,5 @@ Error/
 .agents/
 .claude/
 skills-lock.json
+# OTA dev signing seeds (local testing only — never the production key)
+scripts/ota/dev-keys.env

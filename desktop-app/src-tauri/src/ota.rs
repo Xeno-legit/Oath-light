@@ -544,7 +544,7 @@ mod tests {
     }
 
     /// Cross-implementation interop pin: this exact signature was produced by
-    /// the vendored `extension/lib/noble-ed25519.js` (v1.7.5) from the
+    /// the vendored `extension/bg/noble-ed25519.js` (v1.7.5) from the
     /// all-zero 32-byte seed. If ed25519-dalek ever disagrees with noble about
     /// raw-Ed25519 over these bytes, the whole scheme is broken and this test
     /// says so before a release does.
