@@ -115,6 +115,20 @@
       return invoke('set_block_unknown_browsers', { enabled: !!enabled, auth: auth || null })
         .catch((e) => { console.warn('[PurePath] setBlockUnknownBrowsers failed:', e); throw e; });
     },
+
+    // System DNS filter (1.1/1.2). `getDnsStatus` -> { running, taken_over,
+    // last_error, upstreams }. `setDnsFilter(true)` is a strengthening —
+    // instant, and REJECTS (throws) on a port-53 conflict / no-admin so the
+    // caller can show the error verbatim; `setDnsFilter(false, auth)` is a
+    // friction-gated weakening (same { applied, pending } shape as setGuard)
+    // and requires the master-password token if one is set.
+    getDnsStatus() {
+      return invoke('get_dns_status')
+        .catch((e) => { console.warn('[PurePath] getDnsStatus failed:', e); return null; });
+    },
+    setDnsFilter(enabled, auth) {
+      return invoke('set_dns_filter_enabled', { enabled: !!enabled, auth: auth || null });
+    },
     // Subscribe to blocked-list kill events ({ action, name, reason }).
     // Resolves to an unlisten function, same shape as onNsfwScan.
     onProcessEnforcement(cb) {

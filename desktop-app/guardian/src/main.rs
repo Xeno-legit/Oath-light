@@ -262,15 +262,283 @@ fn main() {
         }
     }
 
+    // ---- DNS restore-on-shutdown (plan 1.1) ---------------------------------
+    //
+    // A legitimate uninstall/shutdown must never leave the machine without
+    // working DNS just because the adapters were pointed at a resolver that's
+    // about to stop existing. `dns.json` (written by `purepath-dns::takeover`
+    // BEFORE any adapter is touched — see desktop-app/dns/src/takeover.rs)
+    // lives at `<app_data_dir>/dns.json`, a sibling of `uninstall.json`; this
+    // crate carries no JSON dependency by design (see Cargo.toml), so the
+    // handful of fields this needs (`alias`, `dhcp`, `servers_v4`,
+    // `servers_v6`) are pulled out with plain string scanning, the same
+    // house pattern `read_requested_at` above uses for `uninstall.json`.
+    // Best-effort and silent-on-absence: if the DNS filter was never enabled,
+    // there is no `dns.json` and nothing to restore.
+
+    /// Resolve the same `uninstall.json` path `shutdown_requested` verifies
+    /// against (spawn arg, falling back to the sentinel's own content) so
+    /// `dns.json` — always its sibling — can be located the same way even by
+    /// the very first guardian (spawned before `--uninstall-json` existed).
+    fn resolve_uninstall_json(uninstall_json: Option<&Path>) -> Option<PathBuf> {
+        uninstall_json.map(Path::to_path_buf).or_else(sentinel_verify_path)
+    }
+
+    fn dns_json_path(uninstall_json: Option<&Path>) -> Option<PathBuf> {
+        resolve_uninstall_json(uninstall_json)
+            .and_then(|p| p.parent().map(|d| d.join("dns.json")))
+    }
+
+    /// Find the byte offset of the matching close bracket for the open
+    /// bracket at `s[open_idx]`, treating `{`/`[` as depth-increasing and
+    /// `}`/`]` as depth-decreasing together (sufficient here: `dns.json`'s
+    /// only nesting is arrays-of-strings inside objects inside one outer
+    /// array, and we never need to tell the bracket *kinds* apart, only find
+    /// where a balanced span closes). Brackets that appear INSIDE a JSON
+    /// string are skipped — the captured `guid` field is `"{XXXX-...}"`, so a
+    /// naive counter would miscount its braces; `in_string`/escape tracking
+    /// makes that impossible.
+    fn matching_bracket(s: &[u8], open_idx: usize) -> Option<usize> {
+        let mut depth: i32 = 0;
+        let mut in_string = false;
+        let mut escaped = false;
+        for (i, &b) in s.iter().enumerate().skip(open_idx) {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if b == b'\\' {
+                    escaped = true;
+                } else if b == b'"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            match b {
+                b'"' => in_string = true,
+                b'{' | b'[' => depth += 1,
+                b'}' | b']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(i);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Split the content of a JSON array (the substring strictly between its
+    /// `[` and `]`) into its top-level `{...}` object substrings. Brackets
+    /// inside strings are skipped (see `matching_bracket`).
+    fn split_top_level_objects(s: &str) -> Vec<&str> {
+        let bytes = s.as_bytes();
+        let mut objs = Vec::new();
+        let mut depth: i32 = 0;
+        let mut start: Option<usize> = None;
+        let mut in_string = false;
+        let mut escaped = false;
+        for (i, &b) in bytes.iter().enumerate() {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if b == b'\\' {
+                    escaped = true;
+                } else if b == b'"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            match b {
+                b'"' => in_string = true,
+                b'{' | b'[' => {
+                    if depth == 0 && b == b'{' {
+                        start = Some(i);
+                    }
+                    depth += 1;
+                }
+                b'}' | b']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        if let Some(st) = start.take() {
+                            objs.push(&s[st..=i]);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        objs
+    }
+
+    /// Extract a `"key": "value"` string field from a JSON object substring.
+    fn json_str_field(obj: &str, key: &str) -> Option<String> {
+        let idx = obj.find(&format!("\"{key}\""))?;
+        let after = &obj[idx..];
+        let colon = after.find(':')?;
+        let rest = after[colon + 1..].trim_start();
+        let rest = rest.strip_prefix('"')?;
+        let end = rest.find('"')?;
+        Some(rest[..end].to_string())
+    }
+
+    /// Extract a `"key": true|false` boolean field.
+    fn json_bool_field(obj: &str, key: &str) -> Option<bool> {
+        let idx = obj.find(&format!("\"{key}\""))?;
+        let after = &obj[idx..];
+        let colon = after.find(':')?;
+        let rest = after[colon + 1..].trim_start();
+        if rest.starts_with("true") {
+            Some(true)
+        } else if rest.starts_with("false") {
+            Some(false)
+        } else {
+            None
+        }
+    }
+
+    /// Extract a `"key": ["a", "b"]` string-array field (empty vec if the
+    /// key is missing or the array is empty — both are legitimate, common
+    /// states here, e.g. a DHCP adapter's `servers_v4`).
+    fn json_str_array_field(obj: &str, key: &str) -> Vec<String> {
+        let Some(idx) = obj.find(&format!("\"{key}\"")) else { return Vec::new() };
+        let after = &obj[idx..];
+        let Some(colon) = after.find(':') else { return Vec::new() };
+        let rest = after[colon + 1..].trim_start();
+        let Some(rest) = rest.strip_prefix('[') else { return Vec::new() };
+        let bytes = rest.as_bytes();
+        // `rest` starts right after the '[', so the matching ']' for the
+        // (already-consumed) '[' is found by scanning from depth 1.
+        let mut depth: i32 = 1;
+        let mut close = None;
+        for (i, &b) in bytes.iter().enumerate() {
+            match b {
+                b'[' => depth += 1,
+                b']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(close) = close else { return Vec::new() };
+        let inner = &rest[..close];
+        let mut out = Vec::new();
+        let ib = inner.as_bytes();
+        let mut i = 0;
+        while i < ib.len() {
+            if ib[i] == b'"' {
+                if let Some(end_rel) = inner[i + 1..].find('"') {
+                    out.push(inner[i + 1..i + 1 + end_rel].to_string());
+                    i += end_rel + 2;
+                } else {
+                    break;
+                }
+            } else {
+                i += 1;
+            }
+        }
+        out
+    }
+
+    struct AdapterDns {
+        alias: String,
+        dhcp: bool,
+        servers_v4: Vec<String>,
+        servers_v6: Vec<String>,
+    }
+
+    /// Parse `dns.json`'s `adapters` array into the fields `restore` needs.
+    /// Anything unreadable/unparsable/absent yields an empty list — best
+    /// effort, never a hard failure this late in a shutdown.
+    fn parse_dns_json(path: &Path) -> Vec<AdapterDns> {
+        let Ok(text) = std::fs::read_to_string(path) else { return Vec::new() };
+        let Some(key_idx) = text.find("\"adapters\"") else { return Vec::new() };
+        let after = &text[key_idx..];
+        let Some(open_rel) = after.find('[') else { return Vec::new() };
+        let bytes = after.as_bytes();
+        let open_idx = open_rel;
+        let Some(close_idx) = matching_bracket(bytes, open_idx) else { return Vec::new() };
+        let inner = &after[open_idx + 1..close_idx];
+        split_top_level_objects(inner)
+            .into_iter()
+            .filter_map(|obj| {
+                let alias = json_str_field(obj, "alias")?;
+                if alias.is_empty() {
+                    return None;
+                }
+                Some(AdapterDns {
+                    alias,
+                    dhcp: json_bool_field(obj, "dhcp").unwrap_or(false),
+                    servers_v4: json_str_array_field(obj, "servers_v4"),
+                    servers_v6: json_str_array_field(obj, "servers_v6"),
+                })
+            })
+            .collect()
+    }
+
+    /// PowerShell single-quote escaping (double an embedded `'`) — mirrors
+    /// `takeover.rs`'s `ps_quote`.
+    fn ps_quote(s: &str) -> String {
+        format!("'{}'", s.replace('\'', "''"))
+    }
+
+    /// Restore one adapter via a hidden PowerShell `Set-DnsClientServerAddress`
+    /// call — DHCP adapters (or ones with nothing captured) get
+    /// `-ResetServerAddresses`; static ones get their exact captured servers
+    /// replayed. Best-effort: a failure here (most commonly "access is
+    /// denied" if this somehow ran unelevated) is not retried — this is the
+    /// last act of a process that's about to exit either way.
+    fn restore_one_adapter(a: &AdapterDns) {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let script = if a.dhcp || (a.servers_v4.is_empty() && a.servers_v6.is_empty()) {
+            format!("Set-DnsClientServerAddress -InterfaceAlias {} -ResetServerAddresses", ps_quote(&a.alias))
+        } else {
+            let mut all: Vec<String> = a.servers_v4.iter().map(|s| ps_quote(s)).collect();
+            all.extend(a.servers_v6.iter().map(|s| ps_quote(s)));
+            format!(
+                "Set-DnsClientServerAddress -InterfaceAlias {} -ServerAddresses ({})",
+                ps_quote(&a.alias),
+                all.join(",")
+            )
+        };
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+
+    /// As the guardian's last act before honoring a sanctioned shutdown:
+    /// restore every adapter recorded in `dns.json`, if the DNS filter was
+    /// ever enabled. Silent no-op if it wasn't (no file) — never blocks or
+    /// delays the shutdown itself.
+    fn restore_dns_best_effort(uninstall_json: Option<&Path>) {
+        let Some(path) = dns_json_path(uninstall_json) else { return };
+        let adapters = parse_dns_json(&path);
+        if adapters.is_empty() {
+            return;
+        }
+        wlog(&format!("restoring DNS on {} adapter(s) before standing down", adapters.len()));
+        for a in &adapters {
+            restore_one_adapter(a);
+        }
+    }
+
     // ---- Run ----------------------------------------------------------------
 
     wlog("starting");
 
     let (main_exe, uninstall_json) = resolve_args();
 
-    // If a shutdown was authorized, do nothing (let the system come down).
+    // If a shutdown was authorized, do nothing (let the system come down) —
+    // but first, restore DNS if it was ever taken over (see above).
     if shutdown_requested(uninstall_json.as_deref()) {
         wlog("shutdown sentinel present at start - exiting");
+        restore_dns_best_effort(uninstall_json.as_deref());
         return;
     }
 
@@ -292,6 +560,10 @@ fn main() {
 
     loop {
         if shutdown_requested(uninstall_json.as_deref()) {
+            // Last act before standing down: restore adapter DNS if the
+            // filter was ever taken over, so a completed uninstall never
+            // leaves the machine pointing at a resolver that's gone.
+            restore_dns_best_effort(uninstall_json.as_deref());
             return;
         }
 

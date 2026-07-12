@@ -55,6 +55,13 @@ pub struct SettingsV1 {
     /// leaving it unenforced. Also wired up by plan item 1.3.
     #[serde(default = "default_false")]
     pub block_unknown_browsers: bool,
+    /// System-level DNS filtering (plan item 1.1). Opt-in for v1 — default
+    /// **false**: it takes over every adapter's DNS + needs admin, so it is
+    /// never turned on without an explicit user action. Enabling is a
+    /// strengthening (instant); disabling is a friction-gated weakening
+    /// (`dns.disable`), same asymmetry as every other protection here.
+    #[serde(default = "default_false")]
+    pub dns_filter_enabled: bool,
 }
 
 impl Default for SettingsV1 {
@@ -65,6 +72,7 @@ impl Default for SettingsV1 {
             monitor_enabled: false,
             blocked_processes: Vec::new(),
             block_unknown_browsers: false,
+            dns_filter_enabled: false,
         }
     }
 }
