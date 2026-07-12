@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 use std::collections::HashSet;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 const BUILT_IN_DOMAINS_P1: &str = include_str!("../../../extension/blocklists/domains_part1.json");
 const BUILT_IN_DOMAINS_P2: &str = include_str!("../../../extension/blocklists/domains_part2.json");
@@ -59,6 +59,105 @@ pub fn built_in() -> &'static BuiltInLists {
         let domains: HashSet<String> = domains_vec.iter().cloned().collect();
         BuiltInLists { domains, domains_vec, keywords }
     })
+}
+
+// ============================================================================
+// OTA overlay (plan 3.5) — runtime-replaceable lists layered OVER the baked
+// built-ins. `built_in()` is a OnceLock and deliberately stays immutable (the
+// embedded lists are the forever-fallback safety floor); an installed OTA
+// update lives here instead, and `effective()` is the one accessor consumers
+// use to see "OTA if loaded, else built-in".
+// ============================================================================
+
+pub mod ota {
+    use super::*;
+    use std::sync::RwLock;
+
+    /// A verified, installed OTA list set (parsed from
+    /// `<app_data_dir>/lists/` by the app's `ota.rs` after signature + hash +
+    /// whitelist-collision checks — nothing constructs one of these from
+    /// unverified bytes).
+    pub struct OtaLists {
+        /// The manifest version these lists came from (monotonic, >= 1).
+        pub version: u64,
+        pub domains: HashSet<String>,
+        pub domains_vec: Vec<String>,
+        pub keywords: Vec<String>,
+    }
+
+    /// `RwLock` (not another OnceLock) because an update can arrive while the
+    /// app runs, and readers (`effective()`) vastly outnumber the writer (the
+    /// weekly check). `Arc` so a reader's view stays alive/consistent even if
+    /// a swap happens mid-use.
+    static CURRENT: RwLock<Option<Arc<OtaLists>>> = RwLock::new(None);
+
+    /// Install a verified list set as the effective overlay.
+    pub fn set(lists: OtaLists) {
+        *CURRENT.write().unwrap() = Some(Arc::new(lists));
+    }
+
+    /// Drop the overlay (back to baked built-ins). Test/repair hook — normal
+    /// operation never clears, only replaces with a newer version.
+    pub fn clear() {
+        *CURRENT.write().unwrap() = None;
+    }
+
+    /// The current overlay, if one is loaded.
+    pub fn get() -> Option<Arc<OtaLists>> {
+        CURRENT.read().unwrap().clone()
+    }
+
+    /// Version of the loaded overlay (`None` when running on built-ins).
+    pub fn installed_version() -> Option<u64> {
+        CURRENT.read().unwrap().as_ref().map(|l| l.version)
+    }
+}
+
+/// The effective list view: the OTA overlay when one is installed, the baked
+/// built-ins otherwise. Owning enum (Arc/static — cheap to construct) so the
+/// accessors below can hand out references without lifetime gymnastics.
+pub enum EffectiveLists {
+    Ota(Arc<ota::OtaLists>),
+    BuiltIn(&'static BuiltInLists),
+}
+
+impl EffectiveLists {
+    pub fn domains(&self) -> &HashSet<String> {
+        match self {
+            EffectiveLists::Ota(l) => &l.domains,
+            EffectiveLists::BuiltIn(l) => &l.domains,
+        }
+    }
+    pub fn domains_vec(&self) -> &Vec<String> {
+        match self {
+            EffectiveLists::Ota(l) => &l.domains_vec,
+            EffectiveLists::BuiltIn(l) => &l.domains_vec,
+        }
+    }
+    pub fn keywords(&self) -> &Vec<String> {
+        match self {
+            EffectiveLists::Ota(l) => &l.keywords,
+            EffectiveLists::BuiltIn(l) => &l.keywords,
+        }
+    }
+    /// OTA manifest version backing this view (`None` = baked built-ins).
+    pub fn ota_version(&self) -> Option<u64> {
+        match self {
+            EffectiveLists::Ota(l) => Some(l.version),
+            EffectiveLists::BuiltIn(_) => None,
+        }
+    }
+}
+
+/// Snapshot of the currently-effective lists. Callers that explicitly want
+/// the immutable baked lists keep calling [`built_in()`]; everything that
+/// should see OTA data (counts, domain checks, full-list pushes to
+/// extensions) goes through this instead.
+pub fn effective() -> EffectiveLists {
+    match ota::get() {
+        Some(l) => EffectiveLists::Ota(l),
+        None => EffectiveLists::BuiltIn(built_in()),
+    }
 }
 
 /// Normalize a user-entered domain the same way everywhere one is compared or
@@ -181,6 +280,30 @@ mod tests {
     fn is_domain_listed_empty_set_never_matches() {
         let s: HashSet<String> = HashSet::new();
         assert!(!is_domain_listed("example.com", &s));
+    }
+
+    #[test]
+    fn effective_prefers_ota_overlay_and_falls_back() {
+        // NB: the overlay is process-global state; this is the only test that
+        // touches it, and it restores the built-in view before returning.
+        assert!(ota::get().is_none(), "no overlay at start");
+        assert!(effective().ota_version().is_none(), "effective == built-ins at start");
+
+        let dv = vec!["ota-example.com".to_string()];
+        ota::set(ota::OtaLists {
+            version: 7,
+            domains: dv.iter().cloned().collect(),
+            domains_vec: dv.clone(),
+            keywords: vec!["otakeyword".to_string()],
+        });
+        let eff = effective();
+        assert_eq!(eff.ota_version(), Some(7));
+        assert_eq!(eff.domains_vec(), &dv);
+        assert!(eff.domains().contains("ota-example.com"));
+        assert_eq!(ota::installed_version(), Some(7));
+
+        ota::clear();
+        assert!(effective().ota_version().is_none(), "cleared back to built-ins");
     }
 
     #[test]

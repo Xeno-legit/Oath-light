@@ -393,6 +393,79 @@ function PendingChangesCard({ PP }) {
   );
 }
 
+// --- OTA blocklist updates (Phase 4 item 3.5) --------------------------------
+
+// Settings card for the over-the-air blocklist update channel: which list
+// version is installed (or "built-in" when none has ever been), when the last
+// check ran and how it went — shown verbatim, including real errors like the
+// GitHub release not existing yet — and a "Check now" button. Checking only
+// ever strengthens the lists (signed, monotonically-versioned updates), so
+// the button is ungated.
+function ListsUpdateCard() {
+  const available = !!(window.PPNative && window.PPNative.available);
+  const [st, setSt] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!available) return;
+    let unlisten = null, cancelled = false;
+    window.PPNative.getOtaStatus().then((v) => { if (!cancelled && v) setSt(v); });
+    window.PPNative.onOtaStatus((v) => { if (!cancelled) setSt(v); })
+      .then((fn) => { if (cancelled) fn(); else unlisten = fn; });
+    // Poll as a fallback while a check runs (the event covers the normal path).
+    const id = setInterval(() => {
+      window.PPNative.getOtaStatus().then((v) => { if (!cancelled && v) setSt(v); });
+    }, 5000);
+    return () => { cancelled = true; clearInterval(id); if (unlisten) unlisten(); };
+  }, [available]);
+
+  const checkNow = () => {
+    window.PPNative.checkListsUpdateNow().then((v) => { if (v) setSt(v); });
+  };
+
+  const checking = !!(st && st.checking);
+  const version = st
+    ? (st.loaded_version ? ('v' + st.loaded_version)
+      : (st.installed_version ? ('v' + st.installed_version + ' (not loaded — using built-in)') : 'built-in'))
+    : '…';
+  const lastCheck = st && st.last_check
+    ? new Date(st.last_check * 1000).toLocaleString()
+    : 'never';
+
+  return (
+    <div className="card fade-up" style={{ marginTop: 18 }}>
+      <div className="row" style={{ gap: 14, alignItems: 'flex-start' }}>
+        <div className="ut-ico"><IconGlobe size={20} /></div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <b style={{ fontSize: 14.5, fontWeight: 800 }}>Blocklist updates</b>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, lineHeight: 1.5, maxWidth: '64ch' }}>
+            Pure Path checks weekly for signed blocklist updates and applies them automatically —
+            updates can only ever add protection, never silently weaken it. The bundled lists always
+            remain as a fallback.
+          </div>
+          <div style={{ marginTop: 12, fontSize: 13, color: 'var(--text-2)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div><span style={{ color: 'var(--muted)' }}>Installed list version:</span> <b>{version}</b></div>
+            <div><span style={{ color: 'var(--muted)' }}>Last check:</span> {lastCheck}</div>
+            {st && st.last_result &&
+              <div style={{ wordBreak: 'break-word' }}>
+                <span style={{ color: 'var(--muted)' }}>Result:</span>{' '}
+                {st.last_result.indexOf('failed') === 0
+                  ? <span style={{ color: '#ef4444' }}>{st.last_result}</span>
+                  : st.last_result}
+              </div>}
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <button className="btn btn-ghost btn-sm" disabled={!available || checking} onClick={checkNow}>
+              {checking ? 'Checking…' : 'Check now'}
+            </button>
+          </div>
+          {!available &&
+            <div className="ut-msg" style={{ color: 'var(--muted)', marginTop: 12 }}>Available in the desktop app.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsPage({ s, PP }) {
   const p = s.profile;
   const setP = (patch) => PP.set({ profile: patch });

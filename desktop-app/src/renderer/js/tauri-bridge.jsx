@@ -152,6 +152,23 @@
     // Resolves to "launched" (uninstaller started, app will close) or "manual".
     completeUninstall() { return invoke('complete_uninstall'); },
 
+    // OTA blocklist updates (3.5). Status shape:
+    //   { installed_version, loaded_version, last_check, last_result, checking }
+    // `checkListsUpdateNow` kicks a check off on a backend thread and returns
+    // immediately (checking: true); the outcome arrives via `onOtaStatus`
+    // (the backend's `ota-status` event) — poll `getOtaStatus` as a fallback.
+    getOtaStatus() { return invoke('get_ota_status').catch((e) => { console.warn('[PurePath] getOtaStatus failed:', e); return null; }); },
+    checkListsUpdateNow() {
+      return invoke('check_lists_update_now')
+        .catch((e) => { console.warn('[PurePath] checkListsUpdateNow failed:', e); return null; });
+    },
+    // Subscribe to OTA check outcomes; resolves to an unlisten function, same
+    // shape as onNsfwScan.
+    onOtaStatus(cb) {
+      if (!available) return Promise.resolve(() => {});
+      return T.event.listen('ota-status', (evt) => { if (evt && evt.payload) cb(evt.payload); });
+    },
+
     // Panic / SOS flow (5.1). `onOpenPanic` subscribes to the backend's
     // `open-panic` event (tray "I need help now" / Ctrl+Shift+Space / the
     // extension blocked page's deep-link); resolves to an unlisten function,
