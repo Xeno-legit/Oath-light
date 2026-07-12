@@ -1,94 +1,148 @@
-# Handoff — Frontier Plan partial implementation (updated 2026-07-11, session 3)
+# Handoff — Frontier Plan FINAL third implemented (updated 2026-07-12, session 4)
 
 Branch: `phase4/friction`.
-This session added Frontier Plan items **4.1 + 4.3** (generalized friction + clock-tamper
-immunity), **4.2** (master password), and **1.3** (process blocking + evasion-browser
-detection), on top of the session-2 work (2.1, 2.2, 3.3, 3.4, 5.1 + Noir theme — all still present).
+This session implemented the **remaining third** of the plan on top of sessions 2–3:
+**A.1/A.2** (cargo workspace + `purepath-core` keyword port + golden corpus),
+**1.1/1.2** (system DNS resolver + DoH defense), **3.5/A.4** (OTA blocklist
+updates + CI), and **4.4/4.5/5.2** (Lockdown Mode + tamper-evident event log +
+trusted-contact accountability). With sessions 2–3 (2.1, 2.2, 3.3, 3.4, 4.1,
+4.2, 4.3, 1.3, 5.1, Noir theme) that takes Phase 4 to effectively **complete**.
 
-That takes the Phase-4 build to roughly **2/3** of the plan. Remaining third is the
-cargo-workspace-heavy block: A.1/A.2 (workspace + Rust keyword port), 1.1/1.2 (DNS
-resolver + DoH defense), 3.5 (OTA), plus 4.4/4.5/5.2 (lockdown, event log, accountability).
+Built by four Sonnet sub-agents (one synchronous for the workspace foundation,
+three in parallel git worktrees) then merged + lead-reviewed line-by-line. The
+three parallel agents each hit session/quota limits at ~90% and were resumed;
+their worktrees were committed, merged, reviewed, and the OTA agent's unfinished
+extension-consumer + CI were completed by the lead. All agent worktrees/branches
+have been removed.
 
 ## Git state (READ THIS)
+Committed, local only (nothing pushed). Commits on `phase4/friction`, newest first:
+- `c8529cd` feat(3.5): finish OTA extension consumer + signer + CI (lead)
+- `46dfcc2` merge: DNS agent final fix · `4586b3e` merge: eventlog+lockdown+contact
+- `08f6c37` merge: OTA · `1a4a884` merge: DNS resolver + DoH
+- `704664b`/`d6ce3f9`/`d322b6c`/`d3c875a` the agent feature commits
+- `b5c934b` chore: Cargo.lock workspace entries · `927de91` feat(A.1+A.2) workspace+core
+Pre-session-4 tip was `780aef6`. `git reset --soft 780aef6` collapses the whole
+session back to a dirty tree if you prefer the repo's uncommitted-norm.
 
-Unlike prior sessions, this work **is committed** (local only, nothing pushed) — it was
-committed so three sub-agents could run in parallel git worktrees. Commits on
-`phase4/friction`, oldest-first:
-- `1658130` WIP: friction store 4.1+4.3 (base) · `0e88b21` WIP: partial 4.2 auth
-- `6ca5666` feat(1.3) · `a0d4e20` feat(4.2) — the two agent-worktree branches
-- `8489448` / `9975246` merge commits · `<review>` throttle fix
-If you prefer the repo's usual uncommitted-working-tree norm, `git reset --soft de0e206`
-collapses all of it back to a dirty tree (de0e206 is the last pre-session-3 commit).
+## What landed, by item
 
-## Done this session (lead-reviewed line-by-line; NOT yet compiled — see risks)
+**A.1/A.2 — workspace + core** (`927de91`)
+- `desktop-app/Cargo.toml` virtual workspace (core, src-tauri, guardian,
+  native-host, **dns**); profiles hoisted to root; Cargo.lock moved to root.
+- `purepath-core`: `lists.rs` (blocklist embed/parse, normalize, exact-and-parent
+  walk), `matching.rs` (function-for-function port of `checkDomainKeywords` +
+  leet/confusable/punycode), `eventlog.rs`, `doh.rs`, `ota.rs`.
+- Golden corpus `extension/tests/fixtures/keyword-hostnames.json` (90 cases)
+  consumed by BOTH `test-domain-keywords.cjs` and core `#[test]`s.
 
-**4.1 generalized friction + 4.3 clock immunity** — `core` of the tamper layer.
-- New `friction.rs`: `FrictionStore` (persisted `friction.json`), keyed by string `action_id`.
-  Every *weakening* registers a `PendingChange`; strengthenings are instant. Clock immunity
-  is real: `credited_secs` accumulates the **min(Δwall, Δtick)** each observation, tick =
-  `GetTickCount64()` (hand-rolled FFI, no dep). Forward clock-jump credits nothing; reboot
-  credits only post-boot ticks (conservative — timer runs long, never short). `take_ready`
-  excludes `"uninstall"` (uninstall only *unlocks*, never auto-fires — the module's one
-  load-bearing invariant).
-- New `settings.rs`: `SettingsV1` (guard_enabled, monitor_enabled, blocked_processes,
-  block_unknown_browsers) persisted to `settings.json`, per-field serde defaults. Seed of A.3.
-- `uninstall.rs`: `UninstallStore` deleted; `delay_secs()`/`Persisted` now `pub(crate)`;
-  new `write_marker()` mirrors `uninstall.json` for the watchdog/guardian (which still read
-  it off disk independently — protocol unchanged).
-- `lib.rs`: uninstall commands migrated onto the friction store; `set_guard_enabled` /
-  `stop_nsfw_monitor` return `WeakeningOutcome {applied, pending}`; `remove_custom_domain`
-  + `set_custom_domains` now additions-only (removals are weakenings). Applier thread in
-  `setup()` polls 1s, applies ready weakenings (guard/monitor/custom-block/password/process).
-- Renderer: `usePendingWeakenings` hook, `PendingChangesCard` (Settings), inline pending
-  notes on Blocking/Blocklist/Monitor. `window.fmtDur` exported for cross-file use.
+**1.1/1.2 — DNS resolver + DoH defense**
+- New crate `desktop-app/dns` (`purepath-dns`): dependency-free `std::net`
+  forwarding proxy — `packet.rs` (parse/synthesize NXDOMAIN, well unit-tested),
+  `decide.rs` (whitelist floor → DoH block → domain-list → keyword), `server.rs`
+  (UDP+TCP :53 + health probe), `upstream.rs`, `takeover.rs` (Windows adapter
+  DNS capture/restore incl. **IPv6 ::1**, non-Windows stubs so it builds cross-
+  platform). NOT hickory — lead decision, since nothing compiles here.
+- `src-tauri/dns_filter.rs` lifecycle; `SettingsV1.dns_filter_enabled` (default
+  false); commands `set_dns_filter_enabled`/`get_dns_status`; friction
+  `dns.disable` arm; monitor-tick health/drift/DoH-policy reassert; guardian +
+  uninstall restore adapter DNS. `browsers.rs::enforce_dns_policy`/`remove_dns_policy`
+  (Chromium `DnsOverHttpsMode=off`, Firefox `DNSOverHTTPS.Enabled=0`).
+  `core::doh::DOH_ENDPOINTS`. UI: `DnsFilterSection` in pages-blocking.jsx.
 
-**4.2 master password** — `auth.rs`: Argon2id PHC hash in `auth.json`, in-memory 5-min
-session tokens, 1s attempt throttle. `require_auth(app, &token)` is the one Rust gate on the
-weakening commands (`request_uninstall`, `set_guard_enabled` off-path, `stop_nsfw_monitor`
-running-path, `remove_custom_domain`, `remove_blocked_process`, `set_block_unknown_browsers`
-off-path). Removal is double-gated (current password AND friction delay); `request_password_
-removal_forgotten` is the no-password recovery path (same delay — **TODO(near-Alpha):** give
-it a real 24h delay class, currently the standard weakening delay). Renderer: `window.PPAuth`
-(`.acquire()` token cache + prompt), `PasswordGate` modal in ui.jsx (mounted in app.jsx),
-`SecurityCard` in Settings.
+**4.5 — tamper-evident event log**
+- `core/eventlog.rs`: append-only JSONL, `hash=sha256(seq‖ts‖kind‖canonical(data)‖prev)`
+  with SOH separators + deterministic canonical-JSON (BTreeMap-sorted insert, so
+  it's `preserve_order`-independent); sidecar checkpoint catches wholesale
+  rollback; `chain_restarted` on break; 10MB rotation. `sha2` added to core.
+- Wired at the lib.rs command/applier layer (36 `log_event`/`notify_contact`
+  call sites): friction transitions, uninstall, auth failures, monitor Acting,
+  extension_missing, process kills, clock anomalies. Commands `get_event_log`,
+  `verify_event_log`; "Protection history" card in Settings.
 
-**1.3 process blocking + evasion detection** — `browsers.rs`: `EVASION_BROWSERS` (9
-conservative entries) + `is_standard_install_path`. `lib.rs::enforce_processes` rides the
-existing 3s `start_monitor` tick: (a) kills `blocked_processes` on sight, (b) tiered evasion
-detection (log always, kill only when `block_unknown_browsers` on). Never flags a browser
-learned over the native host. Commands: `add/remove_blocked_process`, `set_block_unknown_
-browsers`, `get_app_settings`. Renderer: `AppBlockingSection` replaces the coming-soon row.
+**4.4 — Lockdown Mode**
+- `src-tauri/lockdown.rs`: `LockdownStore` with the SAME clock-immune credited-
+  time engine as friction (reuses `friction::monotonic`, now `pub(crate)` — one
+  write path). `SettingsV1.lockdown`. Commands `start_lockdown` (strengthening,
+  instant), `cancel_lockdown` (normal → `require_auth` + `lockdown.cancel`
+  friction; **frozen → refused outright**, never registers a cancel), plus a 60s
+  `lockdown.allow:<domain>` anti-brick class. Extension: `shouldBlockUrl` STEP -1
+  gate (whitelist + user-allow only when active), `blocked.js` lockdown copy,
+  desktop `broadcast_blocking` injects lockdown into EVERY blocking push (no
+  two-path drop). `test-lockdown.cjs` (12 cases).
 
-## Lead review fixes applied on top of agent output
-- `fmtDur` exported via `window.fmtDur` (each renderer file is its own Babel scope — bare
-  cross-file refs would've been fragile); pages-monitor stop-countdown re-sourced from the
-  shared `usePendingWeakenings` poll (survives navigation) instead of a local snapshot.
-- **1.3 perf:** the portable-browser exe-path check forced a full `sysinfo` enumeration
-  *every 3s* (a known browser is always open). Now gated to a `deep_scan` every ~10th tick
-  (~30s); named evasion browsers (Tor etc.) still checked every tick. See `enforce_processes`.
-- Merge conflict in the friction applier chain (4.2 + 1.3 both added arms) resolved as a union.
+**5.2 — trusted contact (Tier 2, opt-in, off by default)**
+- `src-tauri/notify.rs`: SMTP via `lettre` 0.11 (rustls) with mailto fallback;
+  `SettingsV1.trusted_contact`. Wiring a contact instant; unwiring is friction
+  `trusted_contact.remove` AND notifies immediately (anti-weak-moment). Monthly
+  heartbeat. Every send/failure event-logged (recipient+kind only). Solo-first:
+  the whole path is unreachable unless a contact is named.
 
-## Verification state
-- `node extension/tests/run-all.cjs`: **559 passed / 0 failed** (extension untouched).
-- Renderer transpile check (bundled Babel): **OK** on all `.jsx`/`.js`.
-- Command audit: **40 `#[tauri::command]` fns ⇔ 40 `generate_handler!` entries**, exact match
-  both directions. `enforce_processes` signature/call-site arity confirmed (6/6).
-- **`cargo check` NOT run** (hangs here; owner compiles manually). Compile risks, first run:
-  1. **`argon2 = "0.5"`** (new dep, Cargo.lock needs regen): confirm default features pull
-     `password-hash` + `rand` so `password_hash::rand_core::OsRng` / `SaltString::generate`
-     resolve. Also the prior `tauri-plugin-global-shortcut` Cargo.lock regen still pending.
-  2. **`sysinfo 0.30`** APIs used in `enforce_processes`: `ProcessRefreshKind::new()`,
-     `.with_exe(UpdateKind::OnlyIfNotSet)`, `Process::kill()->bool`, `Process::exe()->Option<&Path>`,
-     `Process::name()->&str` (agent verified against vendored 0.30.13).
-  3. Session-2 risks still open: `windows = "0.61"` (overlay.rs `SetWindowDisplayAffinity`),
-     `tauri-plugin-global-shortcut` `event.state()` accessor-vs-field.
+**3.5/A.4 — OTA updates + CI** (desktop by agent; ext-consumer/signer/CI by lead)
+- Scheme: raw Ed25519 (not minisign) over `lists-manifest.json` bytes, one sig,
+  three verifiers. `core/ota.rs` (manifest parse/validate, version-monotonic,
+  whitelist floor, two baked pubkeys). Desktop `src-tauri/ota.rs` (ureq +
+  ed25519-dalek 2, weekly, atomic swap into `<app_data>/lists/`, push to exts).
+  `lists.rs` OTA overlay so app sees updated lists.
+- **Lead-completed:** `extension/bg/ota.js` (standalone consumer, self-registers
+  weekly alarm, prefers verified lists over bundled — safety floor), vendored
+  noble **relocated `lib/`→`bg/`** so it loads in the SW/Firefox background and
+  stays in the strict load-order test; `scripts/ota/sign-manifest.mjs`
+  (Ed25519 signer, proven build→sign→verify); **re-baked real dev pubkeys** into
+  core+bg (agent's had a lost private half); seeds gitignored in
+  `scripts/ota/dev-keys.env`. CI `.github/workflows/ci.yml` +
+  `release-lists.yml`; `scripts/ci/validate-blocklists.mjs`; `docs/OTA_KEYS.md`.
+  `test-ota.cjs` (30 cases: sig/rollback/whitelist/hash/corrupt-fallback).
+- Fixed 4 pre-existing malformed blocklist entries the validator caught (2
+  un-punycoded IDN domains → `xn--`, 1 query-string domain, 1 uppercase keyword).
+
+## Verification state (this session, all GREEN)
+- `node extension/tests/run-all.cjs`: **603 passed / 0 failed** across 8 suites
+  (was 559 pre-session; +90-case fixture refactor, +test-lockdown 12,
+  +test-ota 30). run-all now `await`s `run()` (backward-compatible; async suites).
+- Renderer transpile (bundled Babel): **OK** on all 17 `.jsx`/`.js`.
+- Command audit: **56 `#[tauri::command]` ⇔ 56 `generate_handler!`**, exact both
+  directions (16 commands added this session).
+- Cross-module symbol audit (grep, since no cargo): every symbol the merge wired
+  resolves — `broadcast_blocking`, `save_lockdown_allow`, `maybe_send_contact_
+  heartbeat`, `EventLog`, `LockdownStore`, `drain_anomalies`, `dns_filter::*`,
+  `purepath_dns::{start,health_check,init_custom_domains}`, `takeover::*`. Core
+  declares all 5 modules; src-tauri declares all 17.
+- OTA end-to-end proven live: build→sign(dev seed)→verify = true; wrong key /
+  tampered = false. Blocklist validator passes (385,683 domains, 1,244 keywords).
+- **`cargo check`/`clippy`/`test` NOT run** (cargo hangs here; owner compiles).
+
+## Compile risks for the owner's first `cargo` run (APIs used from memory)
+1. **New deps (Cargo.lock regen needed):** `purepath-dns` (std-only, low risk);
+   core `sha2 = "0.10"`; src-tauri `ed25519-dalek = "2"`, `ureq = "2"`,
+   `sha2`, `lettre = "0.11"` (default-features=false, `smtp-transport`,
+   `rustls-tls`, `builder`). Cargo.lock was hand-merged — regen expected.
+2. **ed25519-dalek 2:** `Signature::from_bytes(&[u8;64])` (infallible in 2.x),
+   `VerifyingKey::from_bytes(&[u8;32])->Result`, `Verifier::verify`,
+   `SigningKey::from_bytes`/`sign` — all match 2.x; pinned against noble by a
+   core interop `#[test]`.
+3. **lettre 0.11:** `Message::builder().from(mbox).to(mbox).subject().body()`,
+   `SmtpTransport::relay(host)?.port().credentials().build()`, `Transport::send`
+   — correct for 0.11; confirm the `rustls-tls` feature name on your lettre point rev.
+4. **ureq 2:** blocking get + read into a size cap.
+5. Session-2/3 risks still open: `windows 0.61` overlay `SetWindowDisplayAffinity`,
+   `tauri-plugin-global-shortcut` `event.state()`, `sysinfo 0.30`, `argon2 0.5`
+   getrandom (Cargo.toml already patches rand_core).
+6. DNS/lockdown/eventlog PowerShell + FFI are RUNTIME risks, not compile.
 
 ## Not done / next session
-- **Visual pass NOT done** (owner declined the browser drive this session). Memory rule stands:
-  render Settings (SecurityCard, PendingChangesCard, PasswordGate modal), Blocking
-  (AppBlockingSection), Blocklist/Monitor pending notes — before trusting them. Serve the
-  `desktop-app/src/renderer` folder over http (Babel-standalone can't load JSX over file://).
-- One agent worktree dir under `.claude/worktrees/` was lock-held at cleanup and may need a
-  manual `git worktree remove --force` / rmdir.
-- TODO(5.4) urge-log markers still sit in the panic flow. Remaining third: A.1/A.2, 1.1/1.2,
-  3.5, then Alpha opens 4.4/4.5/5.2.
+- **Visual pass NOT done** (no browser drive this session). Memory rule stands:
+  render the new UI before trusting it — DnsFilterSection (Blocking), Lockdown
+  card, Protection-history + Trusted-contact + OTA cards (Settings), the
+  lockdown block-page variant. Serve `desktop-app/src/renderer` over http.
+- **OTA production keys:** the baked pubkeys are DEV keys (private seeds in the
+  gitignored `dev-keys.env`). Before first real release, follow `docs/OTA_KEYS.md`
+  (gen prod keypair, re-bake, set `OTA_SIGNING_KEY` secret, delete dev-keys.env).
+- **Repo slug** `Xeno-legit/Pure-Path` is hardcoded in both OTA consumers
+  (TODO markers) — update together if the repo moves.
+- **Firefox OTA:** noble loads via the manifest scripts array (works), but the
+  extension-only Firefox path is otherwise on hold (per project memory).
+- Scoped-out with TODOs: lockdown schedule-from-vulnerable-hours, 5.2
+  ext_removed/block_burst events, event-log cross-file verify.
+- Remaining plan work is all Alpha-and-later: 4.6, 6.1 store publication (+1.5
+  activation), 3.1 graylist big-five, 5.3–5.5, 6.2/6.3, mobile.
