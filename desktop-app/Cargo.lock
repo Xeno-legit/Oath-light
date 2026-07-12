@@ -118,6 +118,7 @@ dependencies = [
  "image",
  "log",
  "ort",
+ "purepath-core",
  "rand_core 0.6.4",
  "serde",
  "serde_json",
@@ -3943,6 +3944,28 @@ dependencies = [
  "quote",
  "syn 1.0.109",
 ]
+
+[[package]]
+name = "pure-path-host"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sysinfo",
+]
+
+[[package]]
+name = "purepath-core"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "purepathguard"
+version = "0.1.0"
 
 [[package]]
 name = "pxfm"
