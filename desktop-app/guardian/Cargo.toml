@@ -1,0 +1,16 @@
+[package]
+name = "oathlightguard"
+version = "0.1.0"
+description = "Oath Light watchdog guardian — keeps the main app alive"
+edition = "2021"
+rust-version = "1.77.2"
+
+[[bin]]
+name = "oathlightguard"
+path = "src/main.rs"
+
+# No dependencies: pure std + a handful of kernel32 FFI calls. Tiny binary.
+
+# Release profile (opt-level="s" + lto/strip) moved to the workspace root
+# Cargo.toml (A.1) — Cargo ignores `[profile.*]` in non-root members. See the
+# comment there for the small lto/strip deviation this move causes.

@@ -10,6 +10,283 @@ function openRedirect(raw) {
   else window.open(u, '_blank', 'noopener');
 }
 
+// Process-level app blocking + evasion-browser detection (plan item 1.3).
+// House rule: name-based process blocking is friction, not a sandbox — a
+// renamed exe slips right past it, and that's an accepted limitation, not a
+// bug to fix here. The kill decision itself always happens in Rust
+// (`enforce_processes` in lib.rs); everything in this component is just a
+// view onto that state plus the friction-gated removal/toggle requests.
+function AppBlockingSection() {
+  const available = !!(window.PPNative && window.PPNative.available);
+  const [cfg, setCfg] = React.useState(null); // { blocked_processes, block_unknown_browsers, ... }
+  const [newProc, setNewProc] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  // Session-only — not persisted, just a live feed of what the backend has
+  // emitted since this page mounted (last 6, newest first).
+  const [recent, setRecent] = React.useState([]);
+
+  const pending = (window.usePendingWeakenings || (() => []))();
+  const pendingRemovals = pending.filter((p) => p.action_id.indexOf('process_block.remove:') === 0);
+  const evasionPending = pending.find((p) => p.action_id === 'evasion_kill.disable');
+
+  const refresh = React.useCallback(() => {
+    if (!available) return;
+    window.PPNative.getAppSettings().then((s) => { if (s) setCfg(s); });
+  }, [available]);
+
+  React.useEffect(() => { refresh(); }, [refresh]);
+  // Also refetch whenever the pending-weakening count changes — an applied
+  // removal or an applied `evasion_kill.disable` needs the list/toggle here
+  // to catch up without waiting on an unrelated re-render.
+  React.useEffect(() => { refresh(); }, [pending.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  React.useEffect(() => {
+    if (!available) return;
+    let unProc = null, unEvasion = null, cancelled = false;
+    const push = (text) => setRecent((r) => [{ id: Date.now() + Math.random(), ts: Date.now(), text }, ...r].slice(0, 6));
+    window.PPNative.onProcessEnforcement((p) => push(`${p.name} — blocked list — killed`))
+      .then((fn) => { if (cancelled) fn(); else unProc = fn; });
+    window.PPNative.onEvasionDetected((p) => push(
+      `${p.name} — ${p.reason === 'tor_browser' ? 'Tor Browser' : p.reason === 'portable_browser' ? 'portable copy' : 'evasion browser'} — ${p.killed ? 'blocked' : 'detected (not blocked)'}`
+    )).then((fn) => { if (cancelled) fn(); else unEvasion = fn; });
+    return () => { cancelled = true; if (unProc) unProc(); if (unEvasion) unEvasion(); };
+  }, [available]);
+
+  function addProc() {
+    const name = newProc.trim();
+    if (!name || busy) return;
+    setErr('');
+    setBusy(true);
+    window.PPNative.addBlockedProcess(name)
+      .then(() => { setNewProc(''); refresh(); })
+      .catch((e) => setErr(e && e.message ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  }
+
+  // PPAuth (master password, 4.2) may not exist in this build yet — the
+  // defensive call means this works with or without it, and a cancelled
+  // prompt (rejected with message 'cancelled') aborts silently.
+  function acquireAuth() {
+    return window.PPAuth ? window.PPAuth.acquire() : Promise.resolve(null);
+  }
+
+  function removeProc(name) {
+    setErr('');
+    acquireAuth()
+      .then((token) => { setBusy(true); return window.PPNative.removeBlockedProcess(name, token); })
+      .then(() => refresh())
+      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
+      .finally(() => setBusy(false));
+  }
+
+  function keepBlockingProc(p) {
+    window.PPNative.cancelWeakening(p.action_id).then(refresh);
+  }
+
+  function toggleEvasionKill(enabled) {
+    setErr('');
+    if (enabled) {
+      // Turning it on is a strengthening — instant, no auth needed.
+      setBusy(true);
+      window.PPNative.setBlockUnknownBrowsers(true, null)
+        .then(() => refresh())
+        .catch((e) => setErr(e && e.message ? e.message : String(e)))
+        .finally(() => setBusy(false));
+      return;
+    }
+    acquireAuth()
+      .then((token) => { setBusy(true); return window.PPNative.setBlockUnknownBrowsers(false, token); })
+      .then(() => refresh())
+      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
+      .finally(() => setBusy(false));
+  }
+
+  const blockedList = (cfg && cfg.blocked_processes) || [];
+  const killUnknown = !!(cfg && cfg.block_unknown_browsers);
+
+  return (
+    <React.Fragment>
+      <div className="setting" style={{ alignItems: 'flex-start' }}>
+        <div className="ico"><IconGrid size={20} /></div>
+        <div className="txt" style={{ flex: 1 }}>
+          <b>App blocking</b>
+          <span>Block distracting or explicit desktop apps by process name. This is friction, not a sandbox — a renamed .exe slips straight past it, on purpose accepted as a known limit rather than something faked as airtight.</span>
+
+          <div className="row" style={{ gap: 10, marginTop: 10 }}>
+            <input
+              className="input"
+              placeholder="e.g. discord.exe"
+              value={newProc}
+              onChange={(e) => setNewProc(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && addProc()}
+              style={{ flex: 1 }} />
+            <button className="btn btn-primary btn-sm" disabled={busy || !available} onClick={addProc}>
+              <IconPlus size={15} /> Add
+            </button>
+          </div>
+
+          {blockedList.length > 0 &&
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {blockedList.map((name) => (
+                <div key={name} className="row" style={{ justifyContent: 'space-between', padding: '8px 10px', background: 'color-mix(in oklab, var(--muted) 7%, transparent)', borderRadius: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{name}</span>
+                  <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => removeProc(name)}>
+                    <IconTrash size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          }
+
+          {pendingRemovals.length > 0 &&
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {pendingRemovals.map((p) => {
+                const name = p.action_id.slice('process_block.remove:'.length);
+                return (
+                  <div key={p.action_id} className="row" style={{ justifyContent: 'space-between', padding: '8px 10px', background: 'color-mix(in oklab, #d9a441 12%, transparent)', borderRadius: 8 }}>
+                    <span style={{ fontSize: 13 }}><b>{name}</b> — unblocks in {fmtDur(p.remaining_secs)}</span>
+                    <button className="btn btn-ghost btn-sm" onClick={() => keepBlockingProc(p)}>Keep blocking</button>
+                  </div>
+                );
+              })}
+            </div>
+          }
+
+          {err && <div style={{ fontSize: 12, color: '#d9534f', marginTop: 8 }}>{err}</div>}
+          {!available && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>App blocking controls are available in the desktop app.</div>}
+        </div>
+      </div>
+
+      <div className="setting">
+        <div className="ico"><IconShieldOff size={20} /></div>
+        <div className="txt">
+          <b>Block unknown &amp; evasion browsers</b>
+          <span>Kill Tor Browser, LibreWolf and other extension-proof browsers — and portable copies of known ones — on sight instead of just logging them. Off by default: detections are always logged as warnings either way, this only decides whether they're also force-closed.</span>
+        </div>
+        <Switch on={killUnknown} onClick={() => toggleEvasionKill(!killUnknown)} disabled={busy || !available} />
+      </div>
+      {evasionPending &&
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '-6px 0 10px 54px' }}>
+          Turning off in {fmtDur(evasionPending.remaining_secs)} — cancel from Settings → Pending changes
+        </div>
+      }
+
+      {recent.length > 0 &&
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', marginBottom: 6 }}>Recent detections (this session)</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {recent.map((r) => (
+              <div key={r.id} style={{ fontSize: 12, color: 'var(--muted)' }}>
+                {new Date(r.ts).toLocaleTimeString()} — {r.text}
+              </div>
+            ))}
+          </div>
+        </div>
+      }
+    </React.Fragment>
+  );
+}
+
+// System-level DNS filter (plan items 1.1 + 1.2). A coarse whole-domain
+// backstop for surfaces the browser extension can't reach — Tor, portable
+// browsers, Electron apps — enforced by a local DNS resolver the desktop app
+// points every network adapter at. The real gate lives in Rust
+// (`set_dns_filter_enabled`); this is a view onto `get_dns_status` plus the
+// instant-enable / friction-gated-disable requests.
+function DnsFilterSection() {
+  const available = !!(window.PPNative && window.PPNative.available);
+  const [status, setStatus] = React.useState(null); // { running, taken_over, last_error, upstreams }
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+
+  const pending = (window.usePendingWeakenings || (() => []))();
+  const disablePending = pending.find((p) => p.action_id === 'dns.disable');
+
+  const refresh = React.useCallback(() => {
+    if (!available) return;
+    window.PPNative.getDnsStatus().then((s) => { if (s) setStatus(s); });
+  }, [available]);
+
+  React.useEffect(() => { refresh(); }, [refresh]);
+  // Re-poll while active (health/takeover state can flip on its own — e.g. the
+  // failsafe restoring real DNS if the resolver dies) and whenever a pending
+  // weakening resolves.
+  React.useEffect(() => {
+    if (!available) return;
+    const id = setInterval(refresh, 3000);
+    return () => clearInterval(id);
+  }, [available, refresh]);
+  React.useEffect(() => { refresh(); }, [pending.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const on = !!(status && status.running);
+
+  function acquireAuth() {
+    return window.PPAuth ? window.PPAuth.acquire() : Promise.resolve(null);
+  }
+
+  function toggle() {
+    setErr('');
+    if (!on) {
+      // Turning it on is a strengthening — instant, no auth. A bind conflict
+      // or missing-admin failure rejects; surface it verbatim.
+      setBusy(true);
+      window.PPNative.setDnsFilter(true, null)
+        .then(() => refresh())
+        .catch((e) => setErr(e && e.message ? e.message : String(e)))
+        .finally(() => setBusy(false));
+      return;
+    }
+    // Turning it off is a weakening — password gate (4.2) then friction delay.
+    acquireAuth()
+      .then((token) => { setBusy(true); return window.PPNative.setDnsFilter(false, token); })
+      .then(() => refresh())
+      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
+      .finally(() => setBusy(false));
+  }
+
+  function keepOn() {
+    window.PPNative.cancelWeakening('dns.disable').then(refresh);
+  }
+
+  // Status line: off / active / active-but-not-taken-over / error.
+  let statusText, statusColor;
+  if (!status) { statusText = 'Loading…'; statusColor = 'var(--muted)'; }
+  else if (status.last_error && !on) { statusText = status.last_error; statusColor = '#d9534f'; }
+  else if (on && status.taken_over) {
+    statusText = 'Active — filtering at the network level' + (status.upstreams && status.upstreams.length ? ' · upstream ' + status.upstreams.join(', ') : '');
+    statusColor = 'var(--accent-2)';
+  }
+  else if (on && !status.taken_over) { statusText = status.last_error || 'Resolver running, but no network adapter could be redirected — needs administrator rights.'; statusColor = '#d9a441'; }
+  else { statusText = 'Off — only the browser extension is filtering.'; statusColor = 'var(--muted)'; }
+
+  return (
+    <React.Fragment>
+      <div className="setting" style={{ alignItems: 'flex-start' }}>
+        <div className="ico"><IconShield size={20} /></div>
+        <div className="txt" style={{ flex: 1 }}>
+          <b>System DNS filter</b>
+          <span>
+            Blocks explicit domains at the network level — for apps the browser extension can't reach, like Tor,
+            portable browsers and Electron apps. Requires administrator rights to take over your DNS, and disables
+            browser DNS-over-HTTPS by policy while active (otherwise a browser could resolve around it). Opt-in.
+          </span>
+          <div style={{ fontSize: 12.5, color: statusColor, marginTop: 8 }}>{statusText}</div>
+          {err && <div style={{ fontSize: 12, color: '#d9534f', marginTop: 6 }}>{err}</div>}
+          {!available && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>Available in the desktop app.</div>}
+        </div>
+        <Switch on={on} onClick={toggle} disabled={busy || !available} />
+      </div>
+      {disablePending &&
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '-6px 0 10px 54px' }}>
+          Turning off in {fmtDur(disablePending.remaining_secs)} — it stays fully active until then · cancel from Settings → Pending changes,{' '}
+          <a href="#" onClick={(e) => { e.preventDefault(); keepOn(); }} style={{ color: 'var(--accent-2)' }}>keep it on</a>
+        </div>
+      }
+    </React.Fragment>
+  );
+}
+
 function SettingRow({ icon: I, title, desc, on, onToggle, accent }) {
   return (
     <div className="setting">
@@ -23,7 +300,43 @@ function SettingRow({ icon: I, title, desc, on, onToggle, accent }) {
 function BlockingPage({ s, PP }) {
   const b = s.blocking;
   const set = (patch) => PP.set({ blocking: patch });
+  // Friction (4.1): if the uninstall guard has a pending "turn off" request,
+  // it's still fully ON (the backend never flips it early) — this is purely
+  // an honest heads-up, not a countdown that gates anything here. `fmtDur` is
+  // a plain top-level `function` declared in pages-settings.jsx; even though
+  // that file loads AFTER this one (see index.html's script order), globals
+  // resolve at *render* time, not at script-parse time, and by the time this
+  // component actually renders every script has already run — so this is
+  // safe. See pages-settings.jsx for the definition.
+  const guardPending = (window.usePendingWeakenings || (() => []))().find((p) => p.action_id === 'guard.disable');
   const toggle = (k) => set({ [k]: !b[k] });
+  // Turning the uninstall guard OFF is a weakening, gated behind the master
+  // password (4.2) when one is set — turning it back ON is a strengthening
+  // and stays instant/ungated (`toggle` above), same asymmetry as every
+  // other friction rule in this codebase. Only the off-and-currently-on
+  // click goes through `PPAuth.acquire()`.
+  //
+  // This calls `PPNative.setGuard` directly with the acquired token, rather
+  // than just flipping the local store and letting app.jsx's reconciliation
+  // effect push it — that effect deliberately passes no token (it's a
+  // reconciler, not a user action; see its comment in app.jsx), so it alone
+  // could never get past the backend's gate. The local store only flips
+  // after the direct, gated call actually succeeds; a cancelled prompt or a
+  // real error leaves the switch exactly where it was. (The reconciliation
+  // effect still fires afterward when the store changes — redundant but
+  // harmless: the friction request already exists, so its own ungated call
+  // just gets rejected by the backend gate and is swallowed there.)
+  const toggleGuard = () => {
+    if (!b.uninstallGuard) { toggle('uninstallGuard'); return; }
+    (window.PPAuth ? PPAuth.acquire() : Promise.resolve(null))
+      .then((auth) => (window.PPNative && PPNative.available
+        ? PPNative.setGuard(false, auth)
+        : Promise.resolve({ applied: true })))
+      .then(() => toggle('uninstallGuard'))
+      .catch((e) => {
+        if (!e || e.message !== 'cancelled') console.warn('[OathLight] toggleGuard failed:', e);
+      });
+  };
   // Block-screen mode toggles are mutually exclusive — enabling one disables
   // the others; toggling the active one off leaves them all disabled.
   const modeKeys = ['redirectLinkOn', 'redirectOffline', 'bgSongEnabled'];
@@ -171,6 +484,102 @@ function BlockingPage({ s, PP }) {
         <SettingRow key={a.id} icon={IconBell} title={a.label} desc={a.desc}
         on={a.on} onToggle={() => toggleAlert(a.id)} />
         )}
+      </div>
+
+      {/* tamper protection & enforcement */}
+      <div className="card fade-up" style={{ marginTop: 18 }}>
+        <div style={{ fontWeight: 800, fontSize: 16 }}>Tamper protection &amp; enforcement</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, marginBottom: 18, maxWidth: '60ch', lineHeight: 1.5 }}>
+          What actually stops you from working around Oath Light — and what's still on the way.
+        </div>
+
+        {/* real, backend-enforced */}
+        <div className="setting">
+          <div className="ico"><IconShield size={20} /></div>
+          <div className="txt">
+            <b>Uninstall guard</b>
+            <span>Force-installs the extension on Chromium browsers and re-applies the policy if it's removed (user-level lock now; machine-wide hardening later)</span>
+          </div>
+          <Switch on={b.uninstallGuard} onClick={toggleGuard} />
+        </div>
+        {guardPending &&
+          <div style={{ fontSize: 12, color: 'var(--muted)', margin: '-6px 0 10px 54px' }}>
+            Turning off in {fmtDur(guardPending.remaining_secs)} — cancel from Settings → Pending changes
+          </div>
+        }
+
+        {/* SafeSearch is enforced unconditionally by the extension — there's
+            genuinely no switch for this, so we don't pretend there is one. */}
+        <div className="setting">
+          <div className="ico"><IconSearch size={20} /></div>
+          <div className="txt">
+            <b>SafeSearch enforcement</b>
+            <span>Forced on every connected browser, permanently — it can't be turned off, on purpose</span>
+          </div>
+          <span className="chip" style={{ color: 'var(--accent-2)' }}>Always on</span>
+        </div>
+
+        {/* YouTube Restricted Mode — opt-in strictness, default OFF. The browser
+            extension enforces it with a YouTube-Restrict: Strict header rule
+            (the same mechanism school networks use), pushed down on the same
+            channel as the redirect settings. */}
+        <div className="setting">
+          <div className="ico"><IconShield size={20} /></div>
+          <div className="txt">
+            <b>YouTube Restricted Mode (strict)</b>
+            <span>Opt-in: the browser extension applies YouTube's strict Restricted Mode via a header rule, so YouTube filters mature videos & comments server-side</span>
+          </div>
+          <Switch on={!!b.youtubeRestrict} onClick={() => toggle('youtubeRestrict')} />
+        </div>
+
+        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', margin: '22px 0 4px' }}>
+          App &amp; process blocking
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>
+          Enforced by the desktop app in the background — no browser needed.
+        </div>
+
+        <AppBlockingSection />
+
+        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', margin: '22px 0 4px' }}>
+          Network-level DNS
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>
+          A coarse backstop for apps that never touch the browser extension. Requires administrator rights.
+        </div>
+
+        <DnsFilterSection />
+
+        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', margin: '22px 0 4px' }}>
+          Coming soon
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>
+          Not built yet — shown honestly here instead of as a switch that would quietly do nothing.
+        </div>
+
+        <div className="setting">
+          <div className="ico"><IconMoon size={20} /></div>
+          <div className="txt">
+            <b>Incognito blocking</b>
+            <span>Stop private/incognito windows from being used to slip past filters</span>
+          </div>
+          <div className="row" style={{ gap: 10 }}>
+            <span className="chip">Coming in Phase 4</span>
+            <Switch on={false} disabled />
+          </div>
+        </div>
+
+        <div className="setting">
+          <div className="ico"><IconLock size={20} /></div>
+          <div className="txt">
+            <b>Settings lock</b>
+            <span>Password-protect Oath Light's settings so they can't be changed without you</span>
+          </div>
+          <div className="row" style={{ gap: 10 }}>
+            <span className="chip">Coming in Alpha</span>
+            <Switch on={false} disabled />
+          </div>
+        </div>
       </div>
 
     </div>);

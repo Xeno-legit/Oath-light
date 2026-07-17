@@ -1,9 +1,9 @@
-/* app.jsx — Pure Path main app */
+/* app.jsx — Oath Light main app */
 const { useState, useEffect } = React;
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "theme": "dark",
-  "style": "aurora",
+  "style": "noir",
   "bg": "both",
   "intensity": 7
 }/*EDITMODE-END*/;
@@ -11,12 +11,14 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 const PAGES = {
   home: HubMenu,
   overview: OverviewPage,
+  monitor: MonitorPage,
   blocklist: BlocklistPage,
   blocking: BlockingPage,
   mentor: MentorPage,
   tips: TipsPage,
   themes: ThemesPage,
   settings: SettingsPage,
+  panic: PanicPage,
 };
 
 function App() {
@@ -51,10 +53,51 @@ function App() {
     redirectUrl: b.redirectUrl || '',
     vulnerable: b.vulnerable || { on: false },
     alerts: b.alerts || [],
+    youtubeRestrict: !!b.youtubeRestrict,
   };
   useEffect(() => {
     if (window.PPNative && PPNative.available) PPNative.setBlocking(blockingPayload);
   }, [JSON.stringify(blockingPayload)]);
+
+  // push the user's "my blocklist" custom sites down to the extensions — this
+  // is the only thing that makes a site added in the UI actually get blocked;
+  // the renderer's localStorage list stays the source of truth.
+  const customSiteUrls = (s.blocklist.customSites || []).map((x) => x.url);
+  useEffect(() => {
+    if (window.PPNative && PPNative.available) PPNative.setCustomDomains(customSiteUrls);
+  }, [JSON.stringify(customSiteUrls)]);
+
+  // push the uninstall-guard toggle down to the backend so it actually (dis)arms
+  // the reinstall-enforcement monitor, not just the UI switch. This is pure
+  // reconciliation (mirroring the store's current value down to the backend,
+  // not a user-initiated toggle), so it deliberately passes no master-
+  // password token (4.2) — a rejected weakening here is the CORRECT outcome
+  // when a password is set: it means the actual toggle-off click already
+  // went through the gated path in pages-blocking.jsx, and if that path
+  // itself was cancelled, the store's own value never changed, so this
+  // effect wouldn't even fire. The catch just keeps a rejected weakening
+  // from surfacing as an unhandled promise rejection.
+  useEffect(() => {
+    if (window.PPNative && PPNative.available) {
+      PPNative.setGuard(!!s.blocking.uninstallGuard).catch(() => {});
+    }
+  }, [s.blocking.uninstallGuard]);
+
+  // Panic / SOS entry (5.1): the tray "I need help now" item, the global
+  // Ctrl+Shift+Space hotkey and the extension blocked page's deep-link all
+  // funnel into the backend's `open-panic` event; a request that fired before
+  // this listener existed (cold start) is caught by the pending flag, which
+  // take_panic_pending consumes at most once.
+  useEffect(() => {
+    if (!(window.PPNative && PPNative.available)) return;
+    let unlisten = null, cancelled = false;
+    PPNative.onOpenPanic(() => PP.set({ page: 'panic' }))
+      .then((fn) => { if (cancelled) fn(); else unlisten = fn; });
+    PPNative.takePanicPending().then((pending) => {
+      if (pending && !cancelled) PP.set({ page: 'panic' });
+    });
+    return () => { cancelled = true; if (unlisten) unlisten(); };
+  }, []);
 
   // apply theme/style/intensity to the document
   useEffect(() => {
@@ -67,13 +110,16 @@ function App() {
   const go = (page) => PP.set({ page });
   const Page = PAGES[s.page] || HubMenu;
   const isHome = s.page === 'home';
+  // The panic flow is full-screen: no sidebar, nothing competing for focus.
+  const isPanic = s.page === 'panic';
 
   return (
     <div className="window">
+      <PasswordGate />
       <TitleBar s={s} />
       <div className="body">
         <AnimatedBG bg={t.bg} intensity={t.intensity} />
-        {!isHome && <Sidebar s={s} go={go} />}
+        {!isHome && !isPanic && <Sidebar s={s} go={go} />}
         <main className="content scroll" key={s.page}>
           <Page s={s} PP={PP} go={go} />
         </main>
@@ -84,7 +130,7 @@ function App() {
         <TweakRadio label="Theme" value={t.theme} options={['light', 'dark']}
                     onChange={(v) => setTweak('theme', v)} />
         <TweakSelect label="Palette" value={t.style}
-                     options={['aurora', 'lagoon', 'dawn', 'midnight', 'forest', 'ember']}
+                     options={['aurora', 'lagoon', 'dawn', 'midnight', 'forest', 'ember', 'noir']}
                      onChange={(v) => setTweak('style', v)} />
         <TweakSection label="Atmosphere" />
         <TweakSelect label="Background" value={t.bg}

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<!--
+  overlay.html — the AI action layer's only actuator (Phase 4 flagship, plan
+  item 2.1). Loaded into its own fullscreen, always-on-top, undecorated Tauri
+  window (see desktop-app/src-tauri/src/overlay.rs::open) when a monitor's
+  recent scans persistently look NSFW. Deliberately self-contained (no React,
+  no imports) — this is a separate webview from the main app shell, not
+  another page in it.
+
+  The webview is not a trust boundary: this page's countdown is a courtesy
+  display, not the enforcement. The Dismiss button always calls the backend;
+  the backend (`dismiss_overlay` -> overlay::dismiss) is what actually refuses
+  to close the window before the dwell timer has elapsed server-side.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oath Light</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    font-family: -apple-system, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+    background: #0b0b12;
+    overflow: hidden;
+  }
+
+  /* Dimmed/blurred backdrop — a soft dark wash rather than a hard black
+     screen, so the interrupt reads as protective, not punitive. */
+  .backdrop {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 35%, rgba(99,102,241,.16), rgba(11,11,18,.97) 65%);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+  }
+
+  .card {
+    width: min(480px, 88vw);
+    text-align: center;
+    color: #f2f2f7;
+    animation: rise .5s ease both;
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+  .eyebrow {
+    font-size: 12.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: #a5a6c9; margin-bottom: 14px;
+  }
+
+  h1 {
+    font-size: 30px; font-weight: 800; letter-spacing: -.02em; margin: 0 0 14px;
+  }
+
+  p.body {
+    font-size: 15.5px; line-height: 1.6; color: #c9c9dc; margin: 0 0 30px;
+  }
+
+  /* Box-breathing prompt: a circle that expands/contracts on a 4-4-4-4 count,
+     with the phase label synced by JS below. */
+  .breath-wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-bottom: 32px; }
+  .breath-ring {
+    width: 92px; height: 92px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(99,102,241,.35), rgba(99,102,241,.05) 70%);
+    border: 1.5px solid rgba(165,166,201,.45);
+    animation: breathe 16s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%   { transform: scale(.72); }
+    25%  { transform: scale(1);   }
+    50%  { transform: scale(1);   }
+    75%  { transform: scale(.72); }
+    100% { transform: scale(.72); }
+  }
+  .breath-label { font-size: 13px; font-weight: 600; color: #a5a6c9; min-width: 120px; }
+
+  .dismiss-btn {
+    appearance: none; border: none; cursor: pointer;
+    padding: 13px 30px; border-radius: 999px;
+    font-size: 14.5px; font-weight: 700;
+    background: #6366f1; color: #fff;
+    transition: opacity .2s ease, transform .2s ease;
+  }
+  .dismiss-btn:disabled {
+    cursor: default; opacity: .45; background: rgba(165,166,201,.25); color: #c9c9dc;
+  }
+  .dismiss-btn:not(:disabled):hover { transform: translateY(-1px); }
+
+  .dismiss-note { margin-top: 12px; font-size: 12.5px; color: #8586a8; }
+  .err { margin-top: 12px; font-size: 12.5px; color: #f59e0b; }
+
+  /* Panic-flow entry (plan 2.1 ties into 5.1): the SOS button is never
+     dwell-gated — asking for help must always be one click, even while
+     Dismiss is still locked. */
+  .sos-btn {
+    appearance: none; cursor: pointer; margin-top: 18px;
+    padding: 10px 22px; border-radius: 999px;
+    font-size: 13px; font-weight: 700;
+    background: transparent; color: #c9c9dc;
+    border: 1px solid rgba(165,166,201,.45);
+    transition: border-color .2s ease, color .2s ease;
+  }
+  .sos-btn:hover { border-color: #a5a6c9; color: #fff; }
+
+  .ground-count {
+    font-size: 56px; font-weight: 800; line-height: 1; color: #fff; margin-bottom: 4px;
+  }
+  .ground-sense {
+    font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+    color: #8586a8; margin-bottom: 24px;
+  }
+</style>
+</head>
+<body>
+  <div class="backdrop">
+    <div class="card">
+      <div class="eyebrow">Oath Light</div>
+      <h1>Take a breath.</h1>
+      <p class="body">
+        This moment will pass. What's on screen right now isn't going to make you feel
+        better — let's ride out the urge together instead of acting on it.
+      </p>
+
+      <div class="breath-wrap">
+        <div class="breath-ring"></div>
+        <div class="breath-label" id="breathLabel">Breathe in&hellip;</div>
+      </div>
+
+      <button class="dismiss-btn" id="dismissBtn" disabled>I'm okay — dismiss (30s)</button>
+      <div class="dismiss-note" id="dismissNote">You've made it through hard moments before. This one's no different.</div>
+      <button class="sos-btn" id="sosBtn">I need help right now</button>
+      <div class="err" id="err" style="display:none"></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  // Mirrors overlay.rs's DWELL const (30s) purely for the on-screen
+  // countdown — the actual gate is server-side (see the header comment).
+  var DWELL_SECS = 30;
+  var remaining = DWELL_SECS;
+
+  var btn = document.getElementById('dismissBtn');
+  var note = document.getElementById('dismissNote');
+  var err = document.getElementById('err');
+
+  function render() {
+    if (remaining > 0) {
+      btn.disabled = true;
+      btn.textContent = "I'm okay — dismiss (" + remaining + "s)";
+    } else {
+      btn.disabled = false;
+      btn.textContent = "I'm okay — dismiss";
+    }
+  }
+  render();
+
+  var timer = setInterval(function () {
+    remaining -= 1;
+    if (remaining <= 0) {
+      remaining = 0;
+      clearInterval(timer);
+    }
+    render();
+  }, 1000);
+
+  // Box-breathing phase label, synced to the CSS ring's 16s cycle
+  // (4s in / 4s hold / 4s out / 4s hold).
+  var phases = ['Breathe in…', 'Hold…', 'Breathe out…', 'Hold…'];
+  var label = document.getElementById('breathLabel');
+  var phaseIdx = 0;
+  label.textContent = phases[0];
+  setInterval(function () {
+    phaseIdx = (phaseIdx + 1) % phases.length;
+    label.textContent = phases[phaseIdx];
+  }, 4000);
+
+  // ── Panic-flow entry (plan 2.1 → 5.1) ─────────────────────────────────────
+  // A compact, self-contained version of the panic flow's wave → grounding →
+  // done stages, run inline in this same card (the breathing stage is already
+  // what the overlay shows by default). Inline on purpose: this window is
+  // fullscreen always-on-top, so opening the main app's flow here could bury
+  // it (single monitor) — and un-pinning the overlay to avoid that would turn
+  // the SOS button into a dismiss bypass. Deliberately NOT dwell-gated:
+  // asking for help is always one click. Copy is verbatim from the Mentor
+  // voice (pages-mentor.jsx), same as pages-panic.jsx and blocked.js.
+  var WAVE_COPY = "The urge feels huge, but it's a wave — it peaks around 20 minutes and then it fades whether you feed it or not. You don't have to fight it. Just let it move through. I'm right here.";
+  var GROUND_STEPS = [
+    { count: 5, sense: 'see', prompt: 'Look around and name five things you can see.' },
+    { count: 4, sense: 'hear', prompt: 'Listen for a moment. Name four things you can hear.' },
+    { count: 3, sense: 'touch', prompt: 'Name three things you can feel — the chair, your feet on the floor, the air.' },
+    { count: 2, sense: 'smell', prompt: 'Name two things you can smell.' },
+    { count: 1, sense: 'taste', prompt: 'Name one thing you can taste.' }
+  ];
+
+  var eyebrow = document.querySelector('.eyebrow');
+  var title = document.querySelector('h1');
+  var body = document.querySelector('p.body');
+  var breathWrap = document.querySelector('.breath-wrap');
+  var sosBtn = document.getElementById('sosBtn');
+  // 0 = not started · 1 = wave · 2..6 = grounding steps 0..4 · 7 = done.
+  // Each SOS-button click advances one position; breathing needs no position
+  // of its own because it's what the overlay is already showing.
+  var flowPos = 0;
+
+  function showGround(step) {
+    var gs = GROUND_STEPS[step];
+    eyebrow.textContent = 'Grounding · 5-4-3-2-1';
+    title.textContent = 'Come back to the room.';
+    body.innerHTML = '';
+    var count = document.createElement('div');
+    count.className = 'ground-count';
+    count.textContent = String(gs.count);
+    var sense = document.createElement('div');
+    sense.className = 'ground-sense';
+    sense.textContent = gs.sense;
+    var prompt = document.createElement('div');
+    prompt.textContent = gs.prompt;
+    body.appendChild(count);
+    body.appendChild(sense);
+    body.appendChild(prompt);
+    sosBtn.textContent = 'Done — next';
+  }
+
+  sosBtn.addEventListener('click', function () {
+    flowPos += 1;
+    if (flowPos === 1) {
+      // The wave message (breathing has already been running above).
+      breathWrap.style.display = 'none';
+      eyebrow.textContent = 'The wave';
+      title.textContent = 'This will pass.';
+      body.textContent = WAVE_COPY;
+      sosBtn.textContent = "I'm still here";
+    } else if (flowPos <= 1 + GROUND_STEPS.length) {
+      showGround(flowPos - 2);
+    } else {
+      eyebrow.textContent = 'You rode it out';
+      title.textContent = 'Well done. Truly.';
+      body.textContent = 'The urge is already weaker than when you arrived. When the pause above unlocks, dismiss this screen and go somewhere that feeds the person you\'re becoming.';
+      sosBtn.style.display = 'none';
+    }
+  });
+
+  btn.addEventListener('click', function () {
+    if (btn.disabled) return;
+    var T = window.__TAURI__;
+    if (!T || !T.core) {
+      err.style.display = 'block';
+      err.textContent = 'Not running inside Oath Light.';
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'Closing…';
+    T.core.invoke('dismiss_overlay').catch(function (e) {
+      // Backend refused (dwell not actually elapsed server-side, or the
+      // overlay wasn't tracked as open) — re-enable so the user can retry.
+      err.style.display = 'block';
+      err.textContent = String((e && e.message) || e || 'Could not dismiss yet.');
+      btn.disabled = false;
+      btn.textContent = "I'm okay — dismiss";
+      note.textContent = 'Give it a few more seconds.';
+    });
+  });
+})();
+</script>
+</body>
+</html>

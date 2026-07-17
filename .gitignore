@@ -33,6 +33,9 @@ build/
 *.pem
 *.zip
 
+# Chrome-generated artifact from loading the extension unpacked (not source).
+extension/_metadata/
+
 # Temporary files
 *.tmp
 *.temp
@@ -86,3 +89,5 @@ Error/
 .agents/
 .claude/
 skills-lock.json
+# OTA dev signing seeds (local testing only — never the production key)
+scripts/ota/dev-keys.env

@@ -5,7 +5,10 @@ const BLACKLIST_KEYWORDS = ['porn', 'xxx', 'xvideos', 'adult', 'nsfw', 'sex', 'n
 function cleanDomain(q) {
   return q.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
 }
-function checkBlacklist(q) {
+// Fallback heuristic used only when the native bridge isn't available (e.g.
+// running outside Tauri) — the old 12-domain + keyword guess, kept exactly
+// as it was so the app still shows *something* in a browser preview.
+function checkBlacklistLocal(q) {
   const d = cleanDomain(q);
   if (!d) return null;
   const blocked = BLACKLIST_KNOWN.some((x) => d === x || d.includes(x) || x.includes(d)) ||
@@ -22,26 +25,107 @@ function checkGraylist(q, graylist) {
 function BlocklistPage({ s, PP }) {
   const [tab, setTab] = React.useState('blocked');
   const [blackQuery, setBlackQuery] = React.useState('');
+  const [blackResult, setBlackResult] = React.useState(null);
   const [grayQuery, setGrayQuery] = React.useState('');
   const [grayOpen, setGrayOpen] = React.useState(false);
   const [newSite, setNewSite] = React.useState('');
   const bl = s.blocklist;
+  // Live, real domain/keyword counts from the actual blocklist (~385k
+  // domains) — null until loaded or outside Tauri. Guarded this way (rather
+  // than calling window.useBlocklistCounts() directly) so this page doesn't
+  // crash if the hook isn't wired up yet; it's still called unconditionally
+  // every render, so it stays hook-rule safe.
+  const counts = (window.useBlocklistCounts || (() => null))();
+  const domainCountText = counts ? counts.domain_count.toLocaleString() : '—';
+
+  // Blacklist search: the keyword heuristic is instant and local (it mirrors
+  // what the extension actually blocks on the fly), but the domain verdict
+  // now comes from the real backend list instead of a 12-site guess. Debounced
+  // and guarded against stale/out-of-order responses.
+  const blackSeq = React.useRef(0);
+  React.useEffect(() => {
+    const d = cleanDomain(blackQuery);
+    if (!d) { setBlackResult(null); return; }
+    const seq = ++blackSeq.current;
+    const keywordHit = BLACKLIST_KEYWORDS.some((k) => d.includes(k));
+    const nativeAvailable = !!(window.PPNative && window.PPNative.available &&
+      typeof window.PPNative.checkDomainBlocked === 'function');
+
+    if (!nativeAvailable) {
+      setBlackResult(checkBlacklistLocal(blackQuery));
+      return;
+    }
+
+    // Clear the previous verdict while the new check is in flight — showing
+    // a stale result for a *different* domain, even briefly, is a small lie.
+    setBlackResult(null);
+    const t = setTimeout(() => {
+      window.PPNative.checkDomainBlocked(d)
+        .then((res) => {
+          if (seq !== blackSeq.current) return; // a newer query has since started
+          setBlackResult({ domain: d, blocked: !!(res && res.blocked) || keywordHit });
+        })
+        .catch(() => {
+          if (seq !== blackSeq.current) return;
+          setBlackResult(checkBlacklistLocal(blackQuery));
+        });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [blackQuery]);
 
   function addSite() {
-    const url = newSite.trim().replace(/^https?:\/\//, '');
+    // Same normalization the backend and extension apply, so the list shows
+    // exactly the domain that will be blocked.
+    const url = cleanDomain(newSite);
     if (!url) return;
+    if (bl.customSites.some((x) => x.url === url)) { setNewSite(''); return; }
     const list = [...bl.customSites, { id: Date.now(), url, added: 'just now' }];
     PP.set({ blocklist: { customSites: list } });
     setNewSite('');
   }
-  function removeSite(id) {
-    PP.put('blocklist', { ...bl, customSites: bl.customSites.filter((x) => x.id !== id) });
+  function removeSite(site) {
+    if (!(window.PPNative && window.PPNative.available)) {
+      // No native bridge (standalone preview) — nothing to gate, just update
+      // the local cosmetic copy.
+      PP.put('blocklist', { ...bl, customSites: bl.customSites.filter((x) => x.id !== site.id) });
+      return;
+    }
+    // Master-password gated (4.2) when one is set. Acquire BEFORE touching
+    // the local store: if the user cancels the prompt, the site must stay
+    // exactly where it was in the list, not disappear and then silently
+    // reappear on the next backend poll.
+    (window.PPAuth ? PPAuth.acquire() : Promise.resolve(null))
+      .then((auth) => {
+        // Fire the removal request — the backend keeps actually enforcing the
+        // block until the friction delay elapses (4.1). This only registers
+        // the request; it does not wait for it.
+        window.PPNative.removeCustomDomain(site.url, auth).catch(() => {});
+        // Local list update happens once acquisition succeeded — same as
+        // before removeCustomDomain existed, this is the renderer's own
+        // cosmetic copy, not the enforcement.
+        PP.put('blocklist', { ...bl, customSites: bl.customSites.filter((x) => x.id !== site.id) });
+      })
+      .catch((e) => {
+        // Cancelled prompt: leave the list untouched, silently abort.
+        if (!e || e.message !== 'cancelled') console.warn('[OathLight] removeSite failed:', e);
+      });
   }
   function removeAllow(id) {
     PP.put('blocklist', { ...bl, allow: bl.allow.filter((x) => x.id !== id) });
   }
+  // Pending custom-block removals (4.1) — sites that still show removed from
+  // the list above but the backend is still blocking until the delay elapses.
+  const pendingRemovals = (window.usePendingWeakenings || (() => []))()
+    .filter((p) => p.action_id.indexOf('custom_block.remove:') === 0);
+  function keepBlocking(p) {
+    const domain = p.action_id.slice('custom_block.remove:'.length);
+    window.PPNative.cancelWeakening(p.action_id).then(() => {
+      if (!bl.customSites.some((x) => x.url === domain)) {
+        PP.put('blocklist', { ...bl, customSites: [...bl.customSites, { id: Date.now(), url: domain, added: 'restored' }] });
+      }
+    });
+  }
 
-  const blackResult = checkBlacklist(blackQuery);
   const grayResult = checkGraylist(grayQuery, bl.graylist);
 
   return (
@@ -68,7 +152,7 @@ function BlocklistPage({ s, PP }) {
             <div className="panel-head">
               <div className="ico" style={{ background: 'color-mix(in oklab, #d9534f 16%, transparent)', color: '#d9534f' }}><IconShieldOff size={20} /></div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="panel-title">Blacklist <span className="chip" style={{ marginLeft: 6, color: '#d9534f' }}>{bl.blacklistDomains} domains</span></div>
+                <div className="panel-title">Blacklist <span className="chip" style={{ marginLeft: 6, color: '#d9534f' }}>{domainCountText} domains</span></div>
                 <div className="panel-sub">Sites that are <b>explicit by nature</b> — pornography and adult media. Blocked entirely, the instant they're detected.</div>
               </div>
             </div>
@@ -79,7 +163,7 @@ function BlocklistPage({ s, PP }) {
               onChange={(e) => setBlackQuery(e.target.value)} />
               </div>
               {!blackResult ?
-            <div className="search-hint">Type any website to check it against {bl.blacklistDomains} explicit domains.</div> :
+            <div className="search-hint">Type any website to check it against {domainCountText} explicit domains.</div> :
 
             <div className={'search-result ' + (blackResult.blocked ? 'is-blocked' : 'is-clear')}>
                   <div className="ico">{blackResult.blocked ? <IconShieldOff size={20} /> : <IconCheck size={20} />}</div>
@@ -166,17 +250,42 @@ function BlocklistPage({ s, PP }) {
             onChange={(e) => setNewSite(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addSite()} />
               <button className="btn btn-primary" onClick={addSite}><IconPlus size={17} /> Block</button>
             </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>
+              Changes apply across every connected browser within moments.
+            </div>
           </div>
           <div className="card" style={{ padding: 8 }}>
             {bl.customSites.map((site) =>
           <div className="setting" key={site.id} style={{ padding: '13px 14px' }}>
                 <div className="ico" style={{ background: 'color-mix(in oklab, var(--accent-2) 14%, transparent)', color: 'var(--accent-2)' }}><IconShield size={18} /></div>
                 <div className="txt"><b>{site.url}</b><span>Added {site.added}</span></div>
-                <button className="btn btn-ghost btn-sm" onClick={() => removeSite(site.id)}><IconTrash size={15} /></button>
+                <button className="btn btn-ghost btn-sm" onClick={() => removeSite(site)}><IconTrash size={15} /></button>
               </div>
           )}
             {!bl.customSites.length && <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>No custom sites yet.</div>}
           </div>
+
+          {/* pending removals (4.1) — still blocked until the delay elapses */}
+          {pendingRemovals.length > 0 &&
+            <div className="card" style={{ padding: 8 }}>
+              <div style={{ fontWeight: 800, fontSize: 13, padding: '10px 14px 2px' }}>Pending removals</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', padding: '0 14px 10px' }}>
+                Still blocked until the delay below elapses — click "Keep blocking" to cancel the removal.
+              </div>
+              {pendingRemovals.map((p) => {
+                const domain = p.action_id.slice('custom_block.remove:'.length);
+                return (
+                  <div className="setting" key={p.action_id} style={{ padding: '13px 14px' }}>
+                    <div className="ico" style={{ background: 'color-mix(in oklab, #d9a441 18%, transparent)', color: '#c9962f' }}><IconShield size={18} /></div>
+                    {/* fmtDur is a plain top-level function in pages-settings.jsx; see the
+                        note in pages-blocking.jsx for why cross-file load order is safe here. */}
+                    <div className="txt"><b>{domain}</b><span>Unblocks in {fmtDur(p.remaining_secs)}</span></div>
+                    <button className="btn btn-ghost btn-sm" onClick={() => keepBlocking(p)}>Keep blocking</button>
+                  </div>
+                );
+              })}
+            </div>
+          }
         </div>
       }
 

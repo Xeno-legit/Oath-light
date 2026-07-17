@@ -1,0 +1,57 @@
+# .github/workflows/ci.yml — the A.4 baseline CI skeleton (plan item A.4).
+# Every later trust feature (OTA signing 3.5, reproducible builds 6.2, the
+# community list pipeline 3.6) hangs off adding a job here. The whole point of
+# A.1's workspace restructure is that `cargo test --workspace` covers core,
+# app, guardian, native-host, and dns in one command.
+#
+# NOTE: CI runners CAN run cargo — the "never run cargo" rule in the repo is
+# specific to the constrained local dev environment where cargo hangs. Here the
+# Rust jobs are the primary compile gate the local workflow can't provide.
+name: CI
+
+on:
+  push:
+    branches: [main, 'phase*/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  extension-tests:
+    name: Extension JS suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run the extension test suite
+        run: node extension/tests/run-all.cjs
+
+  blocklist-shape:
+    name: Blocklist JSON shape
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Validate blocklist JSON shape (valid JSON, lowercase domains)
+        run: node scripts/ci/validate-blocklists.mjs
+
+  rust:
+    name: Rust workspace (test + clippy)
+    # The workspace has Windows-only deps (tauri, the windows crate, the DNS
+    # adapter takeover) — build/test on Windows so those cfg blocks compile.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop-app
+      - name: cargo test (whole workspace)
+        run: cargo test --workspace --manifest-path desktop-app/Cargo.toml
+      - name: cargo clippy (deny warnings)
+        run: cargo clippy --workspace --manifest-path desktop-app/Cargo.toml -- -D warnings

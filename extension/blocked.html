@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Content Blocked — Pure Path</title>
+  <title>Content Blocked — Oath Light</title>
   <!-- shared design system: theme tokens (6 palettes × light/dark), glass primitives, animated bg -->
   <link rel="stylesheet" href="blocklist_assets/desktop.css">
   <style>
@@ -133,6 +133,57 @@
       .stats { flex-direction: column; gap: 18px; }
       .stat + .stat { border-left: none; border-top: 1px solid var(--glass-brd); padding-top: 18px; }
     }
+
+    /* ---- Panic / SOS urge-surfing flow (plan 5.1; driven by blocked.js) ---- */
+    .panic-btn { margin-top: 12px; }
+    .panic-overlay {
+      position: fixed; inset: 0; z-index: 10;
+      display: flex; align-items: center; justify-content: center;
+      padding: 24px; overflow-y: auto;
+      background: color-mix(in oklab, var(--bg-0) 74%, transparent);
+      -webkit-backdrop-filter: blur(26px); backdrop-filter: blur(26px);
+    }
+    .panic-overlay[hidden] { display: none; }
+    .panic-card { width: 100%; max-width: 520px; text-align: center; animation: slideUpFade .5s var(--ease) both; }
+    .panic-eyebrow {
+      font-size: 12px; font-weight: 800; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--accent); margin-bottom: 10px;
+    }
+    .panic-title { font-size: 32px; font-weight: 800; letter-spacing: -.03em; line-height: 1.1; margin-bottom: 12px; }
+    .panic-sub { color: var(--text-2); font-size: 15.5px; font-weight: 500; line-height: 1.65; text-wrap: pretty; }
+    /* box breathing: expand (in) → hold → contract (out) → hold, 4s each */
+    .panic-breath { display: flex; flex-direction: column; align-items: center; gap: 20px; margin: 30px 0 6px; }
+    .panic-ring {
+      width: 150px; height: 150px; border-radius: 50%;
+      background: color-mix(in oklab, var(--accent) 13%, transparent);
+      border: 2px solid color-mix(in oklab, var(--accent) 55%, transparent);
+      box-shadow: 0 0 60px -18px color-mix(in oklab, var(--accent) 70%, transparent);
+      animation: panicBreathe 16s var(--ease-soft) infinite;
+    }
+    @keyframes panicBreathe {
+      0%   { transform: scale(.66); }
+      25%  { transform: scale(1); }
+      50%  { transform: scale(1); }
+      75%  { transform: scale(.66); }
+      100% { transform: scale(.66); }
+    }
+    .panic-phase { font-size: 15px; font-weight: 700; color: var(--text-2); }
+    .panic-phase-count { color: var(--accent); font-weight: 800; margin-left: 9px; font-variant-numeric: tabular-nums; }
+    .panic-ground { margin: 26px 0 4px; }
+    .panic-ground-count {
+      font-size: 64px; font-weight: 800; line-height: 1;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .panic-ground-sense {
+      font-size: 12px; font-weight: 800; letter-spacing: .14em;
+      text-transform: uppercase; color: var(--muted); margin-top: 6px;
+    }
+    .panic-actions { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; margin-top: 28px; }
+    @media (prefers-reduced-motion: reduce) {
+      .panic-ring { animation: none; transform: scale(.85); }
+    }
   </style>
 </head>
 <body>
@@ -148,7 +199,7 @@
     </div>
 
     <div class="shield">
-      <img src="icons/icon128.png" alt="Pure Path">
+      <img src="icons/icon128.png" alt="Oath Light">
     </div>
     <h1>Take a deep breath</h1>
     <div class="reason" id="reason">This page was blocked to help you stay focused on your goals.</div>
@@ -184,6 +235,35 @@
       <svg class="svgi" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
       Return to Safety
     </button>
+    <br>
+    <button class="btn btn-ghost safe-btn panic-btn" id="panicBtn">
+      <svg class="svgi" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+      I need help right now
+    </button>
+  </div>
+
+  <!-- Panic / SOS urge-surfing flow (plan 5.1): box breathing → the
+       20-minute-wave message → 5-4-3-2-1 grounding → redirect target.
+       Self-contained fallback — runs right here even without the desktop
+       app; blocked.js also deep-links the desktop flow when connected. -->
+  <div class="panic-overlay" id="panicOverlay" hidden>
+    <div class="panic-card">
+      <div class="panic-eyebrow" id="panicEyebrow">You're safe here</div>
+      <h2 class="panic-title" id="panicTitle">Let's breathe first.</h2>
+      <p class="panic-sub" id="panicSub"></p>
+      <div class="panic-breath" id="panicBreath">
+        <div class="panic-ring" aria-hidden="true"></div>
+        <div class="panic-phase"><span id="panicPhaseLabel">Breathe in</span><span class="panic-phase-count" id="panicPhaseCount">1</span></div>
+      </div>
+      <div class="panic-ground" id="panicGroundBox" hidden>
+        <div class="panic-ground-count" id="panicGroundCount">5</div>
+        <div class="panic-ground-sense" id="panicGroundSense">see</div>
+      </div>
+      <div class="panic-actions">
+        <button class="btn btn-primary" id="panicGoBtn" hidden>Take me somewhere good</button>
+        <button class="btn btn-ghost" id="panicNextBtn">Continue</button>
+      </div>
+    </div>
   </div>
 
   <script src="blocked.js"></script>

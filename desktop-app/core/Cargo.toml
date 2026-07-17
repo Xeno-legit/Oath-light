@@ -1,0 +1,18 @@
+[package]
+name = "oathlight-core"
+version = "0.1.0"
+description = "Oath Light shared core: blocklist embedding and the hostname-level keyword/matching engine (plan A.1/A.2), consumed by the desktop app today and, later, the DNS resolver (1.1) and mobile bindings (Part H)."
+edition = "2021"
+rust-version = "1.77.2"
+
+# Deliberately NO tauri types and NO windows-only deps here — this crate is
+# the future mobile/UniFFI surface (plan Part H): plain structs, std-only
+# collections, nothing that assumes a desktop windowing system or a
+# particular app framework.
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+# Tamper-evident event log (plan item 4.5) — pure-Rust, no OS-specific APIs,
+# so it stays mobile-safe like the rest of this crate.
+sha2 = "0.10"

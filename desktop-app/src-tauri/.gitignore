@@ -2,3 +2,9 @@
 # will have compiled files and executables
 /target/
 /gen/schemas
+
+# Staged Tauri sidecars (built by scripts/bundle-sidecars.mjs)
+/binaries/
+
+# Packed extension + update manifest (built by scripts/pack-extension.mjs)
+/resources/

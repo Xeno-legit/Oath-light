@@ -1,15 +1,15 @@
-# Pure Path
+# Oath Light
 
-Pure Path is a free, open-source content-filtering system that blocks pornographic and
+Oath Light is a free, open-source content-filtering system that blocks pornographic and
 other NSFW material at the network, page, and platform level. It comprises a Manifest V3
 browser extension for real-time request and content filtering and a Tauri (Rust) desktop
 application for system-level persistence and tamper resistance.
 
-![Pure Path Demonstration](Demogif.gif)
+![Oath Light Demonstration](Demogif.gif)
 
 ## Core Philosophy
 
-Pure Path is built on the principle of accessible protection. The application is free and
+Oath Light is built on the principle of accessible protection. The application is free and
 licensed under the GNU General Public License v3.0. It contains no paid subscriptions, no
 premium tiers, no locked features, and no advertising. The objective is a robust, auditable
 tool available to anyone, without financial or data-collection barriers.
@@ -28,7 +28,7 @@ or transmit data for evaluation. All processing is local.
 
 ## Protection Layers
 
-Pure Path applies independent, complementary layers. A request is blocked if any layer matches.
+Oath Light applies independent, complementary layers. A request is blocked if any layer matches.
 
 ### 1. Curated domain blacklist
 - **385,588 curated domains** bundled with the extension, sharded across three JSON files and
@@ -53,7 +53,7 @@ A pattern layer that runs on the lowercased hostname even when the blacklist doe
 
 ### 3. Graylist V2 — platform-level interception
 Mixed-content platforms (Reddit, X, Pixiv, and similar) cannot be whole-site blocked without
-removing legitimate use, and cannot be left untouched. Pure Path reads each platform's **own
+removing legitimate use, and cannot be left untouched. Oath Light reads each platform's **own
 per-item NSFW label** and removes the flagged items before they render. This is ground-truth
 filtering rather than heuristics, and it survives site redesigns because the underlying API
 fields are stable.
@@ -89,11 +89,11 @@ fields are stable.
 
 ## Comparison with Existing Tools
 
-The following table compares Pure Path against widely used alternatives on attributes that are
+The following table compares Oath Light against widely used alternatives on attributes that are
 publicly documented and structurally stable. Vendor pricing and feature sets change over time;
 verify current details independently before relying on them.
 
-| Attribute | Pure Path | Covenant Eyes | BlockerX | Cold Turkey Blocker | Net Nanny |
+| Attribute | Oath Light | Covenant Eyes | BlockerX | Cold Turkey Blocker | Net Nanny |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | License | GPLv3 (open source) | Proprietary | Proprietary | Proprietary | Proprietary |
 | Cost model | Free | Subscription | Freemium (paid premium) | Freemium (paid Pro) | Subscription |
@@ -104,7 +104,7 @@ verify current details independently before relying on them.
 | Tamper resistance / high-friction uninstall | Yes | Yes | Yes | Yes (Pro) | Yes |
 | Open codebase for audit | Yes | No | No | No | No |
 
-Pure Path's principal differentiators are its open-source GPLv3 licensing at no cost, its
+Oath Light's principal differentiators are its open-source GPLv3 licensing at no cost, its
 platform-level per-item NSFW stripping (the graylist), and a multilingual keyword engine with
 native-script and homoglyph handling, all executed locally with no telemetry.
 
@@ -165,7 +165,7 @@ The project is in beta and is currently installed from source.
 
 | Step | Action | Details |
 | :--- | :--- | :--- |
-| 1 | Clone the repository | `git clone https://github.com/Xeno-legit/Pure-Path-NSFW-blocker.git` |
+| 1 | Clone the repository | `git clone https://github.com/Xeno-legit/Oath-Light-NSFW-blocker.git` |
 | 2 | Load the extension | Load the `extension` folder as an unpacked extension in your browser's developer mode. |
 | 3 | Build the desktop app | In `desktop-app`, follow the build instructions in that directory's README. |
 | 4 | Configure | Complete the setup wizard to set a master password and goals. |
@@ -193,4 +193,4 @@ file for details.
 
 ---
 
-Pure Path is founded and maintained by [Xeno-legit](https://github.com/Xeno-legit).
+Oath Light Blocker is founded and maintained by [Xeno-legit](https://github.com/Xeno-legit).

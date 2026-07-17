@@ -1,0 +1,83 @@
+# .github/workflows/release-lists.yml — OTA blocklist publisher (plan item 3.5).
+# On a GitHub Release (or a manual dispatch), build a signed lists-manifest.json
+# over the current blocklist files and attach it — plus the list files and the
+# signature — to the release as assets. The desktop app (src-tauri/src/ota.rs)
+# and the extension (bg/ota.js) both fetch these from the "latest release"
+# download URL, verify the Ed25519 signature against a baked public key, and
+# apply updated lists without a reinstall. GitHub is the CDN; the signature is
+# the trust (zero servers).
+#
+# The signing private key lives ONLY as the `OTA_SIGNING_KEY` repository secret
+# (32-byte Ed25519 seed, hex) + the owner's offline backup — never in the repo.
+# See docs/OTA_KEYS.md. A dry run without the secret (e.g. a fork) still builds
+# the manifest, just unsigned.
+name: Publish blocklists (OTA)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'OTA list version (monotonic integer — must exceed the last published version)'
+        required: true
+
+permissions:
+  contents: write # needed to upload assets onto the release
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Validate before signing — never publish a malformed list.
+      - name: Validate blocklist shape
+        run: node scripts/ci/validate-blocklists.mjs
+
+      # Version rule: on a release, derive a monotonic integer from the run
+      # number (simple, always-increasing); on manual dispatch, take the input.
+      # The desktop/extension consumers reject any version <= what they have, so
+      # the only hard requirement is "strictly greater than last time".
+      - name: Determine version
+        id: ver
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "value=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build + sign manifest
+        env:
+          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
+        run: |
+          mkdir -p ota-out
+          cp extension/blocklists/domains_part*.json extension/blocklists/domains_ai.json extension/blocklists/keywords.json ota-out/
+          node scripts/ota/sign-manifest.mjs --build extension/blocklists ota-out --version "${{ steps.ver.outputs.value }}"
+          ls -la ota-out
+
+      - name: Attach assets to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            ota-out/lists-manifest.json \
+            ota-out/lists-manifest.json.sig \
+            ota-out/domains_part1.json \
+            ota-out/domains_part2.json \
+            ota-out/domains_part3.json \
+            ota-out/domains_ai.json \
+            ota-out/keywords.json \
+            --clobber
+
+      - name: Upload as workflow artifact (manual dispatch / dry run)
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ota-lists-v${{ steps.ver.outputs.value }}
+          path: ota-out/

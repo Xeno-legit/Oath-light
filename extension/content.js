@@ -25,10 +25,10 @@
   
   function hideSafeSearchUI() {
     if (!isSearchEngine) return;
-    if (document.getElementById('pure-path-safesearch-lock')) return;
+    if (document.getElementById('oath-light-safesearch-lock')) return;
     
     const style = document.createElement('style');
-    style.id = 'pure-path-safesearch-lock';
+    style.id = 'oath-light-safesearch-lock';
     style.textContent = `
       /* ===== GOOGLE ===== */
       #base_safesearch_button,
@@ -135,22 +135,30 @@
 
   function blockNewgroundsBypassPage() {
     if (hostname !== 'newgrounds.com' && !hostname.endsWith('.newgrounds.com')) return;
-    if (window._purePathBlockedNG) return;
+    if (window._oathLightBlockedNG) return;
 
-    function doBlock() {
+    async function doBlock() {
       // Check for the bypass link or the page title
       const bypassLink = document.getElementById('ignore-filter-link');
       const title = document.title;
       const hasFilterPage = bypassLink || title === 'Content Filtered';
       if (!hasFilterPage) return;
 
-      window._purePathBlockedNG = true;
+      window._oathLightBlockedNG = true;
       // Hide everything immediately
       document.documentElement.style.display = 'none';
       try {
-        // TEMP (testing): blocked.html hangs Playwright; route to a light page.
-        console.log('[PurePath][TEST] BLOCK newgrounds bypass page', window.location.href);
-        window.location.replace('about:blank');
+        const response = await chrome.runtime.sendMessage({
+          action: 'checkUrl',
+          url: window.location.href
+        });
+        if (response && response.blockedUrl) {
+          window.location.replace(response.blockedUrl);
+        } else {
+          // Fallback to blocked.html directly
+          window.location.replace(chrome.runtime.getURL('blocked.html') +
+            '?reason=newgrounds-bypass&match=' + encodeURIComponent(window.location.href));
+        }
       } catch (e) {
         // Fallback: nuke the page entirely
         document.documentElement.innerHTML = '<html><body style="background:#0f172a;"></body></html>';
@@ -166,7 +174,7 @@
     // Failsafe: poll for a short burst in case the element loads late
     let checks = 0;
     const interval = setInterval(() => {
-      if (window._purePathBlockedNG || checks++ > 15) {
+      if (window._oathLightBlockedNG || checks++ > 15) {
         clearInterval(interval);
         return;
       }
@@ -185,8 +193,8 @@
   // (This is the sole graylist mechanism now — the old per-site CSS UI/content
   // hiding + toggle-forcing + cheeky popup were removed in favour of it.)
   function injectGraylistInterceptor() {
-    if (window.__purePathGraylistInjected) return;
-    window.__purePathGraylistInjected = true;
+    if (window.__oathLightGraylistInjected) return;
+    window.__oathLightGraylistInjected = true;
     try {
       const s = document.createElement('script');
       s.src = chrome.runtime.getURL('graylist-inject.js');
@@ -205,7 +213,7 @@
     window.addEventListener('message', (e) => {
       if (e.source !== window) return;
       const d = e.data;
-      if (!d || d.__purePath !== 'graylist-filter' || typeof d.count !== 'number') return;
+      if (!d || d.__oathLight !== 'graylist-filter' || typeof d.count !== 'number') return;
       try {
         chrome.runtime.sendMessage({ action: 'graylistFiltered', count: d.count, site: d.site });
       } catch (_) {}
@@ -533,8 +541,8 @@
   }
 
   function hideItem(el) {
-    if (!el || el.dataset.purePathHidden) return false;
-    el.dataset.purePathHidden = '1';
+    if (!el || el.dataset.oathLightHidden) return false;
+    el.dataset.oathLightHidden = '1';
     el.style.setProperty('display', 'none', 'important');
     return true;
   }
@@ -553,7 +561,7 @@
       let items;
       try { items = document.querySelectorAll(rule.textScan.item); } catch (_) { items = []; }
       for (const it of items) {
-        if (it.dataset.purePathHidden) continue;
+        if (it.dataset.oathLightHidden) continue;
         if (rule.textScan.re.test(it.textContent || '')) {
           if (hideItem(it)) removed++;
         }
@@ -722,7 +730,7 @@
   // The background worker fires these during the user's "vulnerable hours". We
   // render a small, self-contained card inside a shadow root (so page CSS can't
   // touch it) anchored bottom-right of the TOP frame only.
-  const PP_REMINDER_HOST_ID = 'pure-path-reminder';
+  const PP_REMINDER_HOST_ID = 'oath-light-reminder';
 
   function setupReminderListener() {
     if (window.top !== window) return; // top frame only — avoid one card per iframe
@@ -796,14 +804,14 @@
         <div class="body">
           <div class="dot"></div>
           <div class="txt">
-            <div class="brand">Pure Path</div>
+            <div class="brand">Oath Light</div>
             <div class="title"></div>
             <div class="msg"></div>
           </div>
         </div>
       </div>`;
     // Inject text via textContent — never interpolate the message into HTML.
-    root.querySelector('.title').textContent = title || 'Pure Path';
+    root.querySelector('.title').textContent = title || 'Oath Light';
     root.querySelector('.msg').textContent = body || '';
 
     (document.body || document.documentElement).appendChild(host);
@@ -835,7 +843,7 @@
   // across every instance & redesign: each instance footer links its own AGPL source
   // repo, and SearXNG/Nitter stamp a <meta name="generator">. Detect that, then
   // hard-block — these mirrors exist precisely to view a platform WITHOUT the
-  // filtering Pure Path already enforces on the canonical host. (Same label-over-host
+  // filtering Oath Light already enforces on the canonical host. (Same label-over-host
   // philosophy as the graylist; it survives the domain churn a hostlist loses to.)
   function setupFrontendSoftwareBlock() {
     if (window.top !== window.self) return;          // top frame only — avoids iframe FPs

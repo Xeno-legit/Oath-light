@@ -1,4 +1,4 @@
-//! Pure Path — Browser registry, detection, native-host registration & policy enforcement.
+//! Oath Light — Browser registry, detection, native-host registration & policy enforcement.
 //!
 //! This module is the single source of truth for everything browser-specific:
 //!   * the stable extension IDs,
@@ -35,17 +35,18 @@ fn reg() -> std::process::Command {
 pub const EXTENSION_ID: &str = "lknpaoecooklfjgenmjpkdkahgoofank";
 
 /// Firefox (Gecko) extension ID — from `browser_specific_settings.gecko.id`.
-pub const GECKO_EXTENSION_ID: &str = "purepath@xeno-legit.github.io";
+pub const GECKO_EXTENSION_ID: &str = "oathlight@xeno-legit.github.io";
 
 /// Native messaging host name (must match `connectNative()` in background.js).
-pub const HOST_NAME: &str = "com.purepath.companion";
+pub const HOST_NAME: &str = "com.oathlight.companion";
 
-/// Update URL used by the Chromium force-install policy. EMPTY until the
-/// extension is published / self-hosted. While empty, enforcement is DORMANT:
-/// detection & monitoring run, but no policy is written. Set this to
-/// `https://clients2.google.com/service/update2/crx` (Web Store) or a
-/// self-hosted update manifest URL at release time.
-pub const CHROMIUM_UPDATE_URL: &str = "";
+/// Update URL used by the Chromium force-install policy. Points at the update
+/// manifest the desktop app serves from localhost (see `update_server` in
+/// lib.rs); the port MUST match `UPDATE_SERVER_PORT` there and the codebase URL
+/// baked into `scripts/pack-extension.mjs`. Non-empty, so Chromium enforcement
+/// is LIVE. (Firefox/Gecko is intentionally still dormant — `FIREFOX_XPI_URL`
+/// below is empty while that browser is on hold.)
+pub const CHROMIUM_UPDATE_URL: &str = "http://127.0.0.1:17244/update_manifest.xml";
 
 /// Signed-XPI URL for the Firefox force-install policy. EMPTY until published
 /// on AMO / self-hosted. Same dormant-until-set behaviour.
@@ -162,6 +163,52 @@ pub const BROWSERS: &[BrowserDef] = &[
     },
 ];
 
+// ============================================================================
+// Evasion-browser detection (plan item 1.3)
+// ============================================================================
+
+/// Lowercase image names of browsers whose whole point on this machine would
+/// be *escaping* the extension: no enterprise-policy hive to force-install
+/// into (or the browser deliberately ignores one), not in the Web/AMO store
+/// pipeline we can force-install from, or — for Tor Browser specifically —
+/// built to route around network-level controls entirely.
+///
+/// This list is deliberately conservative and MUST stay that way: a false
+/// positive here doesn't just log a warning, it can outright kill (see
+/// `enforce_processes` in lib.rs, gated behind `block_unknown_browsers`)
+/// someone's real, legitimately-installed browser — a much worse failure
+/// mode than under-detecting one genuine evasion attempt. When in doubt,
+/// leave a browser off this list; `is_standard_install_path` below still
+/// catches a portable copy of anything we DO recognize.
+///
+/// Deliberately NOT included: Zen, Arc, and other Chromium/Firefox forks that
+/// can run our extension and talk to the native host like any supported
+/// browser — those aren't evasion, they're just browsers we haven't added a
+/// full `BrowserDef` for yet.
+pub const EVASION_BROWSERS: &[&str] = &[
+    "tor.exe",
+    "librewolf.exe",
+    "waterfox.exe",
+    "palemoon.exe",
+    "basilisk.exe",
+    "mullvadbrowser.exe",
+    "mullvad-browser.exe",
+    "floorp.exe",
+    "thorium.exe",
+];
+
+/// True when a (lowercased) exe path looks like a normal install location
+/// rather than a portable copy run from somewhere like Downloads or a USB
+/// drive. Used to flag a portable copy of a browser we otherwise recognize
+/// (see `EVASION_BROWSERS`'s doc comment on why that's still worth a
+/// conservative heads-up, even for a known browser).
+pub fn is_standard_install_path(path_lower: &str) -> bool {
+    path_lower.contains(r"\program files")
+        || path_lower.contains(r"\appdata\local")
+        || path_lower.contains(r"\appdata\roaming")
+        || path_lower.contains(r"\windowsapps")
+}
+
 /// Map a (lowercased) process image name to its browser definition.
 pub fn match_browser_process(proc_name_lower: &str) -> Option<&'static BrowserDef> {
     BROWSERS.iter().find(|b| {
@@ -181,10 +228,18 @@ pub fn browser_by_key(key: &str) -> Option<&'static BrowserDef> {
 
 /// All running process image names (lowercased), scanned once. Callers reuse
 /// this for both known-browser and custom-browser detection.
+///
+/// Called every monitor tick (every 3s, for the app's whole lifetime), so this
+/// uses `refresh_processes_specifics(ProcessRefreshKind::new())` instead of
+/// `refresh_processes()`: the latter also collects CPU usage, memory, disk
+/// I/O counters, and the exe path for every process on the system, none of
+/// which we read here — only the image name (always populated when
+/// enumerating processes). That's a lot of wasted per-tick work for a
+/// steady-state background poll.
 pub fn running_process_names() -> Vec<String> {
-    use sysinfo::System;
+    use sysinfo::{ProcessRefreshKind, System};
     let mut sys = System::new();
-    sys.refresh_processes();
+    sys.refresh_processes_specifics(ProcessRefreshKind::new());
     sys.processes()
         .values()
         .map(|p| p.name().to_lowercase())
@@ -209,18 +264,22 @@ pub fn detect_running_from(names: &[String]) -> Vec<&'static str> {
 /// Returns true if running is already known; otherwise probes the registry.
 #[cfg(target_os = "windows")]
 pub fn is_installed(def: &BrowserDef) -> bool {
+    // The `App Paths\<exe>` key must not merely EXIST — uninstalling a browser
+    // can leave the key behind empty (observed: Opera leaves an empty HKCU
+    // `App Paths\opera.exe` after removal). The old "key exists → installed"
+    // check then reported a ghost browser and wrote a force-install policy for
+    // one that's gone. Require the key to hold a REG_SZ that actually points at
+    // an executable still present on disk.
     for root in ["HKLM", "HKCU"] {
         let key = format!(
             r"{}\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{}",
             root, def.app_path_exe
         );
-        let ok = reg()
-            .args(["query", &key])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        if ok {
-            return true;
+        for (_, data) in read_reg_sz_values(&key) {
+            let p = data.trim().trim_matches('"');
+            if !p.is_empty() && Path::new(p).exists() {
+                return true;
+            }
         }
     }
     false
@@ -242,20 +301,20 @@ pub fn is_installed(_def: &BrowserDef) -> bool {
 pub fn write_manifests(dir: &Path, host_binary: &Path) -> std::io::Result<(PathBuf, PathBuf)> {
     std::fs::create_dir_all(dir)?;
 
-    let chromium_path = dir.join("com.purepath.companion.json");
+    let chromium_path = dir.join("com.oathlight.companion.json");
     let chromium = serde_json::json!({
         "name": HOST_NAME,
-        "description": "Pure Path Desktop Companion — Native Messaging Host",
+        "description": "Oath Light Desktop Companion — Native Messaging Host",
         "path": host_binary.to_string_lossy(),
         "type": "stdio",
         "allowed_origins": [ format!("chrome-extension://{}/", EXTENSION_ID) ]
     });
     std::fs::write(&chromium_path, serde_json::to_string_pretty(&chromium).unwrap())?;
 
-    let gecko_path = dir.join("com.purepath.companion.firefox.json");
+    let gecko_path = dir.join("com.oathlight.companion.firefox.json");
     let gecko = serde_json::json!({
         "name": HOST_NAME,
-        "description": "Pure Path Desktop Companion — Native Messaging Host",
+        "description": "Oath Light Desktop Companion — Native Messaging Host",
         "path": host_binary.to_string_lossy(),
         "type": "stdio",
         "allowed_extensions": [ GECKO_EXTENSION_ID ]
@@ -315,17 +374,49 @@ pub fn register_all_hosts(chromium_manifest: &Path, gecko_manifest: &Path) {
     }
 }
 
+/// Remove every native-messaging host registration we may have written, so an
+/// uninstall leaves no dangling pointer to a deleted host binary. Best-effort —
+/// mirrors `register_all_hosts` and includes the Chrome fallback key.
+#[cfg(target_os = "windows")]
+pub fn unregister_all_hosts() {
+    let delete_value = |subkey: &str| {
+        let full = format!(r"HKCU\{}\{}", subkey, HOST_NAME);
+        let _ = reg().args(["delete", &full, "/f"]).output();
+    };
+    for def in BROWSERS {
+        delete_value(def.nm_registry_subkey);
+    }
+    delete_value(r"SOFTWARE\Google\Chrome\NativeMessagingHosts");
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn unregister_all_hosts() {
+    let home = std::env::var("HOME").unwrap_or_default();
+    for def in BROWSERS {
+        let target = format!("{}/{}/{}.json", home, def.nm_unix_dir, HOST_NAME);
+        let _ = std::fs::remove_file(&target);
+    }
+}
+
 // ============================================================================
 // Force-install enforcement (gated — dormant until update URLs are set)
 // ============================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum EnforceOutcome {
-    /// No update URL configured yet (pre-release) — nothing written.
+    /// No update URL configured yet — nothing written. (Firefox while on hold.)
     Dormant,
-    /// Policy successfully written.
-    Enforced,
-    /// Attempted but failed (e.g. needs elevation).
+    /// Policy written to `HKLM` — a machine-wide hard lock the blocked user
+    /// cannot remove without elevation. Only reachable when the app itself runs
+    /// elevated (Stage 2). This is the strong outcome.
+    EnforcedMachine,
+    /// Policy written to `HKCU` because `HKLM` was refused (no elevation — the
+    /// Stage 1 default today). Real and effective — the browser greys out the
+    /// Remove button and reinstalls on removal — but the policy value lives in
+    /// the user's own hive, so a determined user with a shell can delete it
+    /// without a prompt. Surfaced honestly in the UI as "user-level".
+    EnforcedUser,
+    /// Attempted but neither hive accepted the write.
     Failed,
     /// Platform/engine not supported for enforcement. (macOS/Linux.)
     #[allow(dead_code)]
@@ -340,89 +431,225 @@ pub fn enforcement_configured(engine: Engine) -> bool {
     }
 }
 
+/// Whether this device can actually honor an **off-Web-Store** force-install.
+///
+/// Chrome and Edge deliberately ignore an `ExtensionInstallForcelist` entry that
+/// points at a self-hosted update URL (like ours) unless the machine is
+/// enterprise-managed: joined to an AD domain, joined to Entra/Azure AD, or
+/// enrolled in Chrome Browser Cloud Management. On a plain consumer machine the
+/// policy is accepted into the registry and shows in `chrome://policy`, but the
+/// extension is *silently never installed* — this is the exact anti-malware
+/// measure our self-hosted force-install runs into. (Web-Store-hosted
+/// force-installs are exempt and work unmanaged; self-hosted ones are not.)
+///
+/// We detect the precondition so the app can report the truth instead of a lock
+/// the browser will never apply, and so it doesn't leave a dead "managed by your
+/// organization" policy on machines where it can't work. Cached — it can't
+/// change within a session.
+#[cfg(target_os = "windows")]
+pub fn offstore_forceinstall_supported() -> bool {
+    use std::os::windows::process::CommandExt;
+    use std::sync::OnceLock;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        // Chrome Browser Cloud Management enrollment token (Chrome or Edge).
+        for base in [
+            r"HKLM\SOFTWARE\Policies\Google\Chrome",
+            r"HKLM\SOFTWARE\Policies\Microsoft\Edge",
+        ] {
+            let enrolled = reg()
+                .args(["query", base, "/v", "CloudManagementEnrollmentToken"])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if enrolled {
+                return true;
+            }
+        }
+        // AD domain / Entra (Azure AD) / enterprise join, via dsregcmd.
+        if let Ok(o) = std::process::Command::new("dsregcmd")
+            .arg("/status")
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+        {
+            let t = String::from_utf8_lossy(&o.stdout)
+                .to_ascii_uppercase()
+                .replace(' ', "");
+            if t.contains("AZUREADJOINED:YES")
+                || t.contains("DOMAINJOINED:YES")
+                || t.contains("ENTERPRISEJOINED:YES")
+            {
+                return true;
+            }
+        }
+        false
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn offstore_forceinstall_supported() -> bool {
+    false
+}
+
+/// Read the `REG_SZ` values of a registry key as `(value_name, data)` pairs via
+/// `reg query`. Empty vec if the key is absent or unreadable (reading `HKLM`
+/// policy keys is permitted for standard users even though *writing* is not, so
+/// this works to pick a non-colliding ordinal before an elevated write).
+#[cfg(target_os = "windows")]
+fn read_reg_sz_values(full_key: &str) -> Vec<(String, String)> {
+    let stdout = match reg().args(["query", full_key]).output() {
+        Ok(o) if o.status.success() => o.stdout,
+        _ => return Vec::new(),
+    };
+    let text = String::from_utf8_lossy(&stdout);
+    let mut vals = Vec::new();
+    for line in text.lines() {
+        // Value rows are indented ("    <name>    REG_SZ    <data>"); the key
+        // path header and any subkey paths sit at column 0 — skip those.
+        if line.is_empty() || !line.starts_with(char::is_whitespace) {
+            continue;
+        }
+        let trimmed = line.trim_start();
+        if let Some(pos) = trimmed.find("REG_SZ") {
+            let name = trimmed[..pos].trim().to_string();
+            let data = trimmed[pos + "REG_SZ".len()..].trim().to_string();
+            if !name.is_empty() {
+                vals.push((name, data));
+            }
+        }
+    }
+    vals
+}
+
+/// True when `data` is a forcelist entry for *our* extension (its `id;url` form
+/// starts with our ID).
+#[cfg(target_os = "windows")]
+fn is_our_forcelist_entry(data: &str) -> bool {
+    data.split(';').next() == Some(EXTENSION_ID)
+}
+
+/// Choose the `ExtensionInstallForcelist` value name to write under: reuse the
+/// one already holding our ID if present, otherwise the lowest positive ordinal
+/// not already taken. This avoids clobbering another managed extension's entry —
+/// the previous code hard-wrote value "1", which on a real enterprise machine
+/// could belong to someone else's mandatory extension.
+#[cfg(target_os = "windows")]
+fn pick_forcelist_value(full_key: &str) -> String {
+    let entries = read_reg_sz_values(full_key);
+    if let Some((name, _)) = entries.iter().find(|(_, data)| is_our_forcelist_entry(data)) {
+        return name.clone();
+    }
+    let used: std::collections::HashSet<u32> =
+        entries.iter().filter_map(|(n, _)| n.parse::<u32>().ok()).collect();
+    let mut n = 1u32;
+    while used.contains(&n) {
+        n += 1;
+    }
+    n.to_string()
+}
+
+/// If our force-install policy is **already** present, report which scope it's
+/// in (HKLM checked first, then HKCU) without writing anything. This lets the
+/// app correctly report a policy written by the elevated installer — or by a
+/// previous elevated run — instead of trying (and failing, unelevated) to
+/// re-write it and showing "failed".
+#[cfg(target_os = "windows")]
+pub fn policy_present(def: &BrowserDef) -> Option<EnforceOutcome> {
+    if def.engine != Engine::Chromium {
+        return None; // Gecko is on hold; nothing to detect.
+    }
+    for (root, strong) in [("HKLM", true), ("HKCU", false)] {
+        let key = format!(r"{}\{}\ExtensionInstallForcelist", root, def.policy_subkey);
+        if read_reg_sz_values(&key).iter().any(|(_, d)| is_our_forcelist_entry(d)) {
+            return Some(if strong {
+                EnforceOutcome::EnforcedMachine
+            } else {
+                EnforceOutcome::EnforcedUser
+            });
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn policy_present(_def: &BrowserDef) -> Option<EnforceOutcome> {
+    None
+}
+
 /// Write the force-install policy for `def` so a removed/disabled extension is
-/// reinstalled on the browser's next launch / policy refresh. Prefers HKLM
-/// (machine-wide, hard lock — the desktop app already runs elevated); falls
-/// back to HKCU. Dormant while the update URL is empty.
+/// reinstalled on the browser's next launch / policy refresh.
+///
+/// **Requires elevation.** The `Software\Policies` registry subtree is
+/// ACL-protected against standard users in **both** `HKLM` *and* `HKCU` — a
+/// non-elevated process cannot write there, so this returns `Failed` unless the
+/// app is running elevated. (An earlier design assumed an unelevated HKCU write
+/// would work; it does not. Getting the policy written therefore needs either an
+/// elevated install-time write or the SYSTEM service — see the plan.) When the
+/// policy already exists this returns early via `policy_present` and writes
+/// nothing.
 #[cfg(target_os = "windows")]
 pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
     if !enforcement_configured(def.engine) {
         return EnforceOutcome::Dormant;
     }
+    // Already set (e.g. by the elevated installer)? Report it, don't re-write.
+    if let Some(existing) = policy_present(def) {
+        return existing;
+    }
+
+    // (hive prefix, is this the strong machine-wide scope?)
+    const HIVES: [(&str, bool); 2] = [("HKLM", true), ("HKCU", false)];
 
     match def.engine {
         Engine::Chromium => {
             let entry = format!("{};{}", EXTENSION_ID, CHROMIUM_UPDATE_URL);
-            // ExtensionInstallForcelist is a list keyed by ordinal value names.
-            let mut ok = false;
-            for root in ["HKLM", "HKCU"] {
-                let key =
-                    format!(r"{}\{}\ExtensionInstallForcelist", root, def.policy_subkey);
-                let res = reg()
-                    .args([
-                        "add", &key, "/v", "1", "/t", "REG_SZ", "/d", &entry, "/f",
-                    ])
-                    .output();
-                if res.map(|o| o.status.success()).unwrap_or(false) {
-                    ok = true;
-                    break;
+            for (root, strong) in HIVES {
+                let key = format!(r"{}\{}\ExtensionInstallForcelist", root, def.policy_subkey);
+                let value = pick_forcelist_value(&key);
+                let ok = reg()
+                    .args(["add", &key, "/v", &value, "/t", "REG_SZ", "/d", &entry, "/f"])
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                if ok {
+                    return if strong {
+                        EnforceOutcome::EnforcedMachine
+                    } else {
+                        EnforceOutcome::EnforcedUser
+                    };
                 }
             }
-            if ok {
-                EnforceOutcome::Enforced
-            } else {
-                EnforceOutcome::Failed
-            }
+            EnforceOutcome::Failed
         }
         Engine::Gecko => {
-            // Firefox uses ExtensionSettings with installation_mode=force_installed.
-            let base = format!(
-                r"{}\ExtensionSettings\{}",
-                def.policy_subkey, GECKO_EXTENSION_ID
-            );
-            let mut ok = false;
-            for root in ["HKLM", "HKCU"] {
+            // KNOWN DEFECT (Firefox on hold — see Extension_Force_Install_Plan.md
+            // §7): Mozilla's `ExtensionSettings` Windows format is believed to be
+            // a single REG_SZ holding the whole JSON object, not the nested
+            // subkeys written here. Unreachable today (FIREFOX_XPI_URL is empty),
+            // so it never runs — fix this before taking Firefox off hold.
+            let base = format!(r"{}\ExtensionSettings\{}", def.policy_subkey, GECKO_EXTENSION_ID);
+            for (root, strong) in HIVES {
                 let key = format!(r"{}\{}", root, base);
                 let a = reg()
-                    .args([
-                        "add",
-                        &key,
-                        "/v",
-                        "installation_mode",
-                        "/t",
-                        "REG_SZ",
-                        "/d",
-                        "force_installed",
-                        "/f",
-                    ])
+                    .args(["add", &key, "/v", "installation_mode", "/t", "REG_SZ", "/d", "force_installed", "/f"])
                     .output()
                     .map(|o| o.status.success())
                     .unwrap_or(false);
                 let b = reg()
-                    .args([
-                        "add",
-                        &key,
-                        "/v",
-                        "install_url",
-                        "/t",
-                        "REG_SZ",
-                        "/d",
-                        FIREFOX_XPI_URL,
-                        "/f",
-                    ])
+                    .args(["add", &key, "/v", "install_url", "/t", "REG_SZ", "/d", FIREFOX_XPI_URL, "/f"])
                     .output()
                     .map(|o| o.status.success())
                     .unwrap_or(false);
                 if a && b {
-                    ok = true;
-                    break;
+                    return if strong {
+                        EnforceOutcome::EnforcedMachine
+                    } else {
+                        EnforceOutcome::EnforcedUser
+                    };
                 }
             }
-            if ok {
-                EnforceOutcome::Enforced
-            } else {
-                EnforceOutcome::Failed
-            }
+            EnforceOutcome::Failed
         }
     }
 }
@@ -435,3 +662,124 @@ pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
     // macOS/Linux managed-policy enforcement is out of scope for this pass.
     EnforceOutcome::Unsupported
 }
+
+/// Remove any force-install policy we may have written for `def`. Used when the
+/// user completes an uninstall so the extension is no longer pinned and can
+/// actually be removed. Best-effort and idempotent.
+///
+/// For Chromium it deletes **only** the forcelist value(s) whose data is our own
+/// entry — never a fixed ordinal — so a co-existing managed extension on the
+/// same machine is left untouched (mirrors the collision-safe write above).
+#[cfg(target_os = "windows")]
+pub fn remove_policy(def: &BrowserDef) {
+    match def.engine {
+        Engine::Chromium => {
+            for root in ["HKLM", "HKCU"] {
+                let key = format!(r"{}\{}\ExtensionInstallForcelist", root, def.policy_subkey);
+                for (name, data) in read_reg_sz_values(&key) {
+                    if is_our_forcelist_entry(&data) {
+                        let _ = reg().args(["delete", &key, "/v", &name, "/f"]).output();
+                    }
+                }
+            }
+        }
+        Engine::Gecko => {
+            for root in ["HKLM", "HKCU"] {
+                let key = format!(
+                    r"{}\{}\ExtensionSettings\{}",
+                    root, def.policy_subkey, GECKO_EXTENSION_ID
+                );
+                let _ = reg().args(["delete", &key, "/f"]).output();
+            }
+        }
+    }
+    // Also drop the DoH policy (1.2), so a completed uninstall leaves no
+    // "managed by your organization" DNS setting behind.
+    remove_dns_policy(def);
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn remove_policy(_def: &BrowserDef) {}
+
+// ============================================================================
+// DoH / DNS-over-HTTPS policy (plan item 1.2 layer 1)
+// ============================================================================
+//
+// Disabling browser DoH is what makes the system DNS filter (1.1) actually
+// contain a browser: a browser resolving names over its own DoH endpoint
+// never sends a plain UDP/TCP query to 127.0.0.1:53, so the resolver never
+// sees it. Turning DoH off forces the browser back onto the OS resolver —
+// which we've taken over. Unlike `enforce_policy`, this is deliberately NOT
+// gated on `CHROMIUM_UPDATE_URL`: it works today, pre-publication, because it
+// writes an ordinary policy value rather than force-installing an extension.
+
+/// Write the "disable DoH" policy for `def` — applied for every known browser
+/// while the DNS filter is on. Chromium hives get `DnsOverHttpsMode = "off"`
+/// (REG_SZ) directly under the existing `policy_subkey` (Chrome/Edge/Brave/
+/// Vivaldi/Opera all read it); Firefox gets a `DNSOverHTTPS` subkey with
+/// `Enabled = 0` (DWORD). Same `reg()` helper and same HKLM-then-HKCU
+/// fallback as `enforce_policy`, and the same "needs admin for HKLM, HKCU as
+/// a weaker fallback" reality — reported via the same `EnforceOutcome`.
+#[cfg(target_os = "windows")]
+pub fn enforce_dns_policy(def: &BrowserDef) -> EnforceOutcome {
+    const HIVES: [(&str, bool); 2] = [("HKLM", true), ("HKCU", false)];
+    match def.engine {
+        Engine::Chromium => {
+            for (root, strong) in HIVES {
+                let key = format!(r"{}\{}", root, def.policy_subkey);
+                let ok = reg()
+                    .args(["add", &key, "/v", "DnsOverHttpsMode", "/t", "REG_SZ", "/d", "off", "/f"])
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                if ok {
+                    return if strong { EnforceOutcome::EnforcedMachine } else { EnforceOutcome::EnforcedUser };
+                }
+            }
+            EnforceOutcome::Failed
+        }
+        Engine::Gecko => {
+            for (root, strong) in HIVES {
+                let key = format!(r"{}\{}\DNSOverHTTPS", root, def.policy_subkey);
+                let ok = reg()
+                    .args(["add", &key, "/v", "Enabled", "/t", "REG_DWORD", "/d", "0", "/f"])
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                if ok {
+                    return if strong { EnforceOutcome::EnforcedMachine } else { EnforceOutcome::EnforcedUser };
+                }
+            }
+            EnforceOutcome::Failed
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn enforce_dns_policy(_def: &BrowserDef) -> EnforceOutcome {
+    EnforceOutcome::Unsupported
+}
+
+/// Remove the "disable DoH" policy for `def`. Called when the DNS filter is
+/// turned off (the `dns.disable` weakening applies) and as part of
+/// `remove_policy` on sanctioned uninstall. Best-effort and idempotent.
+#[cfg(target_os = "windows")]
+pub fn remove_dns_policy(def: &BrowserDef) {
+    match def.engine {
+        Engine::Chromium => {
+            for root in ["HKLM", "HKCU"] {
+                let key = format!(r"{}\{}", root, def.policy_subkey);
+                let _ = reg().args(["delete", &key, "/v", "DnsOverHttpsMode", "/f"]).output();
+            }
+        }
+        Engine::Gecko => {
+            for root in ["HKLM", "HKCU"] {
+                let key = format!(r"{}\{}\DNSOverHTTPS", root, def.policy_subkey);
+                let _ = reg().args(["delete", &key, "/v", "Enabled", "/f"]).output();
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn remove_dns_policy(_def: &BrowserDef) {}

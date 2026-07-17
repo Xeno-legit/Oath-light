@@ -1,4 +1,4 @@
-/* Pure Path — popup (vanilla). Wires the new UI to the background blocklist APIs. */
+/* Oath Light — popup (vanilla). Wires the new UI to the background blocklist APIs. */
 
 const $ = (id) => document.getElementById(id);
 
@@ -10,7 +10,7 @@ const QUOTES = [
   { t: "We are what we repeatedly do. Excellence, then, is a habit.", a: "Aristotle" },
   { t: "You don't have to be great to start, but you have to start to be great.", a: "Zig Ziglar" },
   { t: "You are not your urges. You are the one who decides.", a: "Anonymous" },
-  { t: "Every clear choice is a vote for the person you're becoming.", a: "Pure Path" },
+  { t: "Every clear choice is a vote for the person you're becoming.", a: "Oath Light" },
 ];
 let qi = Math.floor(Math.random() * QUOTES.length);
 function renderQuote() {

@@ -1,4 +1,4 @@
-# Pure Path — Cross-Browser Integration & Watchdog
+# Oath Light — Cross-Browser Integration & Watchdog
 
 > How the desktop app connects to the extension, monitors every **running**
 > browser, and (post-release) keeps the extension installed.
@@ -15,7 +15,7 @@ of that system).
 ```
  ┌──────────────┐  connectNative   ┌────────────────┐  TCP 127.0.0.1:17243  ┌──────────────┐
  │  extension   │ ───────────────► │  native host   │ ───────────────────► │  desktop app │
- │ background.js│ ◄─────────────── │ pure-path-host │ ◄─────────────────── │  (Tauri/Rust)│
+ │ background.js│ ◄─────────────── │ oath-light-host │ ◄─────────────────── │  (Tauri/Rust)│
  └──────────────┘  stdin/stdout    └────────────────┘   length-prefixed JSON└──────────────┘
         (one host process per running browser)                                      │
                                                                           monitor loop (sysinfo)
@@ -55,7 +55,7 @@ host manifest's `allowed_origins`, so native messaging silently fails.
 
 - ID: `lknpaoecooklfjgenmjpkdkahgoofank` — the single source of truth is
   `EXTENSION_ID` in `src-tauri/src/browsers.rs`.
-- The private key is `desktop-app/purepath-extension-key.pem` (gitignored —
+- The private key is `desktop-app/oathlight-extension-key.pem` (gitignored —
   `*.pem`). **Keep it safe**: it's needed to self-host a CRX with this ID. The
   Chrome Web Store re-signs and manages its own key, but pinning `key` keeps the
   ID stable everywhere else.
@@ -70,10 +70,10 @@ host manifest's `allowed_origins`, so native messaging silently fails.
 and enforcement: **Chrome, Edge, Brave, Opera, Vivaldi, Chromium (Chromium
 engine) and Firefox (Gecko)**. Native-host manifests come in two flavors:
 
-- Chromium → `com.purepath.companion.json` with `allowed_origins`
+- Chromium → `com.oathlight.companion.json` with `allowed_origins`
   (`chrome-extension://<id>/`).
-- Gecko → `com.purepath.companion.firefox.json` with `allowed_extensions`
-  (`purepath@xeno-legit.github.io`).
+- Gecko → `com.oathlight.companion.firefox.json` with `allowed_extensions`
+  (`oathlight@xeno-legit.github.io`).
 
 Host registration is written broadly to every vendor's `NativeMessagingHosts`
 key on startup (a stray key for an absent browser is harmless). Monitoring and
@@ -109,7 +109,7 @@ elevated) and falls back to `HKCU`.
    `EXTENSION_ID`. Set `CHROMIUM_UPDATE_URL =
    "https://clients2.google.com/service/update2/crx"`.
    - (Self-host alternative: host `updates.xml` + signed `.crx` built with
-     `purepath-extension-key.pem`, and point `CHROMIUM_UPDATE_URL` at it.)
+     `oathlight-extension-key.pem`, and point `CHROMIUM_UPDATE_URL` at it.)
 2. **Edge Add-ons / Brave / Opera / Vivaldi**: all honor the Chromium
    force-list with the Web Store update URL (Edge also has its own store if you
    want a native listing).

@@ -28,10 +28,17 @@ pub struct ProfileExt {
     pub version: String,
 }
 
-const CACHE_TTL: Duration = Duration::from_secs(8);
+const CACHE_TTL: Duration = Duration::from_secs(30);
 
 /// Cached per-browser profile read (prefs files are large-ish; don't parse them
 /// every monitor tick). `None` = this browser's data couldn't be located.
+///
+/// 30s trades off extension-removal detection latency (worst case, ≤30s
+/// before we notice the extension is gone) against steady-state cost: these
+/// are multi-MB Chromium "Secure Preferences"/"Preferences" JSON files, and at
+/// the old 8s TTL they were re-parsed roughly 4x as often for no benefit — 30s
+/// is still far below the uninstall-friction cool-off timescale (minutes to
+/// hours), so it costs us nothing that actually matters for tamper resistance.
 pub fn cached_profiles(def: &BrowserDef) -> Option<Vec<ProfileExt>> {
     static CACHE: OnceLock<Mutex<HashMap<String, (Instant, Option<Vec<ProfileExt>>)>>> =
         OnceLock::new();
@@ -145,21 +152,44 @@ fn read_profile_ext(profile_dir: &Path, name: &str) -> Option<ProfileExt> {
         };
         read_any = true;
         if let Some(entry) = find_ext_entry(&v) {
-            // state: 0 = disabled, 1 = enabled. disable_reasons must be empty.
-            let state = entry.get("state").and_then(|s| s.as_i64()).unwrap_or(1);
-            let reasons_empty = entry
-                .get("disable_reasons")
-                .and_then(|d| d.as_array())
-                .map(|a| a.is_empty())
-                .unwrap_or(true);
-            let version = entry
+            // "Installed" needs evidence of a real unpacked payload, not just a
+            // settings entry: once the ExtensionInstallForcelist policy is
+            // written, Chromium pre-creates a bare `settings.<id>` stub (often
+            // literally `{}`) before — or without ever — downloading the CRX.
+            // Surveyed real profiles (Chrome ~M137, Edge) to pin the schema:
+            //   * `manifest.version` exists only after a real install (store,
+            //     force-install download, or dev "Load unpacked" — all carry a
+            //     full manifest). The stub has no `manifest` at all, so this is
+            //     the discriminator. The bare top-level `version` is kept only
+            //     as a display fallback — never proof of install.
+            //   * Modern Chrome no longer writes `state` (enabled/disabled is
+            //     `disable_reasons` alone); Edge still writes 1/0. So absent
+            //     state must count as enabled, and only an explicit 0 vetoes.
+            //   * `disable_reasons` is an array in new schema but an int
+            //     bitmask in old-schema Edge — handle both; unknown shapes read
+            //     as disabled (for a blocker, a false "installed" is the worse
+            //     failure).
+            let disabled_by_state =
+                entry.get("state").and_then(|s| s.as_i64()) == Some(0);
+            let reasons_empty = match entry.get("disable_reasons") {
+                None => true,
+                Some(d) => d
+                    .as_array()
+                    .map(|a| a.is_empty())
+                    .or_else(|| d.as_i64().map(|n| n == 0))
+                    .unwrap_or(false),
+            };
+            let manifest_version = entry
                 .get("manifest")
                 .and_then(|m| m.get("version"))
                 .and_then(|x| x.as_str())
+                .filter(|s| !s.is_empty());
+            let has_real_payload = manifest_version.is_some();
+            let version = manifest_version
                 .or_else(|| entry.get("version").and_then(|x| x.as_str()))
                 .unwrap_or("")
                 .to_string();
-            found = Some((state == 1 && reasons_empty, version));
+            found = Some((has_real_payload && !disabled_by_state && reasons_empty, version));
             break;
         }
     }

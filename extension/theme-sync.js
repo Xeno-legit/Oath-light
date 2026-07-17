@@ -10,7 +10,7 @@
  */
 (function () {
   const THEMES = ['light', 'dark'];
-  const STYLES = ['aurora', 'lagoon', 'dawn', 'midnight', 'forest', 'ember'];
+  const STYLES = ['aurora', 'lagoon', 'dawn', 'midnight', 'forest', 'ember', 'noir'];
   const DEFAULTS = { theme: 'dark', style: 'aurora' };
 
   const pick = (v, allowed, fb) => (allowed.includes(v) ? v : fb);

@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = ["core", "src-tauri", "guardian", "native-host", "dns"]
+# `dns` (plan item 1.1, oathlight-dns): a dependency-free DNS forwarding proxy
+# (std::net only, plus oathlight-core) — see dns/src/lib.rs for the module map.
+
+# Cargo silently ignores `[profile.*]` tables declared in a non-root workspace
+# member (with a build-time warning) — profile config is workspace-global and
+# must live only at the root. This is src-tauri's release profile: the app
+# crate is by far the biggest binary in the workspace (~10MB of embedded
+# blocklists plus the ORT runtime), so a smaller binary means less disk I/O at
+# login, which is part of what Windows' startup-impact score measures.
+# opt-level stays at its default (3) — image preprocessing/inference for the
+# NSFW layer wants it — and panic stays at the default (unwind): abort would
+# change failure behavior for no meaningful size win on a binary dominated by
+# embedded data.
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"
+
+# guardian (oathlightguard) and native-host (oath-light-host) are tiny
+# throwaway-simple binaries (pure std/FFI watchdog; a thin native-messaging
+# shim) and want `opt-level = "s"` for minimum size. Per-package profile
+# overrides only support opt-level/codegen-units/debug/overflow-checks/debug-
+# assertions — lto/strip/panic are workspace-global and can't be set per
+# package, so both crates now inherit the workspace's `lto = "thin"` +
+# `strip = "symbols"` instead of their previous standalone `lto = true`
+# (fat LTO) + `strip = true`. `strip = "symbols"` is equivalent to `strip =
+# true`, so the only real behavior change is thin vs. fat LTO — a small,
+# accepted deviation in exchange for one shared profile block instead of three.
+[profile.release.package.oathlightguard]
+opt-level = "s"
+
+[profile.release.package.oath-light-host]
+opt-level = "s"

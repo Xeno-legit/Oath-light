@@ -1,0 +1,452 @@
+[
+  {
+    "host": "pornhub.com",
+    "expect": "block",
+    "note": "pornhub.com → hit"
+  },
+  {
+    "host": "videos.xvideos.com",
+    "expect": "block",
+    "note": "subdomain still hits"
+  },
+  {
+    "host": "sex4arabs.com",
+    "expect": "block",
+    "note": "the canonical \"list misses it, keyword catches it\" case"
+  },
+  {
+    "host": "chaturbate.com",
+    "expect": "block",
+    "note": "chaturbate.com → hit"
+  },
+  {
+    "host": "sharmota.tv",
+    "expect": "block",
+    "note": "Arabizi multilingual stem"
+  },
+  {
+    "host": "caonima.cc",
+    "expect": "block",
+    "note": "pinyin multilingual stem"
+  },
+  {
+    "host": "foo.xxx",
+    "expect": "block",
+    "note": "foo.xxx → hit"
+  },
+  {
+    "host": "bar.porn",
+    "expect": "block",
+    "note": "bar.porn → hit"
+  },
+  {
+    "host": "baz.adult",
+    "expect": "block",
+    "note": "baz.adult → hit"
+  },
+  {
+    "host": "proxy.xxxiii.com",
+    "expect": "clean",
+    "note": "xxxiii (roman numeral) is not the .xxx TLD"
+  },
+  {
+    "host": "bigtits.com",
+    "expect": "block",
+    "note": "bigtits.com → hit"
+  },
+  {
+    "host": "asshole.net",
+    "expect": "block",
+    "note": "asshole.net → hit"
+  },
+  {
+    "host": "wetpussy.xxx",
+    "expect": "block",
+    "note": "wetpussy.xxx → hit"
+  },
+  {
+    "host": "cumulative.com",
+    "expect": "clean",
+    "note": "cum is compound-only"
+  },
+  {
+    "host": "document.net",
+    "expect": "clean",
+    "note": "cum is compound-only"
+  },
+  {
+    "host": "classroom.com",
+    "expect": "clean",
+    "note": "ass is compound-only"
+  },
+  {
+    "host": "octopus.energy",
+    "expect": "clean",
+    "note": "pus(sy) must not trip — real UK energy company"
+  },
+  {
+    "host": "platypus.com",
+    "expect": "clean",
+    "note": "platypus.com → clean"
+  },
+  {
+    "host": "massachusetts.gov",
+    "expect": "clean",
+    "note": "massachusetts.gov → clean"
+  },
+  {
+    "host": "sex.com",
+    "expect": "block",
+    "note": "guarded root standalone → block"
+  },
+  {
+    "host": "anal.com",
+    "expect": "block",
+    "note": "anal.com → hit"
+  },
+  {
+    "host": "milf.com",
+    "expect": "block",
+    "note": "milf.com → hit"
+  },
+  {
+    "host": "rape.org",
+    "expect": "block",
+    "note": "rape.org → hit"
+  },
+  {
+    "host": "cunt.net",
+    "expect": "block",
+    "note": "cunt.net → hit"
+  },
+  {
+    "host": "essex.gov.uk",
+    "expect": "clean",
+    "note": "sex → essex (whitelist-covered)"
+  },
+  {
+    "host": "www.essex.ac.uk",
+    "expect": "clean",
+    "note": "University of Essex"
+  },
+  {
+    "host": "sussex.ac.uk",
+    "expect": "clean",
+    "note": "sussex.ac.uk → clean"
+  },
+  {
+    "host": "middlesex.edu",
+    "expect": "clean",
+    "note": "middlesex.edu → clean"
+  },
+  {
+    "host": "analytics.google.com",
+    "expect": "clean",
+    "note": "anal → analytics"
+  },
+  {
+    "host": "canalplus.com",
+    "expect": "clean",
+    "note": "anal → canal covers it"
+  },
+  {
+    "host": "peacock.com",
+    "expect": "clean",
+    "note": "cock → peacock (NBC streaming)"
+  },
+  {
+    "host": "cockpit.io",
+    "expect": "clean",
+    "note": "cockpit.io → clean"
+  },
+  {
+    "host": "hitchcock.com",
+    "expect": "clean",
+    "note": "hitchcock.com → clean"
+  },
+  {
+    "host": "dickens.org",
+    "expect": "clean",
+    "note": "dick → Dickens"
+  },
+  {
+    "host": "grapefruit.com",
+    "expect": "clean",
+    "note": "rape → grapefruit"
+  },
+  {
+    "host": "scunthorpe.gov.uk",
+    "expect": "clean",
+    "note": "the original Scunthorpe problem"
+  },
+  {
+    "host": "milford.com",
+    "expect": "clean",
+    "note": "milf → Milford"
+  },
+  {
+    "host": "aigirlfriend.com",
+    "expect": "block",
+    "note": "aigirlfriend.com → hit"
+  },
+  {
+    "host": "mygirlfriendai.app",
+    "expect": "block",
+    "note": "girlfriendai inside a longer host still hits"
+  },
+  {
+    "host": "virtualgirlfriend.io",
+    "expect": "block",
+    "note": "virtualgirlfriend.io → hit"
+  },
+  {
+    "host": "aiboyfriend.chat",
+    "expect": "block",
+    "note": "aiboyfriend.chat → hit"
+  },
+  {
+    "host": "virtualboyfriend.app",
+    "expect": "block",
+    "note": "virtualboyfriend.app → hit"
+  },
+  {
+    "host": "nsfwgpt.xyz",
+    "expect": "block",
+    "note": "nsfwgpt.xyz → hit"
+  },
+  {
+    "host": "gptnsfw.com",
+    "expect": "block",
+    "note": "gptnsfw.com → hit"
+  },
+  {
+    "host": "aiwaifu.chat",
+    "expect": "block",
+    "note": "aiwaifu.chat → hit"
+  },
+  {
+    "host": "waifuai.net",
+    "expect": "block",
+    "note": "waifuai.net → hit"
+  },
+  {
+    "host": "lewdai.app",
+    "expect": "block",
+    "note": "lewdai.app → hit"
+  },
+  {
+    "host": "nudeai.io",
+    "expect": "block",
+    "note": "nudeai.io → hit"
+  },
+  {
+    "host": "ainude.top",
+    "expect": "block",
+    "note": "ainude.top → hit"
+  },
+  {
+    "host": "hentaiai.com",
+    "expect": "block",
+    "note": "also reachable via the bare hentai stem — pinned as a compound too"
+  },
+  {
+    "host": "aicompanion.com",
+    "expect": "block",
+    "note": "guarded root aicompanion standalone → block"
+  },
+  {
+    "host": "myaicompanion.app",
+    "expect": "block",
+    "note": "aicompanion inside an unexcused longer host → block"
+  },
+  {
+    "host": "bonsaicompanion.com",
+    "expect": "clean",
+    "note": "bonsai + companion (gardening) — whitelist trap"
+  },
+  {
+    "host": "samuraicompanion.com",
+    "expect": "clean",
+    "note": "samurai + companion (game guide) — whitelist trap"
+  },
+  {
+    "host": "acaicompanion.com",
+    "expect": "clean",
+    "note": "acai + companion (nutrition) — whitelist trap"
+  },
+  {
+    "host": "tavernaithaki.com",
+    "expect": "clean",
+    "note": "Taverna Ithaki — real Greek restaurant name containing \"tavernai\""
+  },
+  {
+    "host": "tavernaithaki.gr",
+    "expect": "clean",
+    "note": "tavernaithaki.gr → clean"
+  },
+  {
+    "host": "tavern.com",
+    "expect": "clean",
+    "note": "bare tavern is not a keyword"
+  },
+  {
+    "host": "openai.com",
+    "expect": "clean",
+    "note": "legit AI tooling must not keyword-block"
+  },
+  {
+    "host": "companionlife.com",
+    "expect": "clean",
+    "note": "bare \"companion\" is deliberately NOT a root — real insurance brand"
+  },
+  {
+    "host": "reputable.com",
+    "expect": "clean",
+    "note": "puta → reputable"
+  },
+  {
+    "host": "computation.org",
+    "expect": "clean",
+    "note": "puta → computation"
+  },
+  {
+    "host": "grandiose.com",
+    "expect": "clean",
+    "note": "randi → grandiose"
+  },
+  {
+    "host": "parachute.com",
+    "expect": "clean",
+    "note": "chut → parachute"
+  },
+  {
+    "host": "chutney.co.uk",
+    "expect": "clean",
+    "note": "chutney.co.uk → clean"
+  },
+  {
+    "host": "trapezoid.com",
+    "expect": "clean",
+    "note": "rape → trapezoid"
+  },
+  {
+    "host": "cockatiel-care.com",
+    "expect": "clean",
+    "note": "cock → cockatiel"
+  },
+  {
+    "host": "kundera-books.com",
+    "expect": "clean",
+    "note": "kunda → Milan Kundera"
+  },
+  {
+    "host": "mobydick.com",
+    "expect": "clean",
+    "note": "dick → Moby-Dick"
+  },
+  {
+    "host": "sexsmith.ca",
+    "expect": "clean",
+    "note": "sex → real Alberta town"
+  },
+  {
+    "host": "excluder.com",
+    "expect": "clean",
+    "note": "luder (demoted-strong) → excluder"
+  },
+  {
+    "host": "tittensor.co.uk",
+    "expect": "clean",
+    "note": "titten → Staffordshire village"
+  },
+  {
+    "host": "cockermouth.gov.uk",
+    "expect": "clean",
+    "note": "cock → covered by \"cocker\""
+  },
+  {
+    "host": "clitheroe.gov.uk",
+    "expect": "clean",
+    "note": "no stem at all — real Lancashire town"
+  },
+  {
+    "host": "penistone.gov.uk",
+    "expect": "clean",
+    "note": "no stem at all — real town"
+  },
+  {
+    "host": "arsenal.com",
+    "expect": "clean",
+    "note": "no \"anal\" substring in arsenal"
+  },
+  {
+    "host": "github.com",
+    "expect": "clean",
+    "note": "github.com → clean"
+  },
+  {
+    "host": "wikipedia.org",
+    "expect": "clean",
+    "note": "wikipedia.org → clean"
+  },
+  {
+    "host": "nofap.com",
+    "expect": "clean",
+    "note": "recovery resource — must never be blocked"
+  },
+  {
+    "host": "furaffinity.net",
+    "expect": "clean",
+    "note": "graylist, not keyword-blocked"
+  },
+  {
+    "host": "example.com",
+    "expect": "clean",
+    "note": "example.com → clean"
+  },
+  {
+    "host": "p0rnhub.com",
+    "expect": "block",
+    "note": "0→o"
+  },
+  {
+    "host": "s3x.com",
+    "expect": "block",
+    "note": "3→e → sex"
+  },
+  {
+    "host": "h3nta1.tv",
+    "expect": "block",
+    "note": "hentai"
+  },
+  {
+    "host": "xh4mster.com",
+    "expect": "block",
+    "note": "4→a → xhamster"
+  },
+  {
+    "host": "e55ex.com",
+    "expect": "clean",
+    "note": "leet → essex must stay covered"
+  },
+  {
+    "host": "cl4ssic.com",
+    "expect": "clean",
+    "note": "leet must not create new collisions"
+  },
+  {
+    "host": "xn--sex-nfd.com",
+    "expect": "block",
+    "note": "punycode for \"sexх\" (trailing Cyrillic kha) — Latin \"sex\" already hits before folding"
+  },
+  {
+    "host": "xn--m1abbbg.com",
+    "expect": "block",
+    "note": "punycode-encoded Cyrillic \"порно\" (porno), as a browser delivers url.hostname → hit"
+  },
+  {
+    "host": "xn--fiqs8s.com",
+    "expect": "clean",
+    "note": "punycode-encoded Chinese \"中国\" (China), as a browser delivers url.hostname → must stay clean"
+  }
+]

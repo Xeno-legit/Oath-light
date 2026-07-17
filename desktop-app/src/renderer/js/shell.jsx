@@ -2,6 +2,7 @@
 
 const NAV = [
 { id: 'overview', label: 'Overview', icon: IconGrid },
+{ id: 'monitor', label: 'AI Monitor', icon: IconSearch },
 { id: 'blocklist', label: 'Blocklist', icon: IconShield },
 { id: 'blocking', label: 'Blocking Settings', icon: IconSliders },
 { id: 'mentor', label: 'Personal Mentor', icon: IconChat },
@@ -32,7 +33,8 @@ function TitleBar({ s }) {
     <div className="titlebar">
       <div className="tl-brand" data-tauri-drag-region>
         <span className="tl-logo"><Logo size={18} /></span>
-        <span className="tl-title">Pure Path</span>
+        <span className="tl-title">Oath Light</span>
+        <span className="beta-badge" title="Open beta build — features are still in testing and may change or misbehave.">BETA</span>
       </div>
       <div className="tl-drag" data-tauri-drag-region style={{ flex: 1, alignSelf: 'stretch' }} />
       <div className="win-ctrls">
@@ -56,7 +58,7 @@ function Sidebar({ s, go }) {
       <div className="brand" onClick={() => go('home')} title="Home">
         <div className="brand-logo"><Logo size={34} /></div>
         <div>
-          <div className="brand-name">Pure Path</div>
+          <div className="brand-name">Oath Light</div>
           <div className="brand-sub">Day {s.streak}</div>
         </div>
       </div>
@@ -70,6 +72,17 @@ function Sidebar({ s, go }) {
 
           </button>
         )}
+      </nav>
+
+      {/* Panic / SOS (5.1) — deliberately its own section, always visible,
+          never buried in the page list. Also reachable from the tray item,
+          Ctrl+Shift+Space, and the extension's blocked page. */}
+      <div className="nav-label" style={{ marginTop: 16 }}>Support</div>
+      <nav className="nav">
+        <button className={'nav-item nav-sos' + (s.page === 'panic' ? ' active' : '')} onClick={() => go('panic')}>
+          <IconHeart />
+          <span>SOS — I need help</span>
+        </button>
       </nav>
 
       <div className="sidebar-foot">
@@ -90,7 +103,7 @@ function Sidebar({ s, go }) {
 /* ---------- HUB MENU (starting page) ---------- */
 const HUB_CARDS = [
 { id: 'overview', icon: IconGrid, title: 'Overview', desc: 'Your streak, progress and daily intention at a glance.', stat: (s) => `Day ${s.streak}` },
-{ id: 'blocklist', icon: IconShield, title: 'Blocklist', desc: 'Check what gets blocked — blacklist, graylist and custom sites.', stat: (s) => `${s.blocklist.blacklistDomains} domains` },
+{ id: 'blocklist', icon: IconShield, title: 'Blocklist', desc: 'Check what gets blocked — blacklist, graylist and custom sites.', stat: () => 'Blocklist' },
 { id: 'blocking', icon: IconSliders, title: 'Blocking Settings', desc: 'Strictness, schedules and tamper protection.', stat: (s) => 'Manage settings' },
 { id: 'mentor', icon: IconChat, title: 'Personal Mentor', desc: 'A calm companion for the hard moments. Always here.', stat: () => 'Coming soon' },
 { id: 'tips', icon: IconSpark, title: 'Tips & Questions', desc: 'Questions you might encounter, and tips to guide you.', stat: () => '15 items' },
@@ -101,8 +114,19 @@ function HubMenu({ s, go }) {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const name = s.profile.name.split(' ')[0];
+  // Live domain count for the Blocklist card's stat chip (null until loaded /
+  // outside Tauri) — guarded so a not-yet-wired hook can't crash the hub.
+  const counts = (window.useBlocklistCounts || (() => null))();
   return (
     <div className="page hub" style={{ maxWidth: 1040 }}>
+      <div className="beta-banner fade-up" role="note">
+        <span className="beta-banner-tag">OPEN BETA</span>
+        <span className="beta-banner-text">
+          You're running an early public build of Oath Light. It's still in active
+          testing — some protection may be incomplete and things can change or break.
+          Please don't rely on it as your only safeguard yet.
+        </span>
+      </div>
       <div className="hub-hero fade-up">
         <div className="hub-mark"><Logo size={56} /></div>
         <div className="eyebrow" style={{ marginTop: 22 }}>{greeting}, {name}</div>
@@ -117,17 +141,25 @@ function HubMenu({ s, go }) {
       </div>
 
       <div className="grid hub-grid stagger" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginTop: 40 }}>
-        {HUB_CARDS.map((c) =>
-        <button key={c.id} className="card hover hub-card" onClick={() => go(c.id)}>
-            <div className="hub-card-ico"><c.icon size={22} /></div>
-            <div className="hub-card-title">{c.title}</div>
-            <div className="hub-card-desc">{c.desc}</div>
-            <div className="hub-card-foot">
-              <span className="chip">{c.stat(s)}</span>
-              <IconChevron size={18} className="hub-arrow" />
-            </div>
-          </button>
-        )}
+        {HUB_CARDS.map((c) => {
+          // Blocklist's stat is a live count sourced from the real backend
+          // list, not the card's own stat() fn — every other card keeps the
+          // plain stat-function architecture.
+          const stat = c.id === 'blocklist' ?
+          counts ? `${counts.domain_count.toLocaleString()} domains` : 'View list' :
+          c.stat(s);
+          return (
+            <button key={c.id} className="card hover hub-card" onClick={() => go(c.id)}>
+              <div className="hub-card-ico"><c.icon size={22} /></div>
+              <div className="hub-card-title">{c.title}</div>
+              <div className="hub-card-desc">{c.desc}</div>
+              <div className="hub-card-foot">
+                <span className="chip">{stat}</span>
+                <IconChevron size={18} className="hub-arrow" />
+              </div>
+            </button>);
+
+        })}
       </div>
     </div>);
 

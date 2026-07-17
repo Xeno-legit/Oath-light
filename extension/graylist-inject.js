@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════════════════
-// Pure Path — Graylist V2  (MAIN-world API / network-layer interception)
+// Oath Light — Graylist V2  (MAIN-world API / network-layer interception)
 // ════════════════════════════════════════════════════════════════════════════
 //
 // WHY THIS EXISTS
@@ -33,8 +33,8 @@
   'use strict';
 
   // Guard against double-injection (SPA re-inject, multiple frames sharing a realm).
-  if (window.__purePathGraylistV2) return;
-  window.__purePathGraylistV2 = true;
+  if (window.__oathLightGraylistV2) return;
+  window.__oathLightGraylistV2 = true;
 
   // Strictness, passed down from the isolated content script via the <script> tag's
   // dataset. 'standard' = best-effort in-site filtering (current behaviour); 'strict'
@@ -449,8 +449,8 @@
   // We can't touch chrome.storage from the MAIN world, so hand the count to the
   // isolated content script via postMessage; it forwards to the background worker.
   function report(id, n) {
-    try { window.postMessage({ __purePath: 'graylist-filter', site: id, count: n }, '*'); } catch (_) {}
-    try { console.debug('[Pure Path] Graylist V2 stripped', n, 'NSFW item(s) from', id); } catch (_) {}
+    try { window.postMessage({ __oathLight: 'graylist-filter', site: id, count: n }, '*'); } catch (_) {}
+    try { console.debug('[Oath Light] Graylist V2 stripped', n, 'NSFW item(s) from', id); } catch (_) {}
   }
 
   // §3.3 — some graylist feeds arrive with a non-JSON content-type (text/html,

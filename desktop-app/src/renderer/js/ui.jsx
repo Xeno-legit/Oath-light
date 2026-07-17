@@ -10,7 +10,7 @@ function Logo({ size = 21 }) {
       height={size}
       className={'logo-img' + (anim === 'fwd' ? ' logo-spin-fwd' : anim === 'back' ? ' logo-spin-back' : '')}
       style={{ display: 'block', objectFit: 'contain' }}
-      alt="Pure Path logo"
+      alt="Oath Light logo"
       onMouseEnter={() => { setAnim('fwd'); }}
       onMouseLeave={() => { setAnim('back'); }}
       onAnimationEnd={() => { if (anim === 'back') setAnim(''); }}
@@ -18,8 +18,15 @@ function Logo({ size = 21 }) {
   );
 }
 
-function Switch({ on, onClick }) {
-  return <button className={'switch' + (on ? ' on' : '')} onClick={onClick} role="switch" aria-checked={on} />;
+function Switch({ on, onClick, disabled }) {
+  return (
+    <button
+      className={'switch' + (on ? ' on' : '')}
+      onClick={disabled ? undefined : onClick}
+      role="switch"
+      aria-checked={on}
+      disabled={!!disabled} />);
+
 }
 
 function Segmented({ value, options, onChange }) {
@@ -123,4 +130,110 @@ function Ring({ value, size = 168, stroke = 12, children }) {
   );
 }
 
-Object.assign(window, { Logo, Switch, Segmented, AreaChart, Ring });
+/* PasswordGate — the one modal every gated weakening (4.2) funnels through.
+ * Invisible until `window.PPAuth.acquire()` actually needs a password: on
+ * mount it registers `window.__ppAuthPrompt = () => new Promise(...)`, which
+ * `acquire()` calls and awaits. There is deliberately no Rust-side trust
+ * placed in anything this component does — the real gate is
+ * `auth::require_auth` in lib.rs; this is purely the UI for collecting the
+ * password and turning it into a verified session token via
+ * `PPAuth.verify()`. See tauri-bridge.jsx's `PPAuth.acquire()` doc comment
+ * for the full contract (resolve with a token, or reject `Error('cancelled')`
+ * on dismiss). */
+function PasswordGate() {
+  const [open, setOpen] = React.useState(false);
+  const [pw, setPw] = React.useState('');
+  const [err, setErr] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  // The in-flight prompt's resolve/reject, captured when `__ppAuthPrompt` is
+  // called — kept in a ref (not state) since it's only ever read from event
+  // handlers, never rendered.
+  const waiter = React.useRef(null);
+  const inputRef = React.useRef(null);
+
+  React.useEffect(() => {
+    window.__ppAuthPrompt = () => new Promise((resolve, reject) => {
+      // A second concurrent prompt (rare — two gated actions racing) just
+      // cancels the first one rather than stacking modals; the first
+      // caller's `acquire()` sees a 'cancelled' rejection and aborts.
+      if (waiter.current) waiter.current.reject(new Error('cancelled'));
+      waiter.current = { resolve, reject };
+      setPw('');
+      setErr('');
+      setOpen(true);
+    });
+    return () => { delete window.__ppAuthPrompt; };
+  }, []);
+
+  React.useEffect(() => {
+    if (open && inputRef.current) inputRef.current.focus();
+  }, [open]);
+
+  const close = (rejectErr) => {
+    setOpen(false);
+    setBusy(false);
+    if (waiter.current) {
+      if (rejectErr) waiter.current.reject(rejectErr); else waiter.current.resolve();
+      waiter.current = null;
+    }
+  };
+
+  const cancel = () => close(new Error('cancelled'));
+
+  const unlock = () => {
+    if (!pw || busy) return;
+    setBusy(true);
+    setErr('');
+    window.PPAuth.verify(pw).then((token) => {
+      setOpen(false);
+      setBusy(false);
+      if (waiter.current) { waiter.current.resolve(token); waiter.current = null; }
+    }).catch((e) => {
+      // Wrong password: re-try in place, same modal, cleared field — never
+      // treated as a cancel (that's only the explicit Cancel button / Esc).
+      setBusy(false);
+      setPw('');
+      setErr((e && e.message) ? e.message : 'Wrong password.');
+      if (inputRef.current) inputRef.current.focus();
+    });
+  };
+
+  if (!open) return null;
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(0,0,0,.45)',
+      }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) cancel(); }}
+    >
+      <div className="card" style={{ width: 360, maxWidth: '90vw', padding: 24 }}>
+        <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Enter your master password</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16, lineHeight: 1.5 }}>
+          This change weakens Oath Light's protection, so it needs your master password first.
+        </div>
+        <input
+          ref={inputRef}
+          type="password"
+          className="input"
+          placeholder="Master password"
+          value={pw}
+          disabled={busy}
+          onChange={(e) => setPw(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') unlock(); if (e.key === 'Escape') cancel(); }}
+        />
+        {err && <div style={{ fontSize: 12.5, color: '#ef4444', marginTop: 8 }}>{err}</div>}
+        <div className="row" style={{ gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
+          <button className="btn btn-ghost btn-sm" disabled={busy} onClick={cancel}>Cancel</button>
+          <button className="btn btn-primary btn-sm" disabled={busy || !pw} onClick={unlock}>
+            {busy ? 'Checking…' : 'Unlock'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { Logo, Switch, Segmented, AreaChart, Ring, PasswordGate });

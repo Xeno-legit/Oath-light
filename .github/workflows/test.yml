@@ -1,91 +1,147 @@
-name: Test Extension
+name: Test
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, 'phase*/**' ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main ]
 
 jobs:
-  test:
+  extension:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v3
-    
+    - uses: actions/checkout@v4
+
     - name: Validate manifest.json
       run: |
-        if ! jq empty manifest.json 2>/dev/null; then
-          echo "manifest.json is not valid JSON"
+        if ! jq empty extension/manifest.json 2>/dev/null; then
+          echo "extension/manifest.json is not valid JSON"
           exit 1
         fi
-        echo "✅ manifest.json is valid"
-    
+        echo "manifest.json is valid"
+
     - name: Validate blocklists
       run: |
-        if ! jq empty blocklists/domains.json 2>/dev/null; then
-          echo "domains.json is not valid JSON"
-          exit 1
-        fi
-        if ! jq empty blocklists/keywords.json 2>/dev/null; then
-          echo "keywords.json is not valid JSON"
-          exit 1
-        fi
-        echo "✅ Blocklists are valid"
-    
-    - name: Check file structure
-      run: |
-        required_files=(
-          "manifest.json"
-          "background.js"
-          "content.js"
-          "popup.html"
-          "popup.js"
-          "setup.html"
-          "setup.js"
-          "blocked.html"
-          "blocked.js"
-          "blocklists.html"
-          "blocklists.js"
-          "blocklists/domains.json"
-          "blocklists/keywords.json"
-          "README.md"
-          "LICENSE"
-        )
-        
-        for file in "${required_files[@]}"; do
-          if [ ! -f "$file" ]; then
-            echo "❌ Missing required file: $file"
+        for f in domains_part1.json domains_part2.json domains_part3.json keywords.json; do
+          if ! jq empty "extension/blocklists/$f" 2>/dev/null; then
+            echo "extension/blocklists/$f is not valid JSON"
             exit 1
           fi
         done
-        echo "✅ All required files present"
-    
-    - name: Check for syntax errors
+        echo "Blocklists are valid"
+
+    - name: Check file structure
       run: |
-        # Check JavaScript files for basic syntax errors
-        for file in *.js blocklists.js; do
-          if [ -f "$file" ]; then
-            node -c "$file" || exit 1
+        required_files=(
+          "extension/manifest.json"
+          "extension/background.js"
+          "extension/content.js"
+          "extension/popup.html"
+          "extension/popup.js"
+          "extension/blocked.html"
+          "extension/blocked.js"
+          "extension/blocklists.html"
+          "extension/blocklists.js"
+          "extension/user_blocklist.html"
+          "extension/user_blocklist.js"
+          "extension/graylist-inject.js"
+          "extension/graylist-sites.js"
+          "extension/theme-sync.js"
+          "extension/blocklists/domains_part1.json"
+          "extension/blocklists/domains_part2.json"
+          "extension/blocklists/domains_part3.json"
+          "extension/blocklists/keywords.json"
+        )
+
+        for file in "${required_files[@]}"; do
+          if [ ! -f "$file" ]; then
+            echo "Missing required file: $file"
+            exit 1
           fi
         done
-        echo "✅ No JavaScript syntax errors"
-    
+        echo "All required files present"
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Check for JavaScript syntax errors
+      run: |
+        # node --check every top-level .js file in extension/, except the
+        # minified vendor bundle (gsap.min.js), which isn't ours to lint.
+        status=0
+        for file in extension/*.js; do
+          base="$(basename "$file")"
+          if [ "$base" = "gsap.min.js" ]; then
+            echo "Skipping vendor file: $file"
+            continue
+          fi
+          echo "Checking $file"
+          node --check "$file" || status=1
+        done
+        if [ "$status" -ne 0 ]; then
+          echo "JavaScript syntax errors found"
+          exit 1
+        fi
+        echo "No JavaScript syntax errors"
+
     - name: Verify blocklist counts
       run: |
-        domain_count=$(jq '.domains | length' blocklists/domains.json)
-        keyword_count=$(jq '.keywords | length' blocklists/keywords.json)
-        
-        echo "📊 Blocklist Statistics:"
+        domain_count=$(jq -s '[.[].domains | length] | add' \
+          extension/blocklists/domains_part1.json \
+          extension/blocklists/domains_part2.json \
+          extension/blocklists/domains_part3.json)
+        keyword_count=$(jq '.keywords | length' extension/blocklists/keywords.json)
+
+        echo "Blocklist statistics:"
         echo "  Domains: $domain_count"
         echo "  Keywords: $keyword_count"
-        
-        if [ "$domain_count" -lt 1000 ]; then
-          echo "⚠️ Warning: Domain count is less than expected"
+
+        if [ "$domain_count" -lt 100000 ]; then
+          echo "Warning: domain count ($domain_count) is lower than expected (project claims 500k+)"
         fi
-        
-        if [ "$keyword_count" -lt 1000 ]; then
-          echo "⚠️ Warning: Keyword count is less than expected"
+
+        if [ "$keyword_count" -lt 500 ]; then
+          echo "Warning: keyword count ($keyword_count) is lower than expected"
         fi
-        
-        echo "✅ Blocklist verification complete"
+
+        echo "Blocklist verification complete"
+
+    - name: Run extension unit tests
+      run: node extension/tests/run-all.cjs
+
+  rust:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install stable Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: |
+          desktop-app/guardian
+          desktop-app/native-host
+          desktop-app/src-tauri
+
+    - name: cargo check (guardian)
+      working-directory: desktop-app/guardian
+      run: cargo check --locked
+
+    - name: cargo check (native-host)
+      working-directory: desktop-app/native-host
+      run: cargo check --locked
+
+    # desktop-app/src-tauri pulls in `ort` (ONNX Runtime) and `xcap` (screen
+    # capture) on top of Tauri v2. These are heavier native dependencies but
+    # `cargo check` only needs them to typecheck/link build scripts, not to
+    # actually run inference or capture a screen, so this is not marked
+    # continue-on-error: a failure here is a real signal.
+    - name: cargo check (src-tauri)
+      working-directory: desktop-app/src-tauri
+      run: cargo check --locked

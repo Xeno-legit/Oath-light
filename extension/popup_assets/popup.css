@@ -578,7 +578,7 @@
 
 
 /* ============================================================
-   PURE PATH — browser extension popup
+   OATH LIGHT — browser extension popup
    Reuses the desktop app's visual language:
    Manrope + Instrument Serif · glass panels · gradient orbs
    Theming: [data-theme] (light|dark) × [data-style]
@@ -684,6 +684,17 @@
   --bg-0: #fff8f0; --bg-1: #ffffff; --text: #2a1800; --text-2: #6b3c10; --muted: #9a6030;
   --accent: #d97706; --accent-2: #dc4e0e; --accent-3: #ca8a04;
   --orb-a: #fcd34d; --orb-b: #fb923c; --orb-c: #fbbf24;
+}
+/* ---- NOIR (black & white — pure monochrome) ---- */
+[data-style="noir"][data-theme="dark"] {
+  --bg-0: #0a0a0a; --bg-1: #121212; --text: #f2f2f2; --text-2: #b8b8b8; --muted: #7a7a7a;
+  --accent: #ffffff; --accent-2: #cfcfcf; --accent-3: #8f8f8f;
+  --orb-a: #3a3a3a; --orb-b: #5c5c5c; --orb-c: #262626;
+}
+[data-style="noir"][data-theme="light"] {
+  --bg-0: #fafafa; --bg-1: #ffffff; --text: #111111; --text-2: #3d3d3d; --muted: #7a7a7a;
+  --accent: #111111; --accent-2: #3d3d3d; --accent-3: #6e6e6e;
+  --orb-a: #d4d4d4; --orb-b: #bcbcbc; --orb-c: #e4e4e4;
 }
 
 /* faux desktop wallpaper — extension popup is shown on its own, no surrounding chrome */

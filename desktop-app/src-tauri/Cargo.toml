@@ -21,6 +21,82 @@ tauri-build = { version = "2.5.6", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.10.3", features = [] }
+tauri = { version = "2.10.3", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 sysinfo = "0.30"
+# Shared blocklist embedding + domain/keyword matching (A.1/A.2) — the same
+# crate the DNS resolver (1.1) and any future mobile binding will consume.
+oathlight-core = { path = "../core" }
+# System-level DNS filtering (1.1) + DoH-bypass defense (1.2): a dependency-
+# free std::net forwarding proxy that NXDOMAINs blocked/DoH domains. Driven by
+# src/dns_filter.rs.
+oathlight-dns = { path = "../dns" }
+
+# --- NSFW AI layer (Phase 4 optional monitoring) ---
+# ort = ONNX Runtime bindings; pinned (prerelease, API still churns). image =
+# decode/resize for SigLIP2 preprocessing. Inference runs on the Image-Guard-2.0
+# (SigLIP2-base, 5-class) model exported to FP32 ONNX by desktop-app/ml/export_onnx.py.
+ort = "=2.0.0-rc.12"
+image = "0.25"
+# Screen capture for the change-triggered NSFW monitor (uses image ^0.25 too).
+xcap = "0.9"
+# Base64-encode the scan thumbnail sent to the UI as a data URL.
+base64 = "0.22"
+
+# --- Trusted-contact accountability (Phase 4 item 5.2, Tier 2) ---
+# SMTP delivery for the optional trusted-contact notifier — the user supplies
+# their own host/port/username/app-password (stored locally in plaintext;
+# the UI says so honestly). default-features = false keeps the async/tokio and
+# native-tls stacks out; we only need the blocking SMTP transport with
+# rustls-tls and the message builder. Sends always happen on a background
+# thread (see notify.rs) so they never block a Tauri command.
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "rustls-tls", "builder"] }
+
+# --- Master password (Phase 4 item 4.2) ---
+# Argon2id password hashing for the optional master password that gates
+# weakening requests (turning off protections) in Rust — see auth.rs. Default
+# features are kept on purpose: they pull in `password-hash` (PHC string
+# encoding, `SaltString`) and `rand` (`OsRng`), both used directly there, with
+# no extra crate needed for random bytes or salt generation.
+argon2 = "0.5"
+# argon2 re-exports `password_hash::rand_core`, but `OsRng` (and `SaltString::
+# generate`, which needs it) live behind rand_core's `getrandom` feature, and
+# argon2's default features do NOT enable it — so `rand_core::OsRng` is
+# `cfg`'d out unless something turns getrandom on. Depend on rand_core directly
+# with that feature; Cargo unifies features across the graph, so this also
+# lights up the `argon2::password_hash::rand_core::OsRng` re-export auth.rs
+# imports. Pinned to 0.6 to match the copy argon2/password-hash already pull
+# (rand_core 0.6.4) so no second version enters the tree.
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+# --- OTA blocklist updates (Phase 4 item 3.5, see src/ota.rs) ---
+# ureq: small blocking HTTP client — deliberately NOT reqwest: no tokio
+# runtime enters the tree, and the weekly check runs on a plain background
+# thread anyway. Default features (rustls TLS) cover the two GitHub
+# release-asset GETs.
+ureq = "2"
+# ed25519-dalek v2: verify the raw-Ed25519 manifest signature against the two
+# pubkeys baked into oathlight-core (core/src/ota.rs). Verification only — no
+# signing key ever exists on a user machine — so default features suffice.
+ed25519-dalek = "2"
+# sha256 for the per-file integrity hashes listed in the signed manifest.
+sha2 = "0.10"
+
+# Windows API access for the action-layer overlay (overlay.rs): marks the
+# overlay window WDA_EXCLUDEFROMCAPTURE so the screen monitor never scans its
+# own interrupt. Version pinned to match what `tauri` itself already pulls in
+# (its HWND type must be the exact same crate version as ours) so this adds
+# no new major version to the dependency tree.
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.61"
+features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"]
+
+# Panic/SOS global hotkey (Ctrl+Shift+Space opens the urge-surfing flow from
+# anywhere — plan item 5.1). The plugin only supports desktop platforms, so
+# it's declared for desktop targets exactly as its docs prescribe.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-global-shortcut = "2"
+
+# Release profile (codegen-units/lto/strip) moved to the workspace root
+# Cargo.toml (A.1) — Cargo ignores `[profile.*]` in non-root members. See the
+# comment there for the size rationale.
