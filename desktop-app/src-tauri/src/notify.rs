@@ -10,7 +10,7 @@
 //!
 //! ## What is sent
 //! A short subject + body naming the event kind and the person's own name.
-//! The recipient learns, for example, "Pure Path: an uninstall was requested
+//! The recipient learns, for example, "Oath Light: an uninstall was requested
 //! on <name>'s computer" — and nothing more. Every send (or failure) is
 //! recorded in the event log (4.5) as a `notify_sent` / `notify_failed`
 //! entry carrying only the recipient address and the event kind, so a
@@ -181,36 +181,36 @@ pub fn message_for(kind: &str, name: &str) -> (String, String) {
     let who = if name.trim().is_empty() { "your friend".to_string() } else { name.trim().to_string() };
     let (headline, detail) = match kind {
         "uninstall_requested" => (
-            "an uninstall of Pure Path was requested",
+            "an uninstall of Oath Light was requested",
             "There's a waiting period before it can complete, and it can still be cancelled. This is just a heads-up so you can check in.",
         ),
         "lockdown_cancelled" => (
             "a lockdown was cancelled early",
-            "Pure Path's lockdown mode was ended before its timer ran out. Nothing about what was browsed is shared — only that it happened.",
+            "Oath Light's lockdown mode was ended before its timer ran out. Nothing about what was browsed is shared — only that it happened.",
         ),
         "password_removal_requested" => (
             "removal of the master password was requested",
             "This starts a waiting period before the password comes off. It can still be cancelled. Just a heads-up.",
         ),
         "trusted_contact_removed" => (
-            "Pure Path's trusted-contact setting is being removed",
+            "Oath Light's trusted-contact setting is being removed",
             "You're being told BECAUSE the setting is being removed — this is the last message you'll get. If that's a surprise, it might be worth a gentle check-in.",
         ),
         "heartbeat" => (
             "is still protecting this computer",
-            "This is a routine monthly note so that silence itself would be a signal. Nothing happened — Pure Path is simply still installed and running.",
+            "This is a routine monthly note so that silence itself would be a signal. Nothing happened — Oath Light is simply still installed and running.",
         ),
         _ => (
             "a protective change happened",
-            "A heads-up from Pure Path. No details about browsing are ever shared.",
+            "A heads-up from Oath Light. No details about browsing are ever shared.",
         ),
     };
-    let subject = format!("Pure Path: {headline} on {who}'s computer");
+    let subject = format!("Oath Light: {headline} on {who}'s computer");
     let body = format!(
-        "Hi,\n\nYou're listed as {who}'s trusted contact in Pure Path.\n\n\
+        "Hi,\n\nYou're listed as {who}'s trusted contact in Oath Light.\n\n\
          {who} {headline}.\n\n{detail}\n\n\
-         Pure Path never shares browsing history, screenshots, or any details of what was viewed — only that a discrete event occurred.\n\n\
-         — Pure Path"
+         Oath Light never shares browsing history, screenshots, or any details of what was viewed — only that a discrete event occurred.\n\n\
+         — Oath Light"
     );
     (subject, body)
 }

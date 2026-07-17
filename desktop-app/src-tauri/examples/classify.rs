@@ -2,7 +2,7 @@
 //!
 //!   cargo run --example classify -- <path-to-image> [more images...]
 //!
-//! Resolves the model the same way the app does (PUREPATH_MODEL env, then the
+//! Resolves the model the same way the app does (OATHLIGHT_MODEL env, then the
 //! exe dir, then desktop-app/ml). Prints per-label probabilities + aggregates.
 
 use std::path::Path;
@@ -19,7 +19,7 @@ fn main() {
     let model = match nsfw::resolve_model_path() {
         Some(p) => p,
         None => {
-            eprintln!("model not found — set PUREPATH_MODEL or place image-guard-2.0.onnx");
+            eprintln!("model not found — set OATHLIGHT_MODEL or place image-guard-2.0.onnx");
             std::process::exit(1);
         }
     };

@@ -142,12 +142,12 @@ impl NsfwClassifier {
     }
 }
 
-/// Locate the ONNX model: `PUREPATH_MODEL` env override, then alongside the exe
+/// Locate the ONNX model: `OATHLIGHT_MODEL` env override, then alongside the exe
 /// (`models/` or next to it), then walking up the dev tree to `desktop-app/ml`.
 pub fn resolve_model_path() -> Option<PathBuf> {
     const NAME: &str = "image-guard-2.0.onnx";
 
-    if let Ok(p) = std::env::var("PUREPATH_MODEL") {
+    if let Ok(p) = std::env::var("OATHLIGHT_MODEL") {
         let pb = PathBuf::from(p);
         if pb.exists() {
             return Some(pb);

@@ -1497,7 +1497,7 @@ const EXTRA_BLACKLIST_DOMAINS = new Set([
 
 // PRIVACY-FRONTEND INSTANCE SEED LIST (report Round 4 §11.1)
 // redlib/libreddit (Reddit), invidious/piped (YouTube), nitter (X) and rimgo
-// (Imgur) are pure PROXIES of platforms Pure Path already restricts on the
+// (Imgur) are pure PROXIES of platforms Oath Light already restricts on the
 // canonical host — they re-serve the same content UNFILTERED on arbitrary
 // community domains, so every host-keyed defense misses them. They have no SFW
 // value to preserve (the canonical platform IS the legit path), so per the

@@ -1,8 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["core", "src-tauri", "guardian", "native-host", "dns"]
-# `dns` (plan item 1.1, purepath-dns): a dependency-free DNS forwarding proxy
-# (std::net only, plus purepath-core) — see dns/src/lib.rs for the module map.
+# `dns` (plan item 1.1, oathlight-dns): a dependency-free DNS forwarding proxy
+# (std::net only, plus oathlight-core) — see dns/src/lib.rs for the module map.
 
 # Cargo silently ignores `[profile.*]` tables declared in a non-root workspace
 # member (with a build-time warning) — profile config is workspace-global and
@@ -19,7 +19,7 @@ codegen-units = 1
 lto = "thin"
 strip = "symbols"
 
-# guardian (purepathguard) and native-host (pure-path-host) are tiny
+# guardian (oathlightguard) and native-host (oath-light-host) are tiny
 # throwaway-simple binaries (pure std/FFI watchdog; a thin native-messaging
 # shim) and want `opt-level = "s"` for minimum size. Per-package profile
 # overrides only support opt-level/codegen-units/debug/overflow-checks/debug-
@@ -29,8 +29,8 @@ strip = "symbols"
 # (fat LTO) + `strip = true`. `strip = "symbols"` is equivalent to `strip =
 # true`, so the only real behavior change is thin vs. fat LTO — a small,
 # accepted deviation in exchange for one shared profile block instead of three.
-[profile.release.package.purepathguard]
+[profile.release.package.oathlightguard]
 opt-level = "s"
 
-[profile.release.package.pure-path-host]
+[profile.release.package.oath-light-host]
 opt-level = "s"

@@ -1,7 +1,7 @@
-//! purepath-dns — system-level DNS filtering (plan items 1.1 and 1.2).
+//! oathlight-dns — system-level DNS filtering (plan items 1.1 and 1.2).
 //!
 //! A dependency-free DNS forwarding proxy, built on `std::net` only (plus
-//! `purepath-core` for the shared blocklist/keyword engine): parses just
+//! `oathlight-core` for the shared blocklist/keyword engine): parses just
 //! enough of an incoming query to make a block/allow decision, answers
 //! blocked queries with a synthesized NXDOMAIN, and relays everything else to
 //! the machine's real upstream resolvers.

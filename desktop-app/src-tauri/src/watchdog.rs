@@ -1,9 +1,9 @@
 //! Dual-process watchdog (Phase 4 tamper resistance).
 //!
 //! Two processes guard each other:
-//!   * the **main** desktop app (`PurePath.exe`), and
+//!   * the **main** desktop app (`OathLight.exe`), and
 //!   * a hidden, windowless **guardian** — a separate small binary,
-//!     `purepathguard.exe` (the `guardian` crate), so it shows up under its own
+//!     `oathlightguard.exe` (the `guardian` crate), so it shows up under its own
 //!     name in Task Manager and never carries the heavy app with it.
 //!
 //! Each side owns a **named mutex** for its entire lifetime. The *existence* of
@@ -14,8 +14,8 @@
 //! watchdog. When one side notices the other's mutex has vanished, it relaunches
 //! it:
 //!
-//!   * guardian closed -> main relaunches `purepathguard.exe`
-//!   * main closed     -> guardian relaunches `PurePath.exe`
+//!   * guardian closed -> main relaunches `oathlightguard.exe`
+//!   * main closed     -> guardian relaunches `OathLight.exe`
 //!
 //! Those same mutexes double as a single-instance guard per role, so a relaunch
 //! can never pile up duplicates: a redundant spawn fails to acquire its mutex
@@ -28,7 +28,7 @@
 //! survives to restart the other. Run-at-login plus the uninstall-friction
 //! timer are the backstops for that case; a 2-process scheme cannot close it.
 //!
-//! Dev safety: disabled unless this is a release build or `PUREPATH_WATCHDOG=1`
+//! Dev safety: disabled unless this is a release build or `OATHLIGHT_WATCHDOG=1`
 //! is set, and a sentinel file (see `request_shutdown`) provides a kill switch
 //! so closing the app during testing never traps you in a resurrection loop. In
 //! a **release** build the sentinel alone is not trusted — a user could stand
@@ -63,8 +63,8 @@ mod imp {
     /// session; no `Global\` prefix, so no privilege requirements). The `.v1`
     /// suffix lets us rev the protocol without colliding with stale objects.
     /// MUST match the guardian crate.
-    const MAIN_MUTEX: &str = "PurePath.Watchdog.Main.v1";
-    const GUARDIAN_MUTEX: &str = "PurePath.Watchdog.Guardian.v1";
+    const MAIN_MUTEX: &str = "OathLight.Watchdog.Main.v1";
+    const GUARDIAN_MUTEX: &str = "OathLight.Watchdog.Guardian.v1";
 
     /// Session-namespace named auto-reset event: signaling it asks the
     /// currently-running **main** instance to surface its window. Written by a
@@ -72,10 +72,10 @@ mod imp {
     /// consumed by `start_show_listener`'s background thread in the surviving
     /// instance. The guardian crate does not use this event at all — it is a
     /// main-to-main signal only, so there's nothing to keep in sync there.
-    const SHOW_EVENT: &str = "PurePath.ShowWindow.v1";
+    const SHOW_EVENT: &str = "OathLight.ShowWindow.v1";
 
     /// Guardian executable name (the `guardian` crate's `[[bin]]`).
-    const GUARDIAN_BIN: &str = "purepathguard.exe";
+    const GUARDIAN_BIN: &str = "oathlightguard.exe";
     /// Argument that tells the guardian which executable to relaunch as "main".
     const MAIN_ARG: &str = "--main";
     /// Argument carrying the full path to `uninstall.json`, so the guardian can
@@ -134,7 +134,7 @@ mod imp {
         use std::time::{SystemTime, UNIX_EPOCH};
         let ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
         let line = format!("{ms} main pid {} {msg}\n", std::process::id());
-        let path = std::env::temp_dir().join("purepath-watchdog.log");
+        let path = std::env::temp_dir().join("oathlight-watchdog.log");
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
             let _ = f.write_all(line.as_bytes());
         }
@@ -176,7 +176,7 @@ mod imp {
         }
     }
 
-    /// Locate `purepathguard.exe`: next to our own exe (production), then walking
+    /// Locate `oathlightguard.exe`: next to our own exe (production), then walking
     /// up the dev tree to `guardian/target/{debug,release}/`. Mirrors
     /// `resolve_host_binary` in lib.rs.
     ///
@@ -248,7 +248,7 @@ mod imp {
     // ---- Cross-process shutdown sentinel (the kill switch) -------------------
     //
     // Sentinel protocol (MUST match the guardian crate):
-    //   * path    — `%TEMP%\purepath.watchdog.shutdown`, computed identically on
+    //   * path    — `%TEMP%\oathlight.watchdog.shutdown`, computed identically on
     //               both sides from the per-user temp dir (no Tauri dependency);
     //   * content — the full UTF-8 path to `uninstall.json`, so the release-build
     //               cool-off verification can travel *with* the authorization and
@@ -260,7 +260,7 @@ mod imp {
     /// compute it identically from the per-user temp dir (no Tauri dependency).
     /// MUST match the guardian crate.
     fn shutdown_sentinel() -> PathBuf {
-        std::env::temp_dir().join("purepath.watchdog.shutdown")
+        std::env::temp_dir().join("oathlight.watchdog.shutdown")
     }
 
     /// Authorize a legitimate shutdown: drop the sentinel so both sides stop
@@ -345,7 +345,7 @@ mod imp {
     /// The race this guards against: `perform_uninstall` (lib.rs) writes the
     /// sentinel, spawns a self-delete worker bounded to ~30-40s (see
     /// `uninstall.rs`'s `spawn_self_delete`), then exits the app ~2s later.
-    /// If the user relaunches Pure Path during that window — the worker
+    /// If the user relaunches Oath Light during that window — the worker
     /// hasn't finished tearing things down yet, so a double-click on the
     /// desktop shortcut, or a stray autostart race, can start a fresh
     /// `init_main()` before the worker force-kills whatever's still running —
@@ -435,9 +435,9 @@ mod imp {
 
     // ---- Login autostart (start in the background on boot) -------------------
 
-    /// Per-user Run key: launches Pure Path at login without admin rights.
+    /// Per-user Run key: launches Oath Light at login without admin rights.
     const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
-    const RUN_VALUE: &str = "PurePath";
+    const RUN_VALUE: &str = "OathLight";
     /// Argv flag marking a login-triggered launch (so we start minimized/out of
     /// the way rather than popping a window in the user's face on boot).
     const AUTOSTART_ARG: &str = "--autostart";
@@ -450,7 +450,7 @@ mod imp {
         c
     }
 
-    /// Register Pure Path to start at user login. Idempotent — `/f` overwrites,
+    /// Register Oath Light to start at user login. Idempotent — `/f` overwrites,
     /// so this also self-heals the entry (e.g. if the exe moved) on every launch.
     /// The launch carries `--autostart` so it comes up minimized in the
     /// background. Tamper-resistance, like the watchdog: enforced, not a toggle.
@@ -527,13 +527,13 @@ mod imp {
     // ---- Public entry points -------------------------------------------------
 
     /// Whether the watchdog should run at all. On in release; in debug only when
-    /// `PUREPATH_WATCHDOG=1`, so ordinary `cargo run` is never trapped in a
+    /// `OATHLIGHT_WATCHDOG=1`, so ordinary `cargo run` is never trapped in a
     /// resurrection loop.
     pub fn enabled() -> bool {
         if !cfg!(debug_assertions) {
             return true;
         }
-        std::env::var("PUREPATH_WATCHDOG").map(|v| v == "1").unwrap_or(false)
+        std::env::var("OATHLIGHT_WATCHDOG").map(|v| v == "1").unwrap_or(false)
     }
 
     /// Called once at the very start of the main app, before the Tauri window is

@@ -1,6 +1,6 @@
-/* store.js — global app-data store for Pure Path (plain JS, uses global React) */
+/* store.js — global app-data store for Oath Light (plain JS, uses global React) */
 (function () {
-  const KEY = 'purepath_state_v2';
+  const KEY = 'oathlight_state_v2';
 
   const seedChat = [
     { role: 'mentor', text: "Hi — I'm here with you. This is a safe space. Whatever you're feeling right now, we can work through it together. What's on your mind?" },

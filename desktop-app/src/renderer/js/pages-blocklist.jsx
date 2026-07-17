@@ -107,7 +107,7 @@ function BlocklistPage({ s, PP }) {
       })
       .catch((e) => {
         // Cancelled prompt: leave the list untouched, silently abort.
-        if (!e || e.message !== 'cancelled') console.warn('[PurePath] removeSite failed:', e);
+        if (!e || e.message !== 'cancelled') console.warn('[OathLight] removeSite failed:', e);
       });
   }
   function removeAllow(id) {

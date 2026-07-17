@@ -1,4 +1,4 @@
-// Round 6 adversarial probe / retest — maps Pure Path's PERIMETER coverage and
+// Round 6 adversarial probe / retest — maps Oath Light's PERIMETER coverage and
 // asserts the Round-6 fixes (§13). No explicit content is fetched; this only asks
 // "would the perimeter block this URL shape?".
 //

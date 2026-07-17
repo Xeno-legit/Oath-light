@@ -20,7 +20,7 @@ const MIN_SCAN_GAP: Duration = Duration::from_millis(800);
 fn main() {
     let max_secs: Option<u64> = std::env::args().nth(1).and_then(|s| s.parse().ok());
 
-    let model = nsfw::resolve_model_path().expect("model not found (set PUREPATH_MODEL)");
+    let model = nsfw::resolve_model_path().expect("model not found (set OATHLIGHT_MODEL)");
     eprintln!("model: {}", model.display());
     let load_t = Instant::now();
     let clf = NsfwClassifier::load(&model).expect("load model");

@@ -5,10 +5,10 @@
 // monolith — no logic changes.
 
 // NATIVE MESSAGING BRIDGE — Desktop App Communication
-// Connects to Pure Path desktop companion via chrome.runtime.connectNative()
+// Connects to Oath Light desktop companion via chrome.runtime.connectNative()
 
 const NativeMessagingBridge = (function () {
-  const HOST_NAME = 'com.purepath.companion';
+  const HOST_NAME = 'com.oathlight.companion';
   const HEARTBEAT_INTERVAL = 15000;  // 15 seconds — keeps connection alive
   const SYNC_INTERVAL = 60000;       // 60 seconds — full data refresh
   const MAX_RECONNECT_DELAY = 15000; // 15 seconds max backoff
@@ -63,7 +63,7 @@ const NativeMessagingBridge = (function () {
 
       isConnected = true;
       reconnectDelay = 250; // Reset backoff on successful connect
-      console.log('Connected to Pure Path desktop app');
+      console.log('Connected to Oath Light desktop app');
     } catch (err) {
       console.log('️ Native messaging connect failed:', err.message);
       scheduleReconnect();
@@ -240,7 +240,7 @@ const NativeMessagingBridge = (function () {
     const settings = (msg.settings && typeof msg.settings === 'object') ? msg.settings : null;
     if (!settings) return;
     blockingSettings = settings;
-    console.log('[PurePath] blocking settings received — redirect:',
+    console.log('[OathLight] blocking settings received — redirect:',
       settings.redirectLinkOn ? (settings.redirectUrl || '(blank)') : 'off');
     try { await chrome.storage.local.set({ ppBlocking: settings }); } catch (_) {}
     // Re-arm the reminder loop to reflect the new schedule immediately.

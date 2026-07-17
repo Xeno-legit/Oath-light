@@ -196,7 +196,7 @@ reasonEl.textContent = reasonMap[reason] || 'This page was blocked to help you s
 if (reason === 'lockdown') {
   const note = document.createElement('div');
   note.style.cssText = 'font-size:13px;opacity:.7;margin-top:8px;line-height:1.5;max-width:52ch';
-  note.textContent = "You set this up when you were thinking clearly. It lifts on its own when the timer ends — nothing to do but let it hold. If a site you genuinely need is blocked, you can add it from Pure Path (it takes effect after a short pause).";
+  note.textContent = "You set this up when you were thinking clearly. It lifts on its own when the timer ends — nothing to do but let it hold. If a site you genuinely need is blocked, you can add it from Oath Light (it takes effect after a short pause).";
   if (reasonEl.parentNode) reasonEl.parentNode.insertBefore(note, reasonEl.nextSibling);
 }
 

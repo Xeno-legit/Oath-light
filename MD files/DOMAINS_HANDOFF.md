@@ -149,7 +149,7 @@ If it happens: find offsets with PowerShell `[Array]::IndexOf($bytes,[byte]0)` a
 - `extension/blocklists/domains_part{1,2,3}.json` — **pruned** (385,588 total)
 - `prune-blocklist.cjs` — pruner tool (untracked)
 - `BLOCKING_STRATEGY.md` — strategy/decisions + rollout tracker
-- `Pure_Path_Master_Plan.md` — Phase 2 items (keyword layer, bypass-vector)
+- `Oath_Light_Master_Plan.md` — Phase 2 items (keyword layer, bypass-vector)
 - Only **Batch 1** of the keyword work was committed earlier; Batches 2–5, the prune, and the tool are uncommitted.
 
 ### Non-negotiable principle

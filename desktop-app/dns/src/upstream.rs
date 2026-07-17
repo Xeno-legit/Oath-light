@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn save_and_load_round_trip() {
-        let dir = std::env::temp_dir().join(format!("purepath-dns-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("oathlight-dns-test-{}", std::process::id()));
         let path = dir.join("dns.json");
         let c = CapturedDns {
             captured_at: 12345,
@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn load_missing_file_is_none() {
-        let path = std::env::temp_dir().join("purepath-dns-test-definitely-missing.json");
+        let path = std::env::temp_dir().join("oathlight-dns-test-definitely-missing.json");
         assert!(CapturedDns::load(&path).is_none());
     }
 }

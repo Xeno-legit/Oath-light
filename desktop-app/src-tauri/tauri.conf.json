@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "PurePath",
+  "productName": "OathLight",
   "version": "0.1.0",
-  "identifier": "com.purepath.desktop",
+  "identifier": "com.oathlight.desktop",
   "build": {
     "frontendDist": "../src/renderer",
     "beforeDevCommand": "node scripts/bundle-sidecars.mjs && node scripts/pack-extension.mjs",
@@ -20,11 +20,11 @@
     "targets": "all",
     "licenseFile": "../installer/EULA.rtf",
     "externalBin": [
-      "binaries/purepathguard",
-      "binaries/pure-path-host"
+      "binaries/oathlightguard",
+      "binaries/oath-light-host"
     ],
     "resources": [
-      "resources/purepath.crx",
+      "resources/oathlight.crx",
       "resources/update_manifest.xml"
     ],
     "icon": [

@@ -86,7 +86,7 @@ const tabLastChecked = new Map();
 const tabLastCheckedTime = new Map();
 
 chrome.runtime.onInstalled.addListener(async (details) => {
-  console.log('Pure Path installed');
+  console.log('Oath Light installed');
 
   // Load defaults into memory for sync reference
   await loadDefaultListsIntoMemory();
@@ -107,7 +107,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-  console.log('Pure Path starting up');
+  console.log('Oath Light starting up');
   await loadDefaultListsIntoMemory();
   await loadBlocklistsFromStorage();
 });
@@ -149,7 +149,7 @@ async function loadDefaultListsIntoMemory() {
 
 async function initializeBlocklistsFromJSON() {
   try {
-    console.log('Pure Path: Initializing blocklists from JSON files...');
+    console.log('Oath Light: Initializing blocklists from JSON files...');
     
     // Ensure we have default domains loaded
     if (!defaultDomains || defaultDomains.length === 0) {
@@ -166,15 +166,15 @@ async function initializeBlocklistsFromJSON() {
       blocklistDomains: defaultDomains
     });
 
-    console.log(`Pure Path: Initialized ${defaultDomains.length} domains in storage`);
+    console.log(`Oath Light: Initialized ${defaultDomains.length} domains in storage`);
   } catch (error) {
-    console.error('Pure Path: Error initializing blocklists from JSON:', error);
+    console.error('Oath Light: Error initializing blocklists from JSON:', error);
   }
 }
 
 async function loadBlocklistsFromStorage() {
   try {
-    console.log('Pure Path: Loading blocklists from storage...');
+    console.log('Oath Light: Loading blocklists from storage...');
     const result = await chrome.storage.local.get(['blocklistDomains']);
 
     if (result.blocklistDomains && result.blocklistDomains.length > 0 && result.blocklistDomains.length < 600000) {
@@ -184,14 +184,14 @@ async function loadBlocklistsFromStorage() {
       for (let i = 0; i < blocklistDomains.length; i++) {
         blocklistSet.add(blocklistDomains[i].toLowerCase());
       }
-      console.log(`Pure Path: Loaded ${blocklistDomains.length} domains from storage`);
+      console.log(`Oath Light: Loaded ${blocklistDomains.length} domains from storage`);
     } else {
       if (result.blocklistDomains && result.blocklistDomains.length >= 600000) {
-         console.log('Pure Path: Detected old unoptimized blocklist in storage. Forcing re-initialization...');
+         console.log('Oath Light: Detected old unoptimized blocklist in storage. Forcing re-initialization...');
          await chrome.storage.local.remove('blocklistDomains');
       }
       // If not in storage, initialize from JSON
-      console.log('️ Pure Path: Blocklists empty or not found in storage, initializing from JSON...');
+      console.log('️ Oath Light: Blocklists empty or not found in storage, initializing from JSON...');
       await initializeBlocklistsFromJSON();
       
       // Load again after initialization
@@ -202,13 +202,13 @@ async function loadBlocklistsFromStorage() {
           for (let i = 0; i < blocklistDomains.length; i++) {
             blocklistSet.add(blocklistDomains[i].toLowerCase());
           }
-          console.log(`Pure Path: Successfully initialized ${blocklistDomains.length} domains`);
+          console.log(`Oath Light: Successfully initialized ${blocklistDomains.length} domains`);
       } else {
-          console.error('Pure Path: Failed to load blocklists even after initialization');
+          console.error('Oath Light: Failed to load blocklists even after initialization');
       }
     }
   } catch (error) {
-    console.error('Pure Path: Error loading blocklists from storage:', error);
+    console.error('Oath Light: Error loading blocklists from storage:', error);
   }
 }
 
@@ -226,15 +226,15 @@ async function loadBlocklists() {
 // / matching.js have loaded (both true only transiently at cold start).
 async function applyOtaListsIfPresent() {
   try {
-    if (typeof PurePathOTA === 'undefined' || typeof WHITELIST_DOMAINS === 'undefined') return;
-    const ota = await PurePathOTA.loadStoredOta(chrome.storage.local, WHITELIST_DOMAINS);
+    if (typeof OathLightOTA === 'undefined' || typeof WHITELIST_DOMAINS === 'undefined') return;
+    const ota = await OathLightOTA.loadStoredOta(chrome.storage.local, WHITELIST_DOMAINS);
     if (!ota || !ota.domains.length) return;
     blocklistDomains = ota.domains;
     blocklistSet = new Set();
     for (let i = 0; i < blocklistDomains.length; i++) blocklistSet.add(blocklistDomains[i].toLowerCase());
-    console.log(`Pure Path: applied OTA blocklist v${ota.version} (${blocklistDomains.length} domains)`);
+    console.log(`Oath Light: applied OTA blocklist v${ota.version} (${blocklistDomains.length} domains)`);
   } catch (error) {
-    console.error('Pure Path: OTA list apply failed (keeping bundled lists):', error);
+    console.error('Oath Light: OTA list apply failed (keeping bundled lists):', error);
   }
 }
 

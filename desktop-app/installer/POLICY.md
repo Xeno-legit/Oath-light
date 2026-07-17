@@ -1,9 +1,9 @@
-# Pure Path — Open Beta
+# Oath Light — Open Beta
 ### End-User Notice, Disclosure & Privacy Policy
 
 **Version 0.1.0 (Open Beta) — 2026-07-05**
 
-Please read this before installing. Installing Pure Path means you understand and
+Please read this before installing. Installing Oath Light means you understand and
 agree to what it does, how it protects itself from being disabled, and what it can
 access on this device.
 
@@ -11,14 +11,14 @@ access on this device.
 
 ## 1. This is an open beta
 
-Pure Path is early, in-development software released for public testing. It may
+Oath Light is early, in-development software released for public testing. It may
 contain bugs, block the wrong things, miss things it should block, or stop working
 without warning. **Do not rely on it as your only safeguard.** It is provided
 "as is", with no warranty of any kind.
 
-## 2. What Pure Path is
+## 2. What Oath Light is
 
-Pure Path is an accountability and content-blocking tool designed to help you avoid
+Oath Light is an accountability and content-blocking tool designed to help you avoid
 pornography and other explicit material online. It has two parts:
 
 - **A browser extension** that blocks known adult domains, a curated "graylist" of
@@ -28,13 +28,13 @@ pornography and other explicit material online. It has two parts:
 
 ## 3. Friction & tamper-resistance (please read — this is intentionally strict)
 
-Pure Path is **deliberately hard to remove or disable in the moment**, by design, so
+Oath Light is **deliberately hard to remove or disable in the moment**, by design, so
 a momentary urge cannot instantly undo your commitment. Once installed:
 
 - **It starts automatically when you sign in to Windows** and runs in the background
   (minimized). This is enforced, not an optional setting.
-- **It runs two cooperating processes** — `PurePath.exe` and a hidden
-  `purepathguard.exe` — that watch each other. If one is closed or force-killed
+- **It runs two cooperating processes** — `OathLight.exe` and a hidden
+  `oathlightguard.exe` — that watch each other. If one is closed or force-killed
   (including via Task Manager → *End task*), the other restarts it. **This is
   intentional behavior, not a virus.**
 - **Uninstalling is a two-step, delayed process.** You *request* removal, then wait
@@ -48,9 +48,9 @@ impulsive decisions — not to trap you.
 
 ## 4. What it can access on this device
 
-To do its job, Pure Path:
+To do its job, Oath Light:
 
-- **Reads your browsers' profile settings** to check whether the Pure Path extension
+- **Reads your browsers' profile settings** to check whether the Oath Light extension
   is installed and enabled.
 - **Adds Windows registry/policy entries** to start at login, to register a local
   "native messaging host", and (in a future release) to keep the extension installed.
@@ -63,7 +63,7 @@ To do its job, Pure Path:
 
 ## 5. What it does NOT do — your privacy
 
-Pure Path is built to run **entirely on your device**. It does **not**:
+Oath Light is built to run **entirely on your device**. It does **not**:
 
 - Send your browsing history, screenshots, or any personal data over the internet.
 - Use any servers, cloud services, analytics, tracking, or telemetry.
@@ -74,7 +74,7 @@ Pure Path is built to run **entirely on your device**. It does **not**:
 - Log your keystrokes or record what you type.
 
 **All processing — including the AI image analysis — happens locally. Nothing about
-what you view or do leaves this computer through Pure Path.**
+what you view or do leaves this computer through Oath Light.**
 
 ## 6. No warranty / limitation of liability
 
@@ -83,9 +83,9 @@ warranty of any kind**, express or implied. To the maximum extent permitted by l
 the authors are not liable for any damages, data loss, missed or wrongful blocking,
 or other harm arising from its use. **You install and use it at your own risk.**
 
-## 7. Removing Pure Path
+## 7. Removing Oath Light
 
-You can remove Pure Path at any time by opening the app, going to **Settings**, and
+You can remove Oath Light at any time by opening the app, going to **Settings**, and
 starting the uninstall request — then completing it after the cool-off period
 described in section 3.
 
@@ -94,8 +94,8 @@ described in section 3.
 By continuing this installation you confirm that you have read and understood the
 above — including the tamper-resistance measures, the login autostart, the optional
 on-device screen monitoring, and the delayed-uninstall process — and that you consent
-to Pure Path operating on this device as described.
+to Oath Light operating on this device as described.
 
 ---
 
-*Questions or issues: https://github.com/Xeno-legit/Pure-Path*
+*Questions or issues: https://github.com/Xeno-legit/Oath-Light*

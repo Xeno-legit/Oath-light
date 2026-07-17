@@ -1,10 +1,10 @@
 //! 24-hour uninstall request (Phase 4 friction system).
 //!
-//! Removing Pure Path is meant to be a *deliberate* act, not an impulsive one.
+//! Removing Oath Light is meant to be a *deliberate* act, not an impulsive one.
 //! A removal request opens a cool-off window during which blocking stays fully
 //! functional. Once the window elapses, removal is only *unlocked* — it does
 //! NOT fire on its own. The user still has to take an explicit, destructive
-//! action (the "Remove Pure Path now" button, which calls `complete_uninstall`)
+//! action (the "Remove Oath Light now" button, which calls `complete_uninstall`)
 //! to actually tear anything down. Until then they can reset the timer or cancel
 //! the request outright. The pending request is persisted to disk so it survives
 //! an app restart *and* a wiped renderer `localStorage` — the renderer is
@@ -21,18 +21,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// with them first. Safe at this size because elapsing only *unlocks* the
 /// explicit "Remove completely" action — nothing fires automatically. For
 /// production set this back to 24 hours (`24 * 60 * 60`).
-/// Overridable at runtime with `PUREPATH_UNINSTALL_SECS` (seconds) — **debug
+/// Overridable at runtime with `OATHLIGHT_UNINSTALL_SECS` (seconds) — **debug
 /// builds only**, see `delay_secs` below.
 const DEFAULT_DELAY_SECS: u64 = 10; // ← production: 24 * 60 * 60
 
-/// Debug builds: honor `PUREPATH_UNINSTALL_SECS` so the cool-off can be dialed
+/// Debug builds: honor `OATHLIGHT_UNINSTALL_SECS` so the cool-off can be dialed
 /// down for manual testing. Release builds ignore the env var entirely and
 /// always use `DEFAULT_DELAY_SECS` — otherwise a user could zero out the whole
-/// friction timer with `set PUREPATH_UNINSTALL_SECS=1` and an impulsive uninstall
+/// friction timer with `set OATHLIGHT_UNINSTALL_SECS=1` and an impulsive uninstall
 /// would face no cool-off at all, defeating the point of this module.
 #[cfg(debug_assertions)]
 pub(crate) fn delay_secs() -> u64 {
-    std::env::var("PUREPATH_UNINSTALL_SECS")
+    std::env::var("OATHLIGHT_UNINSTALL_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|v| *v > 0)
@@ -167,12 +167,12 @@ pub enum LaunchResult {
 /// MUST match the real binary names — the guardian `[[bin]]` and the native
 /// host sidecar.
 #[cfg(target_os = "windows")]
-const OTHER_WAIT_PROCESSES: &[&str] = &["purepathguard.exe", "pure-path-host.exe"];
+const OTHER_WAIT_PROCESSES: &[&str] = &["oathlightguard.exe", "oath-light-host.exe"];
 
 /// Build the full list of image names the self-delete worker waits on: the
 /// *current* process's own exe file name, plus the guardian and native-host
-/// sidecars. Deliberately NOT a hardcoded `"PurePath.exe"` constant: the
-/// installed binary is `PurePath.exe` (Tauri `productName`), but the Cargo
+/// sidecars. Deliberately NOT a hardcoded `"OathLight.exe"` constant: the
+/// installed binary is `OathLight.exe` (Tauri `productName`), but the Cargo
 /// package is named `app`, so a loose `target/release/app.exe` run (or any
 /// future rename) has a different exe file name — hardcoding the installed
 /// name would silently break waiting/killing for every other build shape.
@@ -194,12 +194,12 @@ fn wait_for_processes(current_exe_name: &str) -> Vec<String> {
 /// `app_data_dir()` is always `<per-user data root>/<identifier>`, so a
 /// genuine app-data dir's last path component MUST be exactly this.
 #[cfg(target_os = "windows")]
-const APP_IDENTIFIER: &str = "com.purepath.desktop";
+const APP_IDENTIFIER: &str = "com.oathlight.desktop";
 
 /// Number of `Normal` (non-root, non-prefix) path components in `path`. Used as
 /// a cheap "is this suspiciously close to a drive root" guard — e.g. `C:\`
-/// (0 normal components) is rejected, while `C:\PurePath` (1) or
-/// `C:\Program Files\PurePath` (2) are accepted.
+/// (0 normal components) is rejected, while `C:\OathLight` (1) or
+/// `C:\Program Files\OathLight` (2) are accepted.
 #[cfg(target_os = "windows")]
 fn normal_component_count(path: &std::path::Path) -> usize {
     path.components()
@@ -209,8 +209,8 @@ fn normal_component_count(path: &std::path::Path) -> usize {
 
 /// Cheap belt-and-braces check: real Windows paths can never contain a
 /// double-quote character. `spawn_self_delete` passes `install`/`data` to the
-/// batch via `%PUREPATH_RM_INSTALL%`/`%PUREPATH_RM_DATA%` env vars wrapped in
-/// literal double quotes (`"%PUREPATH_RM_INSTALL%"`); a value containing `"`
+/// batch via `%OATHLIGHT_RM_INSTALL%`/`%OATHLIGHT_RM_DATA%` env vars wrapped in
+/// literal double quotes (`"%OATHLIGHT_RM_INSTALL%"`); a value containing `"`
 /// would break out of that quoting. Impossible for a genuine path, so refusing
 /// it costs nothing.
 #[cfg(target_os = "windows")]
@@ -221,7 +221,7 @@ fn path_is_batch_safe(path: &std::path::Path) -> bool {
 /// Validate a candidate install directory before we ever let it near an
 /// `rmdir /s /q`. Must be an absolute path, at least one normal path component
 /// deep (rejects a bare drive root like `C:\`, but accepts a legitimate custom
-/// install such as `D:\PurePath`), free of double quotes, and must actually
+/// install such as `D:\OathLight`), free of double quotes, and must actually
 /// contain the running app's own exe file — the one file we know a genuine
 /// install directory has. The exe-containment check is the real guard here;
 /// the depth check only exists to catch a degenerate root path.
@@ -249,7 +249,7 @@ fn validate_app_data_dir(dir: &std::path::Path) -> bool {
         && dir.file_name().and_then(|n| n.to_str()) == Some(APP_IDENTIFIER)
 }
 
-/// Spawn a detached worker that waits for Pure Path's processes to exit, runs
+/// Spawn a detached worker that waits for Oath Light's processes to exit, runs
 /// the NSIS `uninstall.exe` silently if it's still present (shortcuts + the
 /// installer's own registry state only come off natively), then deletes the
 /// install directory and the app-data directory — a self-contained uninstall
@@ -262,7 +262,7 @@ fn validate_app_data_dir(dir: &std::path::Path) -> bool {
 /// `app_data_dir` is the Tauri per-user data dir (`uninstall.json` etc.). The
 /// install dir is inferred from `current_exe()`, and so is the current exe's
 /// own file name (fed into both validation and the wait/kill list — see
-/// `wait_for_processes`), since it differs across build shapes (`PurePath.exe`
+/// `wait_for_processes`), since it differs across build shapes (`OathLight.exe`
 /// installed vs. `app.exe` for a loose `target/release` run). In debug builds
 /// this is a no-op that returns `Launched` without wiping anything — deleting
 /// your `target/` tree mid-`cargo run` is never what you want; real removal is
@@ -271,7 +271,7 @@ fn validate_app_data_dir(dir: &std::path::Path) -> bool {
 /// The worker itself is a self-deleting batch script with a *bounded* wait: it
 /// polls `tasklist` for our processes, but after ~30 seconds gives up waiting
 /// and force-kills them with `taskkill /F`. This matters specifically for
-/// `pure-path-host.exe` — that process is spawned and owned by the browser
+/// `oath-light-host.exe` — that process is spawned and owned by the browser
 /// over native messaging, not by us, and it does not exit just because the main
 /// app and guardian did; without the bound this would spin forever with an
 /// open browser. The force-kill is not trusted to be instantaneous or
@@ -283,10 +283,10 @@ fn validate_app_data_dir(dir: &std::path::Path) -> bool {
 /// a brief hold on a file (AV scan, Explorer preview, etc).
 ///
 /// The install/data paths are deliberately NOT spliced into the script's text
-/// as literal strings — they're passed via the `PUREPATH_RM_INSTALL` /
-/// `PUREPATH_RM_DATA` environment variables on the spawned `cmd` process, and
-/// the script only ever references them as `%PUREPATH_RM_INSTALL%` /
-/// `%PUREPATH_RM_DATA%`. `cmd` expands `%...%` even inside double quotes, so a
+/// as literal strings — they're passed via the `OATHLIGHT_RM_INSTALL` /
+/// `OATHLIGHT_RM_DATA` environment variables on the spawned `cmd` process, and
+/// the script only ever references them as `%OATHLIGHT_RM_INSTALL%` /
+/// `%OATHLIGHT_RM_DATA%`. `cmd` expands `%...%` even inside double quotes, so a
 /// path containing a literal `%` spliced directly into
 /// `rmdir /s /q "{install}"` would get mangled before the delete ever ran; an
 /// env-var reference is expanded exactly once to its verbatim value and is not
@@ -388,17 +388,17 @@ pub fn spawn_self_delete(app_data_dir: &std::path::Path) -> LaunchResult {
          goto forcecheck\r\n\
          \r\n\
          :afterwait\r\n\
-         if not exist \"%PUREPATH_RM_INSTALL%\\uninstall.exe\" goto sweep\r\n\
-         start \"\" /wait \"%PUREPATH_RM_INSTALL%\\uninstall.exe\" /S\r\n\
+         if not exist \"%OATHLIGHT_RM_INSTALL%\\uninstall.exe\" goto sweep\r\n\
+         start \"\" /wait \"%OATHLIGHT_RM_INSTALL%\\uninstall.exe\" /S\r\n\
          ping -n 3 127.0.0.1 >nul\r\n\
          \r\n\
          :sweep\r\n\
          set /a RETRY=0\r\n\
          :deleteloop\r\n\
-         rmdir /s /q \"%PUREPATH_RM_INSTALL%\" 2>nul\r\n\
-         rmdir /s /q \"%PUREPATH_RM_DATA%\" 2>nul\r\n\
-         if exist \"%PUREPATH_RM_INSTALL%\" goto retrydelete\r\n\
-         if exist \"%PUREPATH_RM_DATA%\" goto retrydelete\r\n\
+         rmdir /s /q \"%OATHLIGHT_RM_INSTALL%\" 2>nul\r\n\
+         rmdir /s /q \"%OATHLIGHT_RM_DATA%\" 2>nul\r\n\
+         if exist \"%OATHLIGHT_RM_INSTALL%\" goto retrydelete\r\n\
+         if exist \"%OATHLIGHT_RM_DATA%\" goto retrydelete\r\n\
          goto selfdelete\r\n\
          \r\n\
          :retrydelete\r\n\
@@ -418,7 +418,7 @@ pub fn spawn_self_delete(app_data_dir: &std::path::Path) -> LaunchResult {
     // worker can still be running for up to ~40s, and a relaunch during that
     // window is possible) must never overwrite the batch file a still-running
     // cmd.exe from the earlier attempt is reading incrementally line-by-line.
-    let bat = std::env::temp_dir().join(format!("purepath-uninstall-{}.bat", std::process::id()));
+    let bat = std::env::temp_dir().join(format!("oathlight-uninstall-{}.bat", std::process::id()));
     if std::fs::write(&bat, script).is_err() {
         return LaunchResult::NotFound;
     }
@@ -429,8 +429,8 @@ pub fn spawn_self_delete(app_data_dir: &std::path::Path) -> LaunchResult {
         .current_dir(std::env::temp_dir())
         // Paths travel via env vars, not spliced into the script text — see the
         // doc comment on this function for why.
-        .env("PUREPATH_RM_INSTALL", &install)
-        .env("PUREPATH_RM_DATA", &data)
+        .env("OATHLIGHT_RM_INSTALL", &install)
+        .env("OATHLIGHT_RM_DATA", &data)
         .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
         .spawn()
     {

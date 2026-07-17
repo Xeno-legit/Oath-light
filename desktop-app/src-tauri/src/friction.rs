@@ -76,18 +76,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// timer being short makes any single weakening more dangerous than it
 /// already is once applied. For production set this back to 24 hours
 /// (`24 * 60 * 60`).
-/// Overridable at runtime with `PUREPATH_FRICTION_SECS` (seconds) — **debug
+/// Overridable at runtime with `OATHLIGHT_FRICTION_SECS` (seconds) — **debug
 /// builds only**, see `weakening_delay_secs` below.
 const DEFAULT_WEAKENING_DELAY_SECS: u64 = 10; // ← production: 24 * 60 * 60
 
-/// Debug builds: honor `PUREPATH_FRICTION_SECS` so the cool-off can be dialed
+/// Debug builds: honor `OATHLIGHT_FRICTION_SECS` so the cool-off can be dialed
 /// down for manual testing. Release builds ignore the env var entirely and
 /// always use `DEFAULT_WEAKENING_DELAY_SECS` — otherwise a user could zero
-/// out every weakening's friction timer with `set PUREPATH_FRICTION_SECS=1`,
+/// out every weakening's friction timer with `set OATHLIGHT_FRICTION_SECS=1`,
 /// defeating the point of this module. Mirrors `uninstall::delay_secs`.
 #[cfg(debug_assertions)]
 fn weakening_delay_secs() -> u64 {
-    std::env::var("PUREPATH_FRICTION_SECS")
+    std::env::var("OATHLIGHT_FRICTION_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|v| *v > 0)
@@ -168,7 +168,7 @@ pub(crate) mod monotonic {
     use std::time::Instant;
 
     /// Non-Windows fallback: a process-lifetime monotonic anchor. NOT
-    /// cross-restart — Pure Path is Windows-first (see the master plan), and
+    /// cross-restart — Oath Light is Windows-first (see the master plan), and
     /// this path exists only so the module builds and behaves sanely
     /// elsewhere during development. A restart resets the anchor to zero, so
     /// (unlike Windows' system-wide `GetTickCount64`) any credited progress
@@ -235,7 +235,7 @@ fn view_of(action_id: &str, p: &PendingChange) -> PendingView {
 }
 
 /// One detected clock-tamper anomaly (a forward wall-clock jump unexplained
-/// by a reboot) — see `advance` below. `purepath-core`'s event log (plan 4.5)
+/// by a reboot) — see `advance` below. `oathlight-core`'s event log (plan 4.5)
 /// is the intended long-term consumer, via `FrictionStore::drain_anomalies`;
 /// this module itself stays free of any eventlog dependency (Part J: keep
 /// `friction.rs` core-clean) and only ever hands the *fact* of the anomaly
@@ -344,7 +344,7 @@ impl FrictionStore {
                             PendingChange {
                                 requested_at: at,
                                 delay_secs: crate::uninstall::delay_secs(),
-                                label: "Remove Pure Path from this computer".to_string(),
+                                label: "Remove Oath Light from this computer".to_string(),
                                 payload: serde_json::json!({}),
                                 credited_secs: now_w.saturating_sub(at),
                                 last_wall: now_w,
@@ -469,7 +469,7 @@ impl FrictionStore {
     ///
     /// `"uninstall"` never auto-fires: reaching its delay only flips
     /// `PendingView::ready`, which unlocks the explicit, separately-gated
-    /// "Remove Pure Path now" action (`complete_uninstall` in lib.rs). If
+    /// "Remove Oath Light now" action (`complete_uninstall` in lib.rs). If
     /// this function ever swept it up like any other weakening, removal
     /// would silently execute itself the moment the cool-off elapsed —
     /// exactly the impulsive, no-second-thought outcome the whole uninstall

@@ -119,9 +119,9 @@ dependencies = [
  "image",
  "lettre",
  "log",
+ "oathlight-core",
+ "oathlight-dns",
  "ort",
- "purepath-core",
- "purepath-dns",
  "rand_core 0.6.4",
  "serde",
  "serde_json",
@@ -3224,6 +3224,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "oath-light-host"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sysinfo",
+]
+
+[[package]]
+name = "oathlight-core"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "oathlight-dns"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "oathlight-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "oathlightguard"
+version = "0.1.0"
+
+[[package]]
 name = "objc2"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4068,39 +4101,6 @@ name = "pulp-wasm-simd-flag"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d8f70e07b9c3962945a74e59ca1c511bba65b6419468acc217c457d93f3c740"
-
-[[package]]
-name = "pure-path-host"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sysinfo",
-]
-
-[[package]]
-name = "purepath-core"
-version = "0.1.0"
-dependencies = [
- "log",
- "serde",
- "serde_json",
- "sha2",
-]
-
-[[package]]
-name = "purepath-dns"
-version = "0.1.0"
-dependencies = [
- "log",
- "purepath-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "purepathguard"
-version = "0.1.0"
 
 [[package]]
 name = "pxfm"

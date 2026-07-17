@@ -158,7 +158,7 @@ function PanicPage({ s, go }) {
               </button>
             )}
             <button className={'btn ' + (target ? 'btn-ghost' : 'btn-primary')} onClick={() => go('home')}>
-              <IconHeart size={17} /> Back to Pure Path
+              <IconHeart size={17} /> Back to Oath Light
             </button>
           </div>
           {!target && (

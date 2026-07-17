@@ -1,7 +1,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 // Canonical Graylist V2 site list (the single source of truth for the UI).
 // ════════════════════════════════════════════════════════════════════════════
-// These are the mixed-content platforms Pure Path filters IN PLACE instead of
+// These are the mixed-content platforms Oath Light filters IN PLACE instead of
 // blocking outright. Each entry mirrors a live rule:
 //   kind:'api' → a RULES row in graylist-inject.js (strips NSFW items from the
 //                JSON the site fetches, before render)

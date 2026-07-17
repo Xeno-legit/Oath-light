@@ -1,4 +1,4 @@
-# Manager Review — Pure Path (Phase 4 checkpoint)
+# Manager Review — Oath Light (Phase 4 checkpoint)
 
 **Date:** 2026-07-05 · **Branch:** `phase4/friction` · **Scope:** master plan, desktop app, extension, themes, AI layer.
 
@@ -26,8 +26,8 @@ The project is in genuinely good shape: the architecture (deterministic blocklis
 
 Phase 4's whole premise is that the adversary is *the user at a weak moment*. Two doors are open:
 
-1. **Watchdog kill switch is a plain temp file.** Writing `%TEMP%\purepath.watchdog.shutdown` (one PowerShell line, or any "how to remove Pure Path" forum post) stands the entire tamper-resistance down. Fine as a dev escape hatch; in release builds it should only be honored when the uninstall cool-off has actually elapsed (the `UninstallStore` already knows), or be removed entirely.
-2. **`PUREPATH_UNINSTALL_SECS` env override** (uninstall.rs:22) lets anyone set the 24-hour timer to 1 second. Same story: keep it in debug builds, compile it out of release.
+1. **Watchdog kill switch is a plain temp file.** Writing `%TEMP%\oathlight.watchdog.shutdown` (one PowerShell line, or any "how to remove Oath Light" forum post) stands the entire tamper-resistance down. Fine as a dev escape hatch; in release builds it should only be honored when the uninstall cool-off has actually elapsed (the `UninstallStore` already knows), or be removed entirely.
+2. **`OATHLIGHT_UNINSTALL_SECS` env override** (uninstall.rs:22) lets anyone set the 24-hour timer to 1 second. Same story: keep it in debug builds, compile it out of release.
 3. **The timer is still on the 10-minute testing value** (`DEFAULT_DELAY_SECS = 10 * 60`, uninstall.rs:20). The comment says so, but this is exactly the kind of value that ships by accident. Suggest: make release builds fail to compile or loudly warn unless it's 24h (e.g. a `#[cfg(debug_assertions)]` pair of constants instead of a comment).
 
 Also worth noting honestly in docs: `uninstall.json` and the registry Run key are user-writable, and the watchdog pair dies if both processes are killed within one poll tick (the code already documents this). Friction ≠ security — that's fine, but the *cheap* bypasses above should cost more than one shell command.

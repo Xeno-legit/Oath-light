@@ -1,4 +1,4 @@
-# Pure Path — Adversarial Perimeter Test Report
+# Oath Light — Adversarial Perimeter Test Report
 
 > A red-team pass driven as a "desperate addict seeking any dopamine," run against the
 > **live extension in a real logged-in browser** via the Playwright MCP bridge. Unlike the
@@ -7,7 +7,7 @@
 > looks at a page. Pairs with [GRAYLIST_V2_TEST_REPORT.md](GRAYLIST_V2_TEST_REPORT.md) and
 > [BLOCKING_STRATEGY.md](BLOCKING_STRATEGY.md).
 >
-> **Date:** 2026-06-20 · **Extension state verified live:** `window.__purePathGraylistV2 === true`,
+> **Date:** 2026-06-20 · **Extension state verified live:** `window.__oathLightGraylistV2 === true`,
 > `over18=0` cookie set, `fetch` patched. Accounts logged in (YouTube/Google, Reddit, Pinterest).
 > **Method mandate:** every finding was *visually verified* on the rendered page, not asserted
 > from predicate logic.
@@ -16,7 +16,7 @@
 
 ## 0. TL;DR — the one thing to fix
 
-**Pure Path enforces by an allowlist of *names*. Anything not explicitly named gets *zero*
+**Oath Light enforces by an allowlist of *names*. Anything not explicitly named gets *zero*
 content filtering**, and the pipeline short-circuits the instant a host isn't on a list. The
 addict never has to defeat the filter — they just stand where it isn't looking, which is most
 of the internet.
@@ -83,7 +83,7 @@ enforced nothing** on the regional TLD, which is the defect.)*
 ### 1.3 🔴 "Trusted" domains with explicit galleries — Wikimedia Commons
 `commons.wikimedia.org/wiki/Category:Nude_women` → **full-frontal nude image rendered inline**,
 **60 organized sub-categories** of nude content, freely browsable. Not blocked. The graylist
-script injected (`__purePathGraylistV2 === true`) but there is no rule for the host, so it does
+script injected (`__oathLightGraylistV2 === true`) but there is no rule for the host, so it does
 nothing. `wikimedia.org` is not whitelisted, not blocklisted, and carries no porn stem for the
 domain-keyword layer — so it's invisible to all three layers. Same logic exposes
 **archive.org** adult uploads and document hosts (Scribd-style erotica).
@@ -120,7 +120,7 @@ keyword-coverage gap, not a hard leak. (Matches the documented `thicc waifu` cov
 | **Google.com Images** | ✅ `safe=active` force-injected; "SafeSearch is locked … applied to this browser"; explicit filtered to artistic/stock | redirect fired (`ERR_ABORTED`), `page-…11-53-09…jpeg` |
 | **Bing.com Images** | ✅ `adlt=strict` force-injected; strict-mode warning, 0 explicit thumbs | redirect fired |
 | **Reddit** (logged in) | ✅ cookie `over18=0` + API scrub + path/search blocks held explicit out | §1.5 |
-| **Pinterest** | ⚠️ *Pinterest's own* filter suppressed queries — **Pure Path has no rule for it**; not a Pure Path win | "couldn't find any Pins" |
+| **Pinterest** | ⚠️ *Pinterest's own* filter suppressed queries — **Oath Light has no rule for it**; not a Oath Light win | "couldn't find any Pins" |
 
 ---
 
@@ -296,7 +296,7 @@ DeviantArt/Bluesky), **blacklist/strict-mode is also defensible.**
 | Vector | Query | What actually rendered | Root cause |
 |---|---|---|---|
 | 🔴 **Yandex Video** | `sex` | **~51 visible thumbs** (title: "3 thousand videos found"), explicit real titles incl. *"An Arousing Sex Session - Pornhub.com"*, *"Bellesa - Vanessa Sky…"*, *"18+ content"*, Turkish porn titles | uncovered engine (video tab) — no SafeSearch enforced |
-| 🟠 **Startpage Images** | `naked women` | suggestive / implied-nude (topless-from-behind, draped; headlines "strips completely NUDE", "Erotic Portrait Nude") — **not hardcore** | uncovered; Pure Path forces no safe param. Startpage's **own** "Safe Search: Moderate" default limits it — user can flip it to **Off** (dropdown on-page) and Pure Path won't re-enforce |
+| 🟠 **Startpage Images** | `naked women` | suggestive / implied-nude (topless-from-behind, draped; headlines "strips completely NUDE", "Erotic Portrait Nude") — **not hardcore** | uncovered; Oath Light forces no safe param. Startpage's **own** "Safe Search: Moderate" default limits it — user can flip it to **Off** (dropdown on-page) and Oath Light won't re-enforce |
 | 🟠 **Spotify** (whitelisted) | `erotica audiobook` | **9 "Explicit"-badged** audio items incl. *"…Handyman - Sexy erotica" (ELUST audiobooks)*, *"OWNING REGINA - Audiobook - Lesbian romance erotica (featuring BDSM)"*, Madonna "Erotica" | whitelist → all content checks skipped (audio-erotica vector, same hole class as YouTube) |
 | 🟡 **Tenor** | `sexy` | 14 suggestive animated GIFs | uncovered platform (same class as Giphy; self-limits to suggestive) |
 
@@ -442,7 +442,7 @@ regression harness (`test-adversarial-fixes.cjs`, 42/42) that runs the real
 
 ## 11. Round 4 — pre-beta sweep of the §9 backlog (privacy frontends, AI gen, SearXNG)
 
-> Run **2026-06-21** (open-beta eve), live in the same logged-in browser (`__purePathGraylistV2 === true`,
+> Run **2026-06-21** (open-beta eve), live in the same logged-in browser (`__oathLightGraylistV2 === true`,
 > `fetch` patched). This pass drives the **untested §9 backlog** — the vectors §1–§7 only *hypothesised*.
 > Method mandate unchanged: every leak below was confirmed by what actually **rendered** (rendered NSFW
 > post titles + real loaded `img` natural-dimensions / result counts), every "blocked" by a real
@@ -452,14 +452,14 @@ regression harness (`test-adversarial-fixes.cjs`, 42/42) that runs the real
 ### 11.1 🔴 NEW (highest value) — Privacy frontends bypass the *entire* host-keyed defense stack
 Every Reddit/YouTube/X defense keys on the real hostname (`reddit.com` / `youtube.com` / `x.com`).
 An open-source **mirror** serves the same content on an arbitrary community domain, where the graylist
-content script still injects (`__purePathGraylistV2 === true`) but **does nothing** — there is no rule
+content script still injects (`__oathLightGraylistV2 === true`) but **does nothing** — there is no rule
 for the host. Confirmed live:
 
 | Frontend (software) | URL driven | What rendered | Defenses bypassed |
 |---|---|---|---|
 | **Redlib** (Reddit) | `safereddit.com/r/nsfw` → redirected to `redlib.catsarch.com/r/nsfw` | Page title **"Not Safe for Work"**, **275** post elements, NSFW titles (e.g. *"Her face is the best seat in the house NSFW"*), **full-resolution media loaded** (4032×6048, 683×1024, 800×1100 jpeg) **proxied through `redlib.catsarch.com/img/`** | `over18=0` cookie, `/r/` path block, `over_18` API scrub, nuclear search-keyword filter — **all** key on `reddit.com`, none fire |
 | **Invidious** (YouTube) | `yewtu.be/search?q=lingerie+try+on+haul` | **117** video result elements (title *"Lizeth Ramirez Savage X Fall Try-On Haul"* …) | Forced Restricted Mode (`PREF` cookie) + `GRAYLIST_SEARCH_ROUTES` nuclear keyword block — both key on `youtube.com` |
-| **Nitter** (X) | `xcancel.com/search?f=media&q=nsfw` | Reached the instance's **own error page** (X upstream rate-limit), **not** a Pure Path block — host is uncovered | X `possibly_sensitive` scrub keys on `x.com` |
+| **Nitter** (X) | `xcancel.com/search?f=media&q=nsfw` | Reached the instance's **own error page** (X upstream rate-limit), **not** a Oath Light block — host is uncovered | X `possibly_sensitive` scrub keys on `x.com` |
 
 **Why it's the worst hole on the board:** redlib **re-proxies the images through its own domain**
 (`/img/…`), so even a hypothetical CDN-level block wouldn't help; and the class is open-ended —
@@ -497,7 +497,7 @@ blacklist. A bare `perchance`/`mage`/`tensor` stem would over-match SFW words �
 ### 11.3 🔴 NEW (visually confirmed) — SearXNG instances serve unfiltered aggregated image search
 `searx.be/search?q=naked+women&categories=images&safesearch=0` → **100 result articles, 100 loaded
 thumbnails**, all proxied through `searx.be/image_proxy?url=…` (the live **Google/Bing image index with
-SafeSearch stripped**). Pure Path appended **no** forced param and did **not** block — `SEARCH_ENGINES`
+SafeSearch stripped**). Oath Light appended **no** forced param and did **not** block — `SEARCH_ENGINES`
 can't host-match the unbounded SearXNG instance space (the exact reason §10 left it as backlog). This is
 the Yandex/Brave class but worse: it's the mainstream engines' own index, unfiltered, on an arbitrary host.
 
@@ -510,7 +510,7 @@ surface. Folds into one mechanism with the privacy-frontend fix.
 `api.codetabs.com/v1/proxy/?quest=<blocked-url>` → **not blocked**; the host isn't in
 `BYPASS_PROXY_DOMAINS` and `unwrapBypassUrl` doesn't recognise the `quest=` param, so the wrapped target
 is never extracted/re-checked. (codetabs' *own* API returned "Bad request" on the test URLs, so no porn
-actually rendered — but the **Pure Path defect** — an uncovered proxy host + unparsed wrapper param —
+actually rendered — but the **Oath Light defect** — an uncovered proxy host + unparsed wrapper param —
 is real.) Generalises to any reader/CORS/web proxy off the ~25-entry list. Add `api.codetabs.com` and the
 generic `?url=`/`?quest=`/`?u=` unwrap; longer-term the finite-list approach needs a generic
 "this response is a proxied foreign page" heuristic.
@@ -533,7 +533,7 @@ generic `?url=`/`?quest=`/`?u=` unwrap; longer-term the finite-list approach nee
 
 ### 11.7 Round-4 bottom line
 The Round 1–3 enforcement held everywhere it was re-tested. The remaining exposure is now clearly
-**one shape: open-ended hostnames that Pure Path can't enumerate** — privacy frontends (§11.1), SearXNG
+**one shape: open-ended hostnames that Oath Light can't enumerate** — privacy frontends (§11.1), SearXNG
 instances (§11.3), and off-list proxies (§11.4). All three want the *same* fix the graylist already
 proved out: **stop matching hosts, start matching software/content fingerprints in `content.js`** (stable
 across instances, survives the domain churn). Plus a small blacklist top-up for the uncovered AI
@@ -567,7 +567,7 @@ Every Round-4 finding is enforced in code. Validated by the regression harness
 
 ## 12. Round 5 — the whitelist perimeter ("trusted" hosts), driven again
 
-> Run **2026-06-21**, live in the same logged-in browser (`__purePathGraylistV2 === true`,
+> Run **2026-06-21**, live in the same logged-in browser (`__oathLightGraylistV2 === true`,
 > `fetch` patched). This pass re-attacked the one class Round 1–4 *named but never fully closed*:
 > the **§3.1 whitelist short-circuit** — any host in `WHITELIST_DOMAINS` returns
 > `{ blocked:false, tier:'whitelist' }` at `shouldBlockUrl` STEP 2 and skips **every** content
@@ -608,7 +608,7 @@ challenge-walled under automation but is structurally identical (code-confirmed 
 | Vector | Result | Note |
 |---|---|---|
 | **telegra.ph** (`/Sample-Page-…`) | 🟡 **uncovered** (re-confirmed) | Renders arbitrary user HTML + images inline; no rule, no porn stem, not whitelisted/blacklisted. The known §7.5/§9 Telegram-adjacent host vector — any porn link shared in a Telegram channel renders fully unfiltered. Backlog (needs a content/host heuristic). |
-| **Privacy-frontend fresh instances** (off-seed redlib `redlib.private.coffee`, invidious `invidious.f5.si`, libreddit `libreddit.bus-hit.me`) | ⚪ **inconclusive** | Every instance tried was Anubis/Cloudflare **anti-bot challenge-walled** (HTTP 418 → 502) or dead (`ERR_NAME_NOT_RESOLVED`). That's the *instance's* bot defense fighting the Playwright bridge — **not** a Pure Path result — so the content.js fingerprint detector (the Round-4 keystone, which fires only once real content renders) could **not** be exercised end-to-end. Honest non-result; needs a non-challenge instance or a manual (human-driven) pass to verify. The seed-list navigation block (§11.1) is unaffected and still 6/6 in the harness. |
+| **Privacy-frontend fresh instances** (off-seed redlib `redlib.private.coffee`, invidious `invidious.f5.si`, libreddit `libreddit.bus-hit.me`) | ⚪ **inconclusive** | Every instance tried was Anubis/Cloudflare **anti-bot challenge-walled** (HTTP 418 → 502) or dead (`ERR_NAME_NOT_RESOLVED`). That's the *instance's* bot defense fighting the Playwright bridge — **not** a Oath Light result — so the content.js fingerprint detector (the Round-4 keystone, which fires only once real content renders) could **not** be exercised end-to-end. Honest non-result; needs a non-challenge instance or a manual (human-driven) pass to verify. The seed-list navigation block (§11.1) is unaffected and still 6/6 in the harness. |
 
 ### 12.3 Fix applied (enforcement pass — 2026-06-21, manifest 3.3.0)
 User decisions for this round: **(scope)** block explicit **sex-ACT/practice** articles only —
@@ -646,7 +646,7 @@ clear the instances' anti-bot challenges).
 
 ## 13. Round 6 — the "stand where it isn't looking" perimeter, re-driven
 
-> Run **2026-06-22**, live in the same logged-in browser (`__purePathGraylistV2 === true`,
+> Run **2026-06-22**, live in the same logged-in browser (`__oathLightGraylistV2 === true`,
 > enforcement confirmed by the Round-5 control: `/wiki/Ejaculation` → `net::ERR_ABORTED`). This
 > pass went back to the report's own TL;DR thesis — *the addict never defeats the filter, they
 > stand where it isn't looking* — and swept the **uncovered-host classes** the earlier rounds
@@ -707,7 +707,7 @@ no block:** `telegra.ph`, `justpaste.it`. Structurally uncovered: `graph.org` (t
 backstop. `t.me/s/` channel previews remain the long-standing un-built Telegram vector.
 
 ### 13.4 🟡 Foreign search engines — uncovered Tier-2 class, but self-censor-capped
-The Round-1 `SEARCH_ENGINES` Tier-2 list omits the major **non-Western** engines. Pure Path forces
+The Round-1 `SEARCH_ENGINES` Tier-2 list omits the major **non-Western** engines. Oath Light forces
 no param and blocks no media surface on them. **Live-driven:**
 - **Baidu Images** (`image.baidu.com`, query `naked woman nude`) → **49 images rendered, not
   blocked** — but Baidu's state-mandated censorship held them to **artistic/suggestive** (sculpture,
@@ -806,11 +806,11 @@ the query layer doesn't.** Trivial obfuscations therefore sail through:
 - **Mojeek** (Tier-2 engine): `mojeek.com/search?q=hentai` → `net::ERR_ABORTED` (blocked), but
   `mojeek.com/search?q=h3ntai` → **rendered**, page title *"h3ntai - Mojeek Search"*, and the web
   results **surfaced an actual hentai-porn link** — `hentai69.hotviber.fr` *"H3ntai 69, le Sexe
-  Orientale"*. Porn hosts self-index under leet SEO, so the obfuscated query both bypasses Pure Path
+  Orientale"*. Porn hosts self-index under leet SEO, so the obfuscated query both bypasses Oath Light
   **and** realizes content.
 - **YouTube** (graylist route): `youtube.com/results?search_query=porn` → blocked, but
   `youtube.com/results?search_query=p0rn` → **rendered** (title *"p0rn - YouTube"*, not `about:blank`)
-  — Pure Path's nuclear search layer took no action (YouTube's own Restricted Mode still caps the
+  — Oath Light's nuclear search layer took no action (YouTube's own Restricted Mode still caps the
   results, but the PP layer demonstrably failed).
 
 **Authoritative coverage** (`round7-probe.cjs`, real `shouldBlockUrl` + real 100k blacklist) — pre-fix

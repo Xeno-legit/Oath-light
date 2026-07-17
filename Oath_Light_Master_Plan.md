@@ -1,7 +1,7 @@
-# Pure Path
+# Oath Light
 Master plan  
 
- Pure path is an anti-addiction software that is designed specifically for fighting Pornography and the fast spreading virus of such disgusting and shameful acts regardless. The app should go under 4-7 stages of development.
+ Oath light is an anti-addiction software that is designed specifically for fighting Pornography and the fast spreading virus of such disgusting and shameful acts regardless. The app should go under 4-7 stages of development.
 
 The First 3 stages are beta stages, then the rest is Alpha stages
 
@@ -54,7 +54,7 @@ Until every stage is complete or before it by one stage.
 
 ## Phase 5:
 
-▶ Phase 5 will focus on phones, Pure path will come to android only with an integrated Ai to see and monitor the user screen.
+▶ Phase 5 will focus on phones, Oath light will come to android only with an integrated Ai to see and monitor the user screen.
 
 * Desktop Alpha launch.
 * Phone support
@@ -68,7 +68,7 @@ Until every stage is complete or before it by one stage.
 
 * Domains expansion
 * Multi-language support
-* Pure path unique website.
+* Oath light unique website.
 * Donation booth
 * Full launch
 
@@ -76,5 +76,5 @@ Until every stage is complete or before it by one stage.
 
 ▶ Phase 7 is just a constant bug monitoring and app improvement stage.
 
-- However there are plans for pure path Plus (islamic sections added)
+- However there are plans for oath light Plus (islamic sections added)
                                          (Also not Paid)

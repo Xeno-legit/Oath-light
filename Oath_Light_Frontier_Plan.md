@@ -1,7 +1,7 @@
-# Pure Path — Frontier Plan
+# Oath Light — Frontier Plan
 
 **Goal:** Not *a* frontier blocker. **THE** frontier blocker.
-**Date:** 2026-07-07 · **Status:** Living document · **Companion to:** [Pure_Path_Master_Plan.md](Pure_Path_Master_Plan.md)
+**Date:** 2026-07-07 · **Status:** Living document · **Companion to:** [Oath_Light_Master_Plan.md](Oath_Light_Master_Plan.md)
 
 This document is the product of a full audit of the codebase (extension, desktop app,
 ML layer, watchdog, uninstall flow) compared against the 2026 commercial frontier:
@@ -22,11 +22,11 @@ Every competitor wins on exactly **one** axis and neglects the rest:
 | BlockerX | Community + panic tools | Filtering quality, privacy |
 | QUITTR / Fortify | Recovery science | Actual blocking (weak filters) |
 
-**Pure Path already wins on filtering quality** (graylist ground-truth per-item stripping,
+**Oath Light already wins on filtering quality** (graylist ground-truth per-item stripping,
 41-language homoglyph/punycode keyword engine, 385k curated domains) **and on trust**
 (GPLv3, free, zero telemetry). Nobody else has either.
 
-To be THE frontier blocker, Pure Path must win on **all five axes at once**:
+To be THE frontier blocker, Oath Light must win on **all five axes at once**:
 
 1. **Containment** — nothing NSFW reaches the eyes, on any surface, in any app.
 2. **Intelligence** — on-device AI that catches what lists can't, and *acts*.
@@ -254,7 +254,7 @@ watchdog.
 ## Pillar 5 — Humanity: win the weak moment
 
 > A wall stops a request. It doesn't stop an urge. The recovery-app wave (QUITTR,
-> Fortify, Brainbuddy) proved people pay $20/month just for this layer. Pure Path can
+> Fortify, Brainbuddy) proved people pay $20/month just for this layer. Oath Light can
 > ship it free, private, and integrated with the actual blocking data.
 
 ### 5.1 Panic / SOS button — `P0 · S · PARITY`
@@ -265,9 +265,9 @@ motivational redirect. All assets already exist in the codebase; this is assembl
 invention. Highest emotional-value-per-line-of-code item in this document.
 
 ### 5.2 Privacy-first accountability — `P0 · L · EDGE`
-**Design principle first: Pure Path is solo-first.** Many users — a teenager, someone
+**Design principle first: Oath Light is solo-first.** Many users — a teenager, someone
 isolated, someone too ashamed to tell anyone — have no partner to name, and the app
-must be *fully* effective for them. "Accountability" in Pure Path is therefore a
+must be *fully* effective for them. "Accountability" in Oath Light is therefore a
 ladder, and the bottom rungs need no other human:
 
 - **Tier 0 — the app holds you accountable (default, solo):** the friction system
@@ -298,7 +298,7 @@ will destroy trust the moment a vulnerable user notices):
   reflection → plan — presented as guided exercises, not as "AI".
 - **v2:** structured 90-day course: daily 3-minute lessons on the neuroscience of the
   habit, trigger mapping, habit replacement. Fortify/QUITTR paywall exactly this;
-  Pure Path ships it free, offline, in-app.
+  Oath Light ships it free, offline, in-app.
 - **v3 (optional):** local small-LLM mentor via the existing ONNX/ort stack, or
   bring-your-own-API-key. Strictly opt-in, clearly labeled.
 
@@ -325,7 +325,7 @@ Relapse currently just resets the counter. Shame-driven design causes abandonmen
   toggle; no blocker does this.
 - Habit replacement: block screen offers the user's own pre-configured alternatives
   ("Go do 20 pushups", "Message Ahmad", link to a book/app).
-- Optional faith content packs (Phase 7's "Pure Path Plus"): pluggable motivation
+- Optional faith content packs (Phase 7's "Oath Light Plus"): pluggable motivation
   packs — secular / Islamic (prayer-time-aware lockdown windows, Quranic reminders) /
   Christian — as data, not forks.
 
@@ -347,7 +347,7 @@ hashes; anyone can verify the store binary matches the GitHub source. For a
 tamper-resistance product this is the ultimate trust story, and no proprietary
 competitor can ever match it.
 
-### 6.3 "Break Pure Path" bypass bounty — `P1 · S · EDGE`
+### 6.3 "Break Oath Light" bypass bounty — `P1 · S · EDGE`
 A standing community challenge: documented threat model + a `BYPASSES.md` hall of fame
 for reported holes (no cash needed; recognition works). The adversarial test suite
 already exists — let the internet extend it. Turns the biggest fear (a public bypass
@@ -431,7 +431,7 @@ zero good free blockers exist in most of them).
 
 ## The pitch, when it's all built
 
-> **Pure Path** — the only blocker that filters *inside* the platforms you use, watches
+> **Oath Light** — the only blocker that filters *inside* the platforms you use, watches
 > the screen with AI that never leaves your device, cannot be talked out of protecting
 > you at 1 a.m., supports you like a coach instead of shaming you like a warden, and
 > proves every one of those claims with open source code.

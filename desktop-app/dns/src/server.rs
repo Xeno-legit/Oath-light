@@ -91,7 +91,7 @@ pub fn start(upstreams: Upstreams) -> Result<DnsServer, String> {
         std::thread::spawn(move || tcp_accept_loop(tcp, running, upstreams));
     }
 
-    log::info!("purepath-dns: listening on 127.0.0.1:53 (UDP+TCP)");
+    log::info!("oathlight-dns: listening on 127.0.0.1:53 (UDP+TCP)");
     Ok(DnsServer { running })
 }
 

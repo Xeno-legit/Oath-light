@@ -1,4 +1,4 @@
-# Pure Path — On-Device NSFW Detection: Evaluation & Architecture Plan
+# Oath Light — On-Device NSFW Detection: Evaluation & Architecture Plan
 
 **Status:** Detection evaluation complete (Phase 4 AI layer). Action/enforcement policy added 2026-06-28 (§8).
 **Date:** 2026-06-23 (detection) · 2026-06-28 (action layer)
@@ -61,7 +61,7 @@ prototype for the mobile core.
 ## 3. Evaluation methodology
 
 - **Set:** 15 NSFW + 15 SFW real screenshots, captured with Playwright from the site
-  categories Pure Path actually targets, balanced **drawn vs photographic** and including
+  categories Oath Light actually targets, balanced **drawn vs photographic** and including
   **borderline-but-clean** SFW (swimwear, fitness, clothed anime) to measure false-positive risk.
 - **Drawn NSFW (7):** booru posts (rule34, gelbooru, konachan, yandere), nhentai reader pages.
 - **Photographic NSFW (8):** tube landing/video pages (xvideos, pornhub), reddit NSFW, redgifs, a gif.
@@ -344,7 +344,7 @@ escalates. Real porn-browsing *does* persist, so it climbs fast. Persistence sor
   *persistence-gated* ladder in §8.3 reaches the same 1–10 min friction **safely**, because a
   false positive can't climb to it and disengagement always exits.
 - **Accountability-partner / "detect → report to a human" model (Covenant Eyes,
-  Accountable2You).** Pure Path has no partner feature and will not add one. The interrupt is
+  Accountable2You).** Oath Light has no partner feature and will not add one. The interrupt is
   between the user and themselves.
 
 ### 8.5 Attribution — "which app / which browser?"

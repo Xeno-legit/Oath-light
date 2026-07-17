@@ -1,9 +1,9 @@
-# Pure Path — Blocking Strategy
+# Oath Light — Blocking Strategy
 
 > Reference doc for the domain-blocking and graylist rework.
 > Last updated: 2026-06-05
 
-This captures the decisions behind how Pure Path blocks, so the reasoning travels
+This captures the decisions behind how Oath Light blocks, so the reasoning travels
 with the code and isn't lost. It feeds two planned items in the master plan:
 **Domain-name keyword layer (Phase 2)** and **Graylist V2 — API interception (Phase 3)**.
 
@@ -172,7 +172,7 @@ Notes:
   site that was missing — all chans, video-chat, and other NSFW sites were already blocked).
 - Removed 4 dead domains from `Graylistfoundomains.txt` (both the category lists and
   the reliability analysis).
-- Added **Domain-name keyword layer** to Phase 2 of `Pure_Path_Master_Plan.md`.
+- Added **Domain-name keyword layer** to Phase 2 of `Oath_Light_Master_Plan.md`.
 - Added **Graylist V2 (API interception)** to Phase 3.
 - **Built Graylist V2 — API/network-layer interception** (`extension/graylist-inject.js`):
   - A `world:"MAIN"` script (injected by `content.js` as an external web-accessible

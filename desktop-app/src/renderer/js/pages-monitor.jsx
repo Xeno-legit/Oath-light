@@ -135,7 +135,7 @@ function MonitorPage() {
 
       {!native &&
         <div className="card" style={{ marginTop: 18, padding: 18 }}>
-          Not running inside the desktop app — launch Pure Path (Tauri) to use the live monitor.
+          Not running inside the desktop app — launch Oath Light (Tauri) to use the live monitor.
         </div>}
 
       {err &&

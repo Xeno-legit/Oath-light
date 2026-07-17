@@ -24,8 +24,8 @@ function debugLog(category, message, data = null) {
 
 function saveCounts() {
   try {
-    localStorage.setItem('purepath_domain_count', domains.length);
-    localStorage.setItem('purepath_threats_count', stats.totalBlocks || 0);
+    localStorage.setItem('oathlight_domain_count', domains.length);
+    localStorage.setItem('oathlight_threats_count', stats.totalBlocks || 0);
     debugLog('CACHE', 'Saved counts to localStorage');
   } catch (error) {
     debugLog('CACHE', 'Failed to save counts:', error);
@@ -34,8 +34,8 @@ function saveCounts() {
 
 function loadCachedCounts() {
   try {
-    const cachedDomainCount = localStorage.getItem('purepath_domain_count');
-    const cachedThreatsCount = localStorage.getItem('purepath_threats_count');
+    const cachedDomainCount = localStorage.getItem('oathlight_domain_count');
+    const cachedThreatsCount = localStorage.getItem('oathlight_threats_count');
     
     if (cachedDomainCount) {
       document.getElementById('domainCount').textContent = parseInt(cachedDomainCount).toLocaleString();

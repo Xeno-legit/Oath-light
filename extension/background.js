@@ -64,7 +64,7 @@ async function recordBlockAndRedirect(tabId, url, reason, match, skipTabUpdate =
   const blockedUrl = PP_TESTING
     ? 'about:blank'
     : blockedPrefix + `?reason=${reason}&match=${encodeURIComponent(match)}`;
-  if (PP_TESTING) console.log('[PurePath][TEST] BLOCK', { reason, match, url });
+  if (PP_TESTING) console.log('[OathLight][TEST] BLOCK', { reason, match, url });
 
   // Desktop "Redirect link": send the user to the configured URL instead of the
   // block screen. The loop guard (the url isn't already the target) stops an
@@ -73,9 +73,9 @@ async function recordBlockAndRedirect(tabId, url, reason, match, skipTabUpdate =
   const redirectTarget = PP_TESTING ? null : getRedirectTarget();
   const targetUrl = (redirectTarget && !url.startsWith(redirectTarget)) ? redirectTarget : blockedUrl;
   if (redirectTarget) {
-    console.log('[PurePath] block →', targetUrl === redirectTarget ? 'redirecting to ' + redirectTarget : 'block screen (loop guard)');
+    console.log('[OathLight] block →', targetUrl === redirectTarget ? 'redirecting to ' + redirectTarget : 'block screen (loop guard)');
   } else if (!blockingSettings) {
-    console.log('[PurePath] block → block screen (no settings from desktop app yet)');
+    console.log('[OathLight] block → block screen (no settings from desktop app yet)');
   }
 
   if (!skipTabUpdate) {
@@ -216,7 +216,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (chrome.runtime.lastError) {
         sendResponse({ success: false, error: chrome.runtime.lastError.message });
       } else {
-        console.log('Pure Path: Blocklists updated in storage');
+        console.log('Oath Light: Blocklists updated in storage');
         sendResponse({ success: true });
         // Notify desktop app of the change
         if (typeof NativeMessagingBridge !== 'undefined') {

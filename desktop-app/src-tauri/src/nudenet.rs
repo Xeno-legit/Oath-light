@@ -130,13 +130,13 @@ impl NudeNetDetector {
     }
 }
 
-/// Locate the NudeNet model: `PUREPATH_NUDENET` env override, then alongside the
+/// Locate the NudeNet model: `OATHLIGHT_NUDENET` env override, then alongside the
 /// exe, then walking up the dev tree to `desktop-app/ml` — same scheme as the
 /// SigLIP model in [`crate::nsfw::resolve_model_path`].
 pub fn resolve_model_path() -> Option<PathBuf> {
     const NAME: &str = "nudenet-320n.onnx";
 
-    if let Ok(p) = std::env::var("PUREPATH_NUDENET") {
+    if let Ok(p) = std::env::var("OATHLIGHT_NUDENET") {
         let pb = PathBuf::from(p);
         if pb.exists() {
             return Some(pb);

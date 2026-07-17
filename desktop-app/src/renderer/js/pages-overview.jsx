@@ -394,7 +394,7 @@ function BrowserProtectionCard() {
         <div>
           <div style={{ fontWeight: 800, fontSize: 16, letterSpacing: '-.02em' }}>Browser protection</div>
           <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3 }}>
-            Pure Path watches every running browser and keeps its extension in place
+            Oath Light watches every running browser and keeps its extension in place
           </div>
         </div>
         {runningBrowsers.length > 0 &&
@@ -410,7 +410,7 @@ function BrowserProtectionCard() {
         </div>
       ) : shown.length === 0 ? (
         <div style={{ fontSize: 13.5, color: 'var(--muted)', padding: '14px 2px' }}>
-          No browser is running right now. Open one and Pure Path will protect it automatically.
+          No browser is running right now. Open one and Oath Light will protect it automatically.
         </div>
       ) : (
         <div className="ext-grid">

@@ -77,6 +77,7 @@ pub mod ota {
     /// `<app_data_dir>/lists/` by the app's `ota.rs` after signature + hash +
     /// whitelist-collision checks — nothing constructs one of these from
     /// unverified bytes).
+    #[derive(Debug)]
     pub struct OtaLists {
         /// The manifest version these lists came from (monotonic, >= 1).
         pub version: u64,

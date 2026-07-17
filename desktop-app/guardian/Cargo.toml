@@ -1,12 +1,12 @@
 [package]
-name = "purepathguard"
+name = "oathlightguard"
 version = "0.1.0"
-description = "Pure Path watchdog guardian — keeps the main app alive"
+description = "Oath Light watchdog guardian — keeps the main app alive"
 edition = "2021"
 rust-version = "1.77.2"
 
 [[bin]]
-name = "purepathguard"
+name = "oathlightguard"
 path = "src/main.rs"
 
 # No dependencies: pure std + a handful of kernel32 FFI calls. Tiny binary.

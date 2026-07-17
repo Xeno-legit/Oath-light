@@ -334,7 +334,7 @@ function BlockingPage({ s, PP }) {
         : Promise.resolve({ applied: true })))
       .then(() => toggle('uninstallGuard'))
       .catch((e) => {
-        if (!e || e.message !== 'cancelled') console.warn('[PurePath] toggleGuard failed:', e);
+        if (!e || e.message !== 'cancelled') console.warn('[OathLight] toggleGuard failed:', e);
       });
   };
   // Block-screen mode toggles are mutually exclusive — enabling one disables
@@ -490,7 +490,7 @@ function BlockingPage({ s, PP }) {
       <div className="card fade-up" style={{ marginTop: 18 }}>
         <div style={{ fontWeight: 800, fontSize: 16 }}>Tamper protection &amp; enforcement</div>
         <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, marginBottom: 18, maxWidth: '60ch', lineHeight: 1.5 }}>
-          What actually stops you from working around Pure Path — and what's still on the way.
+          What actually stops you from working around Oath Light — and what's still on the way.
         </div>
 
         {/* real, backend-enforced */}
@@ -573,7 +573,7 @@ function BlockingPage({ s, PP }) {
           <div className="ico"><IconLock size={20} /></div>
           <div className="txt">
             <b>Settings lock</b>
-            <span>Password-protect Pure Path's settings so they can't be changed without you</span>
+            <span>Password-protect Oath Light's settings so they can't be changed without you</span>
           </div>
           <div className="row" style={{ gap: 10 }}>
             <span className="chip">Coming in Alpha</span>

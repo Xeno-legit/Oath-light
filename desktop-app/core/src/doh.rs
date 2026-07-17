@@ -3,7 +3,7 @@
 //! A browser (or any app) bootstrapping a DoH client must first resolve the
 //! endpoint's hostname over plain DNS — there is no other way to find the
 //! HTTPS server to talk to unless the IP is hardcoded. Killing that one plain
-//! lookup (the DNS resolver in `purepath-dns` NXDOMAINs these — see
+//! lookup (the DNS resolver in `oathlight-dns` NXDOMAINs these — see
 //! `dns/src/decide.rs`) kills DoH for anything that isn't hardcoding IPs,
 //! without needing to parse/block HTTPS traffic at all.
 //!

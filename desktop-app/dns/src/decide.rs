@@ -15,7 +15,7 @@
 //! scope note. It never does per-path/query filtering, SafeSearch, or
 //! graylist stripping; those stay extension-only.
 
-use purepath_core::{lists, matching};
+use oathlight_core::{lists, matching};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -75,7 +75,7 @@ fn is_custom_blocked(host: &str) -> bool {
 
 fn doh_set() -> &'static HashSet<String> {
     static SET: OnceLock<HashSet<String>> = OnceLock::new();
-    SET.get_or_init(|| purepath_core::doh::DOH_ENDPOINTS.iter().map(|s| s.to_string()).collect())
+    SET.get_or_init(|| oathlight_core::doh::DOH_ENDPOINTS.iter().map(|s| s.to_string()).collect())
 }
 
 fn is_doh_endpoint(host: &str) -> bool {

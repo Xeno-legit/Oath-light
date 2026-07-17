@@ -33,7 +33,7 @@ function TitleBar({ s }) {
     <div className="titlebar">
       <div className="tl-brand" data-tauri-drag-region>
         <span className="tl-logo"><Logo size={18} /></span>
-        <span className="tl-title">Pure Path</span>
+        <span className="tl-title">Oath Light</span>
         <span className="beta-badge" title="Open beta build — features are still in testing and may change or misbehave.">BETA</span>
       </div>
       <div className="tl-drag" data-tauri-drag-region style={{ flex: 1, alignSelf: 'stretch' }} />
@@ -58,7 +58,7 @@ function Sidebar({ s, go }) {
       <div className="brand" onClick={() => go('home')} title="Home">
         <div className="brand-logo"><Logo size={34} /></div>
         <div>
-          <div className="brand-name">Pure Path</div>
+          <div className="brand-name">Oath Light</div>
           <div className="brand-sub">Day {s.streak}</div>
         </div>
       </div>
@@ -122,7 +122,7 @@ function HubMenu({ s, go }) {
       <div className="beta-banner fade-up" role="note">
         <span className="beta-banner-tag">OPEN BETA</span>
         <span className="beta-banner-text">
-          You're running an early public build of Pure Path. It's still in active
+          You're running an early public build of Oath Light. It's still in active
           testing — some protection may be incomplete and things can change or break.
           Please don't rely on it as your only safeguard yet.
         </span>

@@ -1,4 +1,4 @@
-//! Pure Path — Browser registry, detection, native-host registration & policy enforcement.
+//! Oath Light — Browser registry, detection, native-host registration & policy enforcement.
 //!
 //! This module is the single source of truth for everything browser-specific:
 //!   * the stable extension IDs,
@@ -35,10 +35,10 @@ fn reg() -> std::process::Command {
 pub const EXTENSION_ID: &str = "lknpaoecooklfjgenmjpkdkahgoofank";
 
 /// Firefox (Gecko) extension ID — from `browser_specific_settings.gecko.id`.
-pub const GECKO_EXTENSION_ID: &str = "purepath@xeno-legit.github.io";
+pub const GECKO_EXTENSION_ID: &str = "oathlight@xeno-legit.github.io";
 
 /// Native messaging host name (must match `connectNative()` in background.js).
-pub const HOST_NAME: &str = "com.purepath.companion";
+pub const HOST_NAME: &str = "com.oathlight.companion";
 
 /// Update URL used by the Chromium force-install policy. Points at the update
 /// manifest the desktop app serves from localhost (see `update_server` in
@@ -301,20 +301,20 @@ pub fn is_installed(_def: &BrowserDef) -> bool {
 pub fn write_manifests(dir: &Path, host_binary: &Path) -> std::io::Result<(PathBuf, PathBuf)> {
     std::fs::create_dir_all(dir)?;
 
-    let chromium_path = dir.join("com.purepath.companion.json");
+    let chromium_path = dir.join("com.oathlight.companion.json");
     let chromium = serde_json::json!({
         "name": HOST_NAME,
-        "description": "Pure Path Desktop Companion — Native Messaging Host",
+        "description": "Oath Light Desktop Companion — Native Messaging Host",
         "path": host_binary.to_string_lossy(),
         "type": "stdio",
         "allowed_origins": [ format!("chrome-extension://{}/", EXTENSION_ID) ]
     });
     std::fs::write(&chromium_path, serde_json::to_string_pretty(&chromium).unwrap())?;
 
-    let gecko_path = dir.join("com.purepath.companion.firefox.json");
+    let gecko_path = dir.join("com.oathlight.companion.firefox.json");
     let gecko = serde_json::json!({
         "name": HOST_NAME,
-        "description": "Pure Path Desktop Companion — Native Messaging Host",
+        "description": "Oath Light Desktop Companion — Native Messaging Host",
         "path": host_binary.to_string_lossy(),
         "type": "stdio",
         "allowed_extensions": [ GECKO_EXTENSION_ID ]

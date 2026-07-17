@@ -2,7 +2,7 @@
 //! (plan item 3.5). The publisher side lives in CI
 //! (`.github/workflows/release-lists.yml` + `scripts/ota/sign-manifest.mjs`);
 //! the shared policy (manifest schema, baked pubkeys, monotonicity, the
-//! whitelist safety floor) lives in `purepath_core::ota`; this module is the
+//! whitelist safety floor) lives in `oathlight_core::ota`; this module is the
 //! I/O half: fetch, verify, atomically install, load-at-startup, and push the
 //! fresh lists to every connected extension.
 //!
@@ -25,8 +25,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use purepath_core::lists;
-use purepath_core::ota as policy;
+use oathlight_core::lists;
+use oathlight_core::ota as policy;
 use tauri::{AppHandle, Emitter, Manager};
 
 // ============================================================================
@@ -39,12 +39,12 @@ use tauri::{AppHandle, Emitter, Manager};
 /// assets" CDN the plan describes.
 ///
 /// Repo slug taken from this repository's `origin` remote
-/// (github.com/Xeno-legit/Pure-Path). TODO(owner): if the project moves to a
+/// (github.com/Xeno-legit/Oath-Light). TODO(owner): if the project moves to a
 /// dedicated org/repo before Alpha, update this const AND the matching
 /// `_config.baseUrl` in `extension/bg/ota.js` — they must always point at the
 /// same release stream, or desktop and extension will drift.
 pub const OTA_RELEASE_BASE: &str =
-    "https://github.com/Xeno-legit/Pure-Path/releases/latest/download";
+    "https://github.com/Xeno-legit/Oath-Light/releases/latest/download";
 
 pub const MANIFEST_ASSET: &str = "lists-manifest.json";
 pub const MANIFEST_SIG_ASSET: &str = "lists-manifest.json.sig";
@@ -551,11 +551,11 @@ mod tests {
     #[test]
     fn sig_verify_interop_with_noble_ed25519() {
         let pub_hex = "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29";
-        let msg = b"purepath-ota-interop-fixture-v1";
+        let msg = b"oathlight-ota-interop-fixture-v1";
         let sig_hex = "63e68cf09095be3a32cf1987fd8629c8376b859cb2dfea87d6ea950d11138d4796bf6b80dcf3b966cb0f479736da259ff09b869657f63cd9263490c541365d05";
         assert!(verify_sig_any(msg, sig_hex, &[pub_hex]).is_ok());
         // And the same signature over different bytes must fail.
-        assert!(verify_sig_any(b"purepath-ota-interop-fixture-v2", sig_hex, &[pub_hex]).is_err());
+        assert!(verify_sig_any(b"oathlight-ota-interop-fixture-v2", sig_hex, &[pub_hex]).is_err());
     }
 
     #[test]

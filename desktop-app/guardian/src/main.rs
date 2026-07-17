@@ -1,4 +1,4 @@
-//! Pure Path — watchdog guardian (`purepathguard.exe`).
+//! Oath Light — watchdog guardian (`oathlightguard.exe`).
 //!
 //! A hidden, windowless companion to the main desktop app. Half of the
 //! dual-process watchdog (the other half lives in
@@ -26,8 +26,8 @@ fn main() {
     use std::time::{Duration, Instant};
 
     // ---- Shared protocol constants (keep in sync with watchdog.rs) ----------
-    const MAIN_MUTEX: &str = "PurePath.Watchdog.Main.v1";
-    const GUARDIAN_MUTEX: &str = "PurePath.Watchdog.Guardian.v1";
+    const MAIN_MUTEX: &str = "OathLight.Watchdog.Main.v1";
+    const GUARDIAN_MUTEX: &str = "OathLight.Watchdog.Guardian.v1";
     const MAIN_ARG: &str = "--main";
     /// Passed to a resurrected main app so it comes up hidden in the background
     /// (tray only) instead of popping a focused window in the user's face. MUST
@@ -35,7 +35,7 @@ fn main() {
     const AUTOSTART_ARG: &str = "--autostart";
     /// Production name of the main executable, used only as a fallback when the
     /// spawner did not pass `--main` (it normally does).
-    const MAIN_BIN: &str = "PurePath.exe";
+    const MAIN_BIN: &str = "OathLight.exe";
     /// Argument carrying the full path to the main app's `uninstall.json`, so we
     /// can independently verify the uninstall cool-off before honoring the
     /// shutdown sentinel in a release build. MUST match `watchdog.rs`.
@@ -112,7 +112,7 @@ fn main() {
         use std::time::{SystemTime, UNIX_EPOCH};
         let ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
         let line = format!("{ms} guardian pid {} {msg}\n", std::process::id());
-        let path = std::env::temp_dir().join("purepath-watchdog.log");
+        let path = std::env::temp_dir().join("oathlight-watchdog.log");
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
             let _ = f.write_all(line.as_bytes());
         }
@@ -187,14 +187,14 @@ fn main() {
     // ---- Shutdown sentinel (kill switch) ------------------------------------
     //
     // Sentinel protocol (MUST match watchdog.rs):
-    //   * path    — `%TEMP%\purepath.watchdog.shutdown`;
+    //   * path    — `%TEMP%\oathlight.watchdog.shutdown`;
     //   * content — the full UTF-8 path to `uninstall.json`, so the cool-off can
     //               be verified in a release build even by a guardian that was
     //               spawned before the main app knew that path (i.e. the very
     //               first guardian, launched by `init_main()` before `setup()`
     //               populated it, which therefore never got `--uninstall-json`).
     //               Empty content = "path unknown" -> release readers default-deny.
-    const SENTINEL_NAME: &str = "purepath.watchdog.shutdown";
+    const SENTINEL_NAME: &str = "oathlight.watchdog.shutdown";
 
     /// Read the `uninstall.json` path the sentinel carries (its trimmed UTF-8
     /// content), if any. Empty/unreadable = `None`.
@@ -266,7 +266,7 @@ fn main() {
     //
     // A legitimate uninstall/shutdown must never leave the machine without
     // working DNS just because the adapters were pointed at a resolver that's
-    // about to stop existing. `dns.json` (written by `purepath-dns::takeover`
+    // about to stop existing. `dns.json` (written by `oathlight-dns::takeover`
     // BEFORE any adapter is touched — see desktop-app/dns/src/takeover.rs)
     // lives at `<app_data_dir>/dns.json`, a sibling of `uninstall.json`; this
     // crate carries no JSON dependency by design (see Cargo.toml), so the

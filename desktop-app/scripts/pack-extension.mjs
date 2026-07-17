@@ -1,10 +1,10 @@
-// Packs the Pure Path browser extension into a signed CRX3 and writes the
+// Packs the Oath Light browser extension into a signed CRX3 and writes the
 // self-hosted update manifest the desktop app serves from localhost.
 //
 //   in:   ../../extension            (the unpacked MV3 extension)
-//         ../purepath-extension-key.pem   (RSA private key — the ID is derived
+//         ../oathlight-extension-key.pem   (RSA private key — the ID is derived
 //                                          from its public half; NEVER regenerate)
-//   out:  ../src-tauri/resources/purepath.crx
+//   out:  ../src-tauri/resources/oathlight.crx
 //         ../src-tauri/resources/update_manifest.xml
 //
 // The CRX's ID is derived from the signing key and MUST equal the EXTENSION_ID
@@ -31,9 +31,9 @@ const desktopApp = join(here, '..');
 const repoRoot = join(desktopApp, '..');
 
 const EXTENSION_DIR = join(repoRoot, 'extension');
-const KEY_PATH = join(desktopApp, 'purepath-extension-key.pem');
+const KEY_PATH = join(desktopApp, 'oathlight-extension-key.pem');
 const OUT_DIR = join(desktopApp, 'src-tauri', 'resources');
-const CRX_PATH = join(OUT_DIR, 'purepath.crx');
+const CRX_PATH = join(OUT_DIR, 'oathlight.crx');
 const XML_PATH = join(OUT_DIR, 'update_manifest.xml');
 
 // The single source of truth lives in browsers.rs; duplicated here only as an
@@ -42,7 +42,7 @@ const EXPECTED_ID = 'lknpaoecooklfjgenmjpkdkahgoofank';
 
 // Update URL the app serves and the policy points browsers at. MUST match
 // CHROMIUM_UPDATE_URL / the update server port in the Rust app.
-const UPDATE_CODEBASE = 'http://127.0.0.1:17244/purepath.crx';
+const UPDATE_CODEBASE = 'http://127.0.0.1:17244/oathlight.crx';
 
 // Never ship these into the packed extension: `_metadata` is a Chrome-generated
 // artifact from unpacked loading, `tests` is dev-only.

@@ -106,7 +106,7 @@ pub fn open(app: &AppHandle, state: &OverlayState, monitor_id: u32) -> Result<()
     let scale = if scale > 0.0 { scale as f64 } else { 1.0 };
 
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("overlay.html".into()))
-        .title("Pure Path")
+        .title("Oath Light")
         .position(x as f64 / scale, y as f64 / scale)
         .inner_size(w as f64 / scale, h as f64 / scale)
         .fullscreen(true)

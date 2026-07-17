@@ -26,11 +26,11 @@ tauri-plugin-log = "2"
 sysinfo = "0.30"
 # Shared blocklist embedding + domain/keyword matching (A.1/A.2) — the same
 # crate the DNS resolver (1.1) and any future mobile binding will consume.
-purepath-core = { path = "../core" }
+oathlight-core = { path = "../core" }
 # System-level DNS filtering (1.1) + DoH-bypass defense (1.2): a dependency-
 # free std::net forwarding proxy that NXDOMAINs blocked/DoH domains. Driven by
 # src/dns_filter.rs.
-purepath-dns = { path = "../dns" }
+oathlight-dns = { path = "../dns" }
 
 # --- NSFW AI layer (Phase 4 optional monitoring) ---
 # ort = ONNX Runtime bindings; pinned (prerelease, API still churns). image =
@@ -76,7 +76,7 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 # release-asset GETs.
 ureq = "2"
 # ed25519-dalek v2: verify the raw-Ed25519 manifest signature against the two
-# pubkeys baked into purepath-core (core/src/ota.rs). Verification only — no
+# pubkeys baked into oathlight-core (core/src/ota.rs). Verification only — no
 # signing key ever exists on a user machine — so default features suffice.
 ed25519-dalek = "2"
 # sha256 for the per-file integrity hashes listed in the signed manifest.

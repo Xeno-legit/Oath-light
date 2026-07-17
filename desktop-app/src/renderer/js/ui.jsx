@@ -10,7 +10,7 @@ function Logo({ size = 21 }) {
       height={size}
       className={'logo-img' + (anim === 'fwd' ? ' logo-spin-fwd' : anim === 'back' ? ' logo-spin-back' : '')}
       style={{ display: 'block', objectFit: 'contain' }}
-      alt="Pure Path logo"
+      alt="Oath Light logo"
       onMouseEnter={() => { setAnim('fwd'); }}
       onMouseLeave={() => { setAnim('back'); }}
       onAnimationEnd={() => { if (anim === 'back') setAnim(''); }}
@@ -212,7 +212,7 @@ function PasswordGate() {
       <div className="card" style={{ width: 360, maxWidth: '90vw', padding: 24 }}>
         <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Enter your master password</div>
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16, lineHeight: 1.5 }}>
-          This change weakens Pure Path's protection, so it needs your master password first.
+          This change weakens Oath Light's protection, so it needs your master password first.
         </div>
         <input
           ref={inputRef}

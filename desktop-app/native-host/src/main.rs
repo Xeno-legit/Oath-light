@@ -1,7 +1,7 @@
-//! Pure Path — Chrome Native Messaging Host
+//! Oath Light — Chrome Native Messaging Host
 //!
 //! This binary is spawned by Chrome when the extension calls
-//! `chrome.runtime.connectNative('com.purepath.companion')`.
+//! `chrome.runtime.connectNative('com.oathlight.companion')`.
 //!
 //! It speaks the Chrome Native Messaging protocol (4-byte LE length + JSON)
 //! on stdin/stdout, and relays messages to the Tauri desktop app via a local
@@ -178,22 +178,22 @@ fn read_tcp_message(reader: &mut BufReader<TcpStream>) -> io::Result<Value> {
 
 fn main() {
     // All logging goes to stderr — stdout is reserved for the protocol
-    eprintln!("[pure-path-host] Starting native messaging host");
+    eprintln!("[oath-light-host] Starting native messaging host");
 
     // Connect to the Tauri app
     let tcp_stream = match connect_to_tauri() {
         Ok(s) => {
-            eprintln!("[pure-path-host] Connected to Tauri app at {}:{}", TAURI_ADDR, TAURI_PORT);
+            eprintln!("[oath-light-host] Connected to Tauri app at {}:{}", TAURI_ADDR, TAURI_PORT);
             s
         }
         Err(e) => {
-            eprintln!("[pure-path-host] Failed to connect to Tauri app: {}", e);
+            eprintln!("[oath-light-host] Failed to connect to Tauri app: {}", e);
             // Send an error back to the extension so it knows
             let mut stdout = io::stdout().lock();
             let err_msg = serde_json::json!({
                 "type": "error",
                 "error": "desktop_app_not_running",
-                "message": "Pure Path desktop app is not running"
+                "message": "Oath Light desktop app is not running"
             });
             let _ = write_native_message(&mut stdout, &err_msg);
             return;
@@ -204,7 +204,7 @@ fn main() {
     let tcp_read_stream = match tcp_stream.try_clone() {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("[pure-path-host] Failed to clone TCP stream: {}", e);
+            eprintln!("[oath-light-host] Failed to clone TCP stream: {}", e);
             return;
         }
     };
@@ -223,7 +223,7 @@ fn main() {
     // Friendly name only for custom browsers; the desktop app already names the known ones.
     let browser_name = if known.is_some() { String::new() } else { friendly_name(&proc_name) };
     let ext_origin = std::env::args().nth(1).unwrap_or_default();
-    eprintln!("[pure-path-host] Parent browser: {} ({}) origin: {}", browser_key, proc_name, ext_origin);
+    eprintln!("[oath-light-host] Parent browser: {} ({}) origin: {}", browser_key, proc_name, ext_origin);
     let hello = serde_json::json!({
         "type": "host_hello",
         "browser": browser_key,
@@ -232,7 +232,7 @@ fn main() {
         "extOrigin": ext_origin,
     });
     if let Err(e) = send_tcp_message(&mut tcp_write_stream, &hello) {
-        eprintln!("[pure-path-host] Failed to send host_hello: {}", e);
+        eprintln!("[oath-light-host] Failed to send host_hello: {}", e);
     }
 
     // Channel for messages from TCP reader → stdout writer
@@ -249,9 +249,9 @@ fn main() {
         loop {
             match read_tcp_message(&mut reader) {
                 Ok(msg) => {
-                    eprintln!("[pure-path-host] Tauri → Extension: {}", msg);
+                    eprintln!("[oath-light-host] Tauri → Extension: {}", msg);
                     if tx.send(msg).is_err() {
-                        eprintln!("[pure-path-host] stdout channel closed, exiting TCP reader");
+                        eprintln!("[oath-light-host] stdout channel closed, exiting TCP reader");
                         break;
                     }
                 }
@@ -262,7 +262,7 @@ fn main() {
                     continue;
                 }
                 Err(e) => {
-                    eprintln!("[pure-path-host] TCP read error: {}", e);
+                    eprintln!("[oath-light-host] TCP read error: {}", e);
                     break;
                 }
             }
@@ -276,13 +276,13 @@ fn main() {
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(msg) => {
                     if let Err(e) = write_native_message(&mut stdout, &msg) {
-                        eprintln!("[pure-path-host] stdout write error: {}", e);
+                        eprintln!("[oath-light-host] stdout write error: {}", e);
                         break;
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    eprintln!("[pure-path-host] Channel disconnected, exiting stdout writer");
+                    eprintln!("[oath-light-host] Channel disconnected, exiting stdout writer");
                     break;
                 }
             }
@@ -294,24 +294,24 @@ fn main() {
     loop {
         match read_native_message(&mut stdin) {
             Ok(msg) => {
-                eprintln!("[pure-path-host] Extension → Tauri: {}", msg);
+                eprintln!("[oath-light-host] Extension → Tauri: {}", msg);
                 if let Err(e) = send_tcp_message(&mut tcp_write_stream, &msg) {
-                    eprintln!("[pure-path-host] TCP write error: {}", e);
+                    eprintln!("[oath-light-host] TCP write error: {}", e);
                     break;
                 }
             }
             Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => {
-                eprintln!("[pure-path-host] stdin closed (extension disconnected)");
+                eprintln!("[oath-light-host] stdin closed (extension disconnected)");
                 break;
             }
             Err(e) => {
-                eprintln!("[pure-path-host] stdin read error: {}", e);
+                eprintln!("[oath-light-host] stdin read error: {}", e);
                 break;
             }
         }
     }
 
-    eprintln!("[pure-path-host] Shutting down");
+    eprintln!("[oath-light-host] Shutting down");
     // Threads will exit when their streams/channels close
     drop(tcp_write_stream);
     let _ = tcp_reader_handle.join();

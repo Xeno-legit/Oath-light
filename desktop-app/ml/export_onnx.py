@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-One-time ONNX export for Pure Path's NSFW AI layer.
+One-time ONNX export for Oath Light's NSFW AI layer.
 
 Model: prithivMLmods/Image-Guard-2.0-Post0.1  (SigLIP2-base, 5-class, Apache-2.0)
 

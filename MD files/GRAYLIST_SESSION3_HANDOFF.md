@@ -16,7 +16,7 @@
 
 ### 1.1 The harness
 - We drive a **real Chrome** through the **Playwright MCP extension bridge**
-  (`mcp__playwright__*` tools). That Chrome has **Pure Path installed** and is **logged
+  (`mcp__playwright__*` tools). That Chrome has **Oath Light installed** and is **logged
   into the test accounts**, so we see what a real opted-in user sees.
 - The user toggles the bridge extension on/off. If a tool errors with
   **`Target page, context or browser has been closed`**, the bridge dropped — recover with

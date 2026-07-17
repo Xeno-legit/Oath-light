@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn advance_credits_min_of_wall_and_tick_delta() {
-        let mut cur = ActiveLockdown {
+        let cur = ActiveLockdown {
             started_wall: 1000,
             duration_secs: 3600,
             frozen: false,

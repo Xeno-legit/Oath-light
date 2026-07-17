@@ -4,7 +4,7 @@ GRAYLIST — TRIAGED STATUS  (mixed-content platforms: legit, but host NSFW)
 Last updated: 2026-06-12   ·   Original inventory generated: 2026-04-27
 
 This is the LIVE handling status of every graylist domain — what mechanism (if
-any) Pure Path applies to each, and why. It replaces the old raw category dump.
+any) Oath Light applies to each, and why. It replaces the old raw category dump.
 
 Mechanisms:
   API      → graylist-inject.js strips NSFW items from the JSON the site fetches

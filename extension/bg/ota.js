@@ -15,7 +15,7 @@
 // load; a corrupt/missing/failed-verification set silently falls back to the
 // bundled lists, which are never deleted.
 //
-// Every policy rule here is the JS twin of `purepath_core::ota`; the two are
+// Every policy rule here is the JS twin of `oathlight_core::ota`; the two are
 // pinned against each other by extension/tests/test-ota.cjs and that module's
 // Rust #[test]s. Keep them in lockstep — a rule that changes in one MUST change
 // in the other.
@@ -41,7 +41,7 @@ const OTA_PUBKEYS_HEX = [
 // GitHub "latest release" asset base — the same repo slug the desktop uses.
 // TODO(owner): if the project moves repos before Alpha, update this AND
 // desktop-app/src-tauri/src/ota.rs's OTA_RELEASE_BASE together.
-const OTA_RELEASE_BASE = 'https://github.com/Xeno-legit/Pure-Path/releases/latest/download';
+const OTA_RELEASE_BASE = 'https://github.com/Xeno-legit/Oath-Light/releases/latest/download';
 const MANIFEST_ASSET = 'lists-manifest.json';
 const MANIFEST_SIG_ASSET = 'lists-manifest.json.sig';
 
@@ -309,12 +309,12 @@ function armOtaAlarm() {
   } catch (e) {
     // Non-fatal: a browser that can't schedule alarms simply keeps running on
     // its last-good (or bundled) lists — the safety floor holds.
-    console.error('Pure Path OTA: alarm arm failed', e);
+    console.error('Oath Light OTA: alarm arm failed', e);
   }
 }
 
 // Exposed for bg/blocklists.js (prefer-OTA-over-bundled) and the test suite.
-const PurePathOTA = {
+const OathLightOTA = {
   parseManifest,
   versionIsAcceptable,
   whitelistCollision,
@@ -331,8 +331,8 @@ const PurePathOTA = {
 };
 
 // Both worlds: attach to the service-worker/global scope, and export for Node.
-if (typeof globalThis !== 'undefined') globalThis.PurePathOTA = PurePathOTA;
-if (typeof module === 'object' && module.exports) module.exports = PurePathOTA;
+if (typeof globalThis !== 'undefined') globalThis.OathLightOTA = OathLightOTA;
+if (typeof module === 'object' && module.exports) module.exports = OathLightOTA;
 
 // ── self-registration (same shape as bg/reminders.js) ────────────────────────
 // Arm the weekly alarm on install + startup, and run the alarm's check when it

@@ -1,8 +1,8 @@
-// Builds Pure Path's companion executables and stages them as Tauri "sidecars"
-// so the installer ships them next to PurePath.exe:
+// Builds Oath Light's companion executables and stages them as Tauri "sidecars"
+// so the installer ships them next to OathLight.exe:
 //
-//   * purepathguard  — the watchdog guardian   (desktop-app/guardian)
-//   * pure-path-host — the native-messaging host (desktop-app/native-host)
+//   * oathlightguard  — the watchdog guardian   (desktop-app/guardian)
+//   * oath-light-host — the native-messaging host (desktop-app/native-host)
 //
 // Tauri requires each sidecar to be named `<name>-<target-triple><ext>` under
 // the path listed in `bundle.externalBin`; at bundle time it copies them next
@@ -29,8 +29,8 @@ const outDir = join(root, 'src-tauri', 'binaries');
 mkdirSync(outDir, { recursive: true });
 
 const crates = [
-  { dir: 'guardian', bin: 'purepathguard' },
-  { dir: 'native-host', bin: 'pure-path-host' },
+  { dir: 'guardian', bin: 'oathlightguard' },
+  { dir: 'native-host', bin: 'oath-light-host' },
 ];
 
 for (const { dir, bin } of crates) {

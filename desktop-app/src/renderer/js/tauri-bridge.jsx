@@ -43,12 +43,12 @@
     // Push blocking settings (redirect target + reminder schedule) to the extensions.
     setBlocking(settings) {
       return invoke('set_blocking_settings', { settings })
-        .catch((e) => console.warn('[PurePath] setBlocking failed (rebuild the app?):', e));
+        .catch((e) => console.warn('[OathLight] setBlocking failed (rebuild the app?):', e));
     },
     // Open a URL in the default browser (the "Test" button on the blocking page).
     openExternal(url) {
       return invoke('open_external', { url })
-        .catch((e) => console.warn('[PurePath] openExternal failed:', e));
+        .catch((e) => console.warn('[OathLight] openExternal failed:', e));
     },
     // Push the app's clean-streak day count to the extensions.
     setStreak(streak) { return invoke('set_app_streak', { streak: streak | 0 }).catch(() => {}); },
@@ -56,7 +56,7 @@
     // extension (localStorage stays the source of truth; this is the sync).
     setCustomDomains(domains) {
       return invoke('set_custom_domains', { domains })
-        .catch((e) => console.warn('[PurePath] setCustomDomains failed (rebuild the app?):', e));
+        .catch((e) => console.warn('[OathLight] setCustomDomains failed (rebuild the app?):', e));
     },
     // Check whether a domain is currently blocked (exact or parent-domain
     // match), against whatever list is effective right now.
@@ -76,44 +76,44 @@
     // guard, AI monitor, a custom-block removal) — the backend is the source
     // of truth for the countdown, never the renderer's own clock.
     getPendingWeakenings() {
-      return invoke('get_pending_weakenings').catch((e) => { console.warn('[PurePath] getPendingWeakenings failed:', e); return []; });
+      return invoke('get_pending_weakenings').catch((e) => { console.warn('[OathLight] getPendingWeakenings failed:', e); return []; });
     },
     cancelWeakening(actionId) {
       return invoke('cancel_weakening', { actionId })
-        .catch((e) => console.warn('[PurePath] cancelWeakening failed:', e));
+        .catch((e) => console.warn('[OathLight] cancelWeakening failed:', e));
     },
     // Request removal of a custom-blocked domain — a weakening, gated behind
     // the friction delay AND, if set, the master password (4.2). The domain
     // stays blocked until the delay elapses.
     removeCustomDomain(domain, auth) {
       return invoke('remove_custom_domain', { domain, auth: auth || null })
-        .catch((e) => { console.warn('[PurePath] removeCustomDomain failed:', e); return null; });
+        .catch((e) => { console.warn('[OathLight] removeCustomDomain failed:', e); return null; });
     },
     nsfwMonitorRunning() { return invoke('nsfw_monitor_running').catch(() => false); },
 
     // Process-level app blocking + evasion-browser detection (1.3). Backend-
     // owned settings — `getAppSettings` is the honest read (blocked_processes,
     // block_unknown_browsers), refetched by the caller after every mutation.
-    getAppSettings() { return invoke('get_app_settings').catch((e) => { console.warn('[PurePath] getAppSettings failed:', e); return null; }); },
+    getAppSettings() { return invoke('get_app_settings').catch((e) => { console.warn('[OathLight] getAppSettings failed:', e); return null; }); },
     // Adding a block is a strengthening — instant, ungated. Resolves to the
     // new full blocked-process list.
     addBlockedProcess(name) {
       return invoke('add_blocked_process', { name })
-        .catch((e) => { console.warn('[PurePath] addBlockedProcess failed:', e); throw e; });
+        .catch((e) => { console.warn('[OathLight] addBlockedProcess failed:', e); throw e; });
     },
     // Removing a block is a weakening — friction-gated (1.3), same shape as
     // removeCustomDomain: resolves to { action_id, label, ..., remaining_secs,
     // ready }. Requires the master-password token if one is set (4.2).
     removeBlockedProcess(name, auth) {
       return invoke('remove_blocked_process', { name, auth: auth || null })
-        .catch((e) => { console.warn('[PurePath] removeBlockedProcess failed:', e); throw e; });
+        .catch((e) => { console.warn('[OathLight] removeBlockedProcess failed:', e); throw e; });
     },
     // Toggle blocking unknown/evasion browsers outright. Turning ON is
     // instant; turning OFF is friction-gated (same { applied, pending } shape
     // as setGuard) and requires the master-password token if one is set.
     setBlockUnknownBrowsers(enabled, auth) {
       return invoke('set_block_unknown_browsers', { enabled: !!enabled, auth: auth || null })
-        .catch((e) => { console.warn('[PurePath] setBlockUnknownBrowsers failed:', e); throw e; });
+        .catch((e) => { console.warn('[OathLight] setBlockUnknownBrowsers failed:', e); throw e; });
     },
 
     // System DNS filter (1.1/1.2). `getDnsStatus` -> { running, taken_over,
@@ -124,7 +124,7 @@
     // and requires the master-password token if one is set.
     getDnsStatus() {
       return invoke('get_dns_status')
-        .catch((e) => { console.warn('[PurePath] getDnsStatus failed:', e); return null; });
+        .catch((e) => { console.warn('[OathLight] getDnsStatus failed:', e); return null; });
     },
     setDnsFilter(enabled, auth) {
       return invoke('set_dns_filter_enabled', { enabled: !!enabled, auth: auth || null });
@@ -171,10 +171,10 @@
     // `checkListsUpdateNow` kicks a check off on a backend thread and returns
     // immediately (checking: true); the outcome arrives via `onOtaStatus`
     // (the backend's `ota-status` event) — poll `getOtaStatus` as a fallback.
-    getOtaStatus() { return invoke('get_ota_status').catch((e) => { console.warn('[PurePath] getOtaStatus failed:', e); return null; }); },
+    getOtaStatus() { return invoke('get_ota_status').catch((e) => { console.warn('[OathLight] getOtaStatus failed:', e); return null; }); },
     checkListsUpdateNow() {
       return invoke('check_lists_update_now')
-        .catch((e) => { console.warn('[PurePath] checkListsUpdateNow failed:', e); return null; });
+        .catch((e) => { console.warn('[OathLight] checkListsUpdateNow failed:', e); return null; });
     },
     // Subscribe to OTA check outcomes; resolves to an unlisten function, same
     // shape as onNsfwScan.

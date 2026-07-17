@@ -1,4 +1,4 @@
-/* app.jsx — Pure Path main app */
+/* app.jsx — Oath Light main app */
 const { useState, useEffect } = React;
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{

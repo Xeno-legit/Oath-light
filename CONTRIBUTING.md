@@ -1,6 +1,6 @@
-# Contributing to Pure Path
+# Contributing to Oath Light
 
-First off, thank you for considering contributing to Pure Path! It's people like you that make Pure Path such a great tool for personal growth.
+First off, thank you for considering contributing to Oath Light! It's people like you that make Oath Light such a great tool for personal growth.
 
 ## Code of Conduct
 
@@ -74,7 +74,7 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 ## Project Structure
 
 ```
-pure-path/
+oath-light/
 ├── extension/                 # Browser extension
 │   ├── manifest.json          # Extension configuration
 │   ├── background.js          # Service worker
@@ -152,4 +152,4 @@ Feel free to open an issue with your question or reach out to the maintainers.
 
 Contributors will be recognized Here.
 
-Thank you for contributing to Pure Path! ❤️
+Thank you for contributing to Oath Light! ❤️

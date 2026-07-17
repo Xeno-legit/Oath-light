@@ -1,7 +1,7 @@
 /* pages-tips.jsx */
 const TIPS = [
   { id: 't1', icon: IconUser, title: 'Try to Break Out of Isolation', body: "Isolation is one of the biggest reasons you might be set up for a relapse. Just have a person in your room — that person might be a family member, a friend, etc. The point is, you should NOT stay alone in a room.", color: 'var(--accent)' },
-  { id: 't2', icon: IconShield, title: 'If You Feel a Relapse Is Coming', body: "Immediately try to shut all devices, regardless of whether Pure Path is installed on them or not. At least have Pure Path installed on your devices in case you are feeling too weak to resist.", color: 'var(--accent-2)' },
+  { id: 't2', icon: IconShield, title: 'If You Feel a Relapse Is Coming', body: "Immediately try to shut all devices, regardless of whether Oath Light is installed on them or not. At least have Oath Light installed on your devices in case you are feeling too weak to resist.", color: 'var(--accent-2)' },
   { id: 't3', icon: IconHeart, title: 'If You Relapse', body: "Do not beat yourself up for it. A mistake is a mistake and you can't change the past — you can shape the future instead. Get back up and never spiral into the spiral of shame. Try to get a cold shower and clean yourself too.", color: 'var(--accent-3)' },
 ];
 
@@ -12,7 +12,7 @@ const QUESTIONS = [
   { id: 'q4', icon: IconCompass, title: "I Relapsed, But I Don't Know Why", body: "Sometimes you can relapse before you are even conscious of the urge. This can sometimes happen at the most random of times, or at certain times when the conscious part of your mind is still booting up.", color: 'var(--accent)' },
   { id: 'q5', icon: IconShieldOff, title: "A Certain App/Website Wasn't Blocked", body: "Immediately report this to us, we will take care of it as soon as humanly possible. Visit the report page on the website.", color: 'var(--accent-2)' },
   { id: 'q6', icon: IconFlame, title: 'I Broke My Streak...', body: "Your progress was never EVER based on a number. And never let your personality and goals be based on a number. If the streak breaks and you are still breathing and alive, you can achieve a higher streak anyway.", color: 'var(--accent-3)' },
-  { id: 'q7', icon: IconShield, title: "Pure Path Didn't Eliminate My Addiction", body: "Pure Path is not a physical person, we can't physically stop you from masturbating or somehow finding a loophole around us. What we can do is try our best to be your digital bodyguard. And we are most likely the best digital bodyguard ;D.", color: 'var(--accent)' },
+  { id: 'q7', icon: IconShield, title: "Oath Light Didn't Eliminate My Addiction", body: "Oath Light is not a physical person, we can't physically stop you from masturbating or somehow finding a loophole around us. What we can do is try our best to be your digital bodyguard. And we are most likely the best digital bodyguard ;D.", color: 'var(--accent)' },
   { id: 'q8', icon: IconSearch, title: 'What Are Some Reasons for a Sudden Relapse?', body: "Looking... Either it's looking at the opposite gender or not being able to lower your gaze properly. Yes, not lowering your gaze will only poison you slowly, leading to a sudden relapse. Do your best to lower your gaze.", color: 'var(--accent-2)' },
   { id: 'q9', icon: IconClock, title: 'When Will This Suffering End?', body: "If you are suffering because you didn't give the addiction its dose, then keep on suffering. It's not you who is suffering. It's the addiction that is absolutely suffocating.", color: 'var(--accent-3)' },
   { id: 'q10', icon: IconX, title: 'Can I Just Do It One Last Time?', body: 'My friend, ask yourself: was the "one last time" truly a one last time? That\'s it.', color: 'var(--accent)' },
@@ -59,7 +59,7 @@ function TipsPage({ s, PP }) {
         <div className="ico" style={{ width: 44, height: 44, flex: '0 0 44px', borderRadius: 12, display: 'grid', placeItems: 'center', background: 'var(--bg-1)', color: 'var(--accent-3)' }}><IconShield size={22} /></div>
         <div style={{ flex: 1 }}>
           <b style={{ fontSize: 14.5, fontWeight: 800 }}>Disclaimer</b>
-          <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 2, lineHeight: 1.5 }}>Pure Path is not fool-proof, nor is it a replacement for therapy or medical treatment. If you can afford therapy or medical treatment, please seek those first before you rely fully on Pure Path. But we won't disappoint you.</div>
+          <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 2, lineHeight: 1.5 }}>Oath Light is not fool-proof, nor is it a replacement for therapy or medical treatment. If you can afford therapy or medical treatment, please seek those first before you rely fully on Oath Light. But we won't disappoint you.</div>
         </div>
       </div>
 

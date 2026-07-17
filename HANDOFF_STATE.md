@@ -2,7 +2,7 @@
 
 Branch: `phase4/friction`.
 This session implemented the **remaining third** of the plan on top of sessions 2–3:
-**A.1/A.2** (cargo workspace + `purepath-core` keyword port + golden corpus),
+**A.1/A.2** (cargo workspace + `oathlight-core` keyword port + golden corpus),
 **1.1/1.2** (system DNS resolver + DoH defense), **3.5/A.4** (OTA blocklist
 updates + CI), and **4.4/4.5/5.2** (Lockdown Mode + tamper-evident event log +
 trusted-contact accountability). With sessions 2–3 (2.1, 2.2, 3.3, 3.4, 4.1,
@@ -30,14 +30,14 @@ session back to a dirty tree if you prefer the repo's uncommitted-norm.
 **A.1/A.2 — workspace + core** (`927de91`)
 - `desktop-app/Cargo.toml` virtual workspace (core, src-tauri, guardian,
   native-host, **dns**); profiles hoisted to root; Cargo.lock moved to root.
-- `purepath-core`: `lists.rs` (blocklist embed/parse, normalize, exact-and-parent
+- `oathlight-core`: `lists.rs` (blocklist embed/parse, normalize, exact-and-parent
   walk), `matching.rs` (function-for-function port of `checkDomainKeywords` +
   leet/confusable/punycode), `eventlog.rs`, `doh.rs`, `ota.rs`.
 - Golden corpus `extension/tests/fixtures/keyword-hostnames.json` (90 cases)
   consumed by BOTH `test-domain-keywords.cjs` and core `#[test]`s.
 
 **1.1/1.2 — DNS resolver + DoH defense**
-- New crate `desktop-app/dns` (`purepath-dns`): dependency-free `std::net`
+- New crate `desktop-app/dns` (`oathlight-dns`): dependency-free `std::net`
   forwarding proxy — `packet.rs` (parse/synthesize NXDOMAIN, well unit-tested),
   `decide.rs` (whitelist floor → DoH block → domain-list → keyword), `server.rs`
   (UDP+TCP :53 + health probe), `upstream.rs`, `takeover.rs` (Windows adapter
@@ -106,14 +106,14 @@ session back to a dirty tree if you prefer the repo's uncommitted-norm.
 - Cross-module symbol audit (grep, since no cargo): every symbol the merge wired
   resolves — `broadcast_blocking`, `save_lockdown_allow`, `maybe_send_contact_
   heartbeat`, `EventLog`, `LockdownStore`, `drain_anomalies`, `dns_filter::*`,
-  `purepath_dns::{start,health_check,init_custom_domains}`, `takeover::*`. Core
+  `oathlight_dns::{start,health_check,init_custom_domains}`, `takeover::*`. Core
   declares all 5 modules; src-tauri declares all 17.
 - OTA end-to-end proven live: build→sign(dev seed)→verify = true; wrong key /
   tampered = false. Blocklist validator passes (385,683 domains, 1,244 keywords).
 - **`cargo check`/`clippy`/`test` NOT run** (cargo hangs here; owner compiles).
 
 ## Compile risks for the owner's first `cargo` run (APIs used from memory)
-1. **New deps (Cargo.lock regen needed):** `purepath-dns` (std-only, low risk);
+1. **New deps (Cargo.lock regen needed):** `oathlight-dns` (std-only, low risk);
    core `sha2 = "0.10"`; src-tauri `ed25519-dalek = "2"`, `ureq = "2"`,
    `sha2`, `lettre = "0.11"` (default-features=false, `smtp-transport`,
    `rustls-tls`, `builder`). Cargo.lock was hand-merged — regen expected.
@@ -138,7 +138,7 @@ session back to a dirty tree if you prefer the repo's uncommitted-norm.
 - **OTA production keys:** the baked pubkeys are DEV keys (private seeds in the
   gitignored `dev-keys.env`). Before first real release, follow `docs/OTA_KEYS.md`
   (gen prod keypair, re-bake, set `OTA_SIGNING_KEY` secret, delete dev-keys.env).
-- **Repo slug** `Xeno-legit/Pure-Path` is hardcoded in both OTA consumers
+- **Repo slug** `Xeno-legit/Oath-Light` is hardcoded in both OTA consumers
   (TODO markers) — update together if the repo moves.
 - **Firefox OTA:** noble loads via the manifest scripts array (works), but the
   extension-only Firefox path is otherwise on hold (per project memory).

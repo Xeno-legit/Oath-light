@@ -14,7 +14,7 @@ mod settings;
 mod uninstall;
 mod watchdog;
 
-use purepath_core::eventlog::{self, EventLog};
+use oathlight_core::eventlog::{self, EventLog};
 
 use browsers::{BrowserDef, Engine, EnforceOutcome, BROWSERS};
 use serde::{Deserialize, Serialize};
@@ -69,12 +69,12 @@ pub struct ExtensionStats {
     pub days_protected: u64,
 }
 
-// Built-in blocklist/keyword embedding + parsing moved to `purepath-core`
+// Built-in blocklist/keyword embedding + parsing moved to `oathlight-core`
 // (plan A.1) — the DNS resolver (1.1) and any future mobile binding need the
 // same parsed table this app uses, and a shared `OnceLock` (in core) means
 // it's parsed once per process regardless of how many callers ask for it.
 // Since OTA updates (plan 3.5, ota.rs) the app reads the *effective* view —
-// `purepath_core::lists::effective()`: the verified OTA overlay when one is
+// `oathlight_core::lists::effective()`: the verified OTA overlay when one is
 // installed, the baked built-ins otherwise. Callers that specifically want
 // the immutable baked lists would call `lists::built_in()` directly; nothing
 // in the app should, so counts/checks/pushes all follow updates.
@@ -97,7 +97,7 @@ pub struct ExtensionBlocklists {
 /// an OTA install, `ota::push_lists_to_extensions` overwrites these fields
 /// directly — the emptiness guard here never blocks an update.)
 fn fill_built_in_lists(bl: &mut ExtensionBlocklists) {
-    let eff = purepath_core::lists::effective();
+    let eff = oathlight_core::lists::effective();
     if bl.built_in_domains.is_empty() {
         bl.built_in_domains = eff.domains_vec().clone();
     }
@@ -106,11 +106,11 @@ fn fill_built_in_lists(bl: &mut ExtensionBlocklists) {
     }
 }
 
-// normalize_domain / normalize_domain_list moved to purepath-core (plan A.1)
+// normalize_domain / normalize_domain_list moved to oathlight-core (plan A.1)
 // — brought into scope here so every existing call site keeps working
 // unqualified; behavior is byte-for-byte the same function, now shared with
 // the DNS resolver (1.1) and any future mobile binding.
-use purepath_core::lists::{normalize_domain, normalize_domain_list};
+use oathlight_core::lists::{normalize_domain, normalize_domain_list};
 
 /// One live native-host connection = one browser profile's extension.
 struct ConnState {
@@ -690,7 +690,7 @@ fn broadcast_app_data(state: &Arc<Mutex<AppState>>) {
 
 // ============================================================================
 // Tamper-evident event log (plan item 4.5) — thin app-side helpers around the
-// `purepath-core::eventlog::EventLog` managed in `setup()`. Every writer in
+// `oathlight-core::eventlog::EventLog` managed in `setup()`. Every writer in
 // this file goes through `log_event`; the core module owns the hash-chaining
 // and tamper-evidence, this is just the wiring.
 // ============================================================================
@@ -819,7 +819,7 @@ fn notify_contact(app: &AppHandle, event_kind: &str) {
 /// a contact is configured and it's been more than 30 days since the last
 /// heartbeat, send one and stamp `last_heartbeat`. So even if every real
 /// event notification silently failed to deliver, thirty days of silence from
-/// Pure Path is itself a signal the contact would notice. Called from the
+/// Oath Light is itself a signal the contact would notice. Called from the
 /// applier thread's ~minute cadence; the 30-day gate makes the send rare.
 fn maybe_send_contact_heartbeat(app: &AppHandle, settings: &Arc<settings::SettingsState>) {
     let Some(contact) = settings.get().trusted_contact else { return };
@@ -909,7 +909,7 @@ static RE_ENFORCE_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// Bind the localhost update server. The Chromium `ExtensionInstallForcelist`
 /// policy points browsers at `http://127.0.0.1:17244/update_manifest.xml`; this
-/// serves that manifest and the signed `purepath.crx` next to it. Two static
+/// serves that manifest and the signed `oathlight.crx` next to it. Two static
 /// files, hand-rolled HTTP/1.1, no dependency.
 ///
 /// Reads both files once at startup (they're bundled Tauri resources produced by
@@ -930,7 +930,7 @@ fn load_update_assets(app: &AppHandle) -> Option<(Vec<u8>, Vec<u8>)> {
     let read_first = |name: &str| -> Option<Vec<u8>> {
         roots.iter().find_map(|r| std::fs::read(r.join(name)).ok())
     };
-    match (read_first("update_manifest.xml"), read_first("purepath.crx")) {
+    match (read_first("update_manifest.xml"), read_first("oathlight.crx")) {
         (Some(x), Some(c)) => Some((x, c)),
         _ => None,
     }
@@ -999,7 +999,7 @@ fn serve_update_conn(mut stream: TcpStream, xml: &[u8], crx: &[u8]) {
 
     let (status, ctype, body): (&str, &str, &[u8]) = if path.starts_with("/update_manifest.xml") {
         ("200 OK", "application/xml", xml)
-    } else if path.starts_with("/purepath.crx") {
+    } else if path.starts_with("/oathlight.crx") {
         ("200 OK", "application/x-chrome-extension", crx)
     } else {
         ("404 Not Found", "text/plain", b"not found")
@@ -1732,7 +1732,7 @@ fn register_native_host(app: &AppHandle) {
 /// candidates cover the shared-target case if this exe ever runs from
 /// somewhere other than that shared dir.
 fn resolve_host_binary(app_data_dir: &std::path::Path) -> std::path::PathBuf {
-    let host_binary_name = if cfg!(windows) { "pure-path-host.exe" } else { "pure-path-host" };
+    let host_binary_name = if cfg!(windows) { "oath-light-host.exe" } else { "oath-light-host" };
 
     let exe_dir = std::env::current_exe()
         .ok()
@@ -2384,7 +2384,7 @@ fn set_trusted_contact(
             // Changing to a DIFFERENT email is unwiring the old one — must go
             // through the friction-gated removal first.
             return Err(
-                "To point Pure Path at a different contact, remove the current one first (Settings → Trusted contact → Remove) — that's a waiting-period change, on purpose."
+                "To point Oath Light at a different contact, remove the current one first (Settings → Trusted contact → Remove) — that's a waiting-period change, on purpose."
                     .to_string(),
             );
         }
@@ -2472,10 +2472,10 @@ fn test_trusted_contact_send(
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::thread::spawn(move || {
         let recipient = contact.email.trim().to_string();
-        let subject = "Pure Path: test message".to_string();
+        let subject = "Oath Light: test message".to_string();
         let body = format!(
-            "Hi {},\n\nThis is a test from Pure Path confirming your trusted-contact setup works. \
-             You'll only ever be told THAT a discrete event happened — never anything about what was browsed.\n\n— Pure Path",
+            "Hi {},\n\nThis is a test from Oath Light confirming your trusted-contact setup works. \
+             You'll only ever be told THAT a discrete event happened — never anything about what was browsed.\n\n— Oath Light",
             if contact.name.trim().is_empty() { "there" } else { contact.name.trim() }
         );
         match notify::deliver(&dir, &recipient, &subject, &body) {
@@ -2788,7 +2788,7 @@ fn elevated_setup() {
         let tr = format!("\"{}\" --autostart", exe.display());
         let _ = std::process::Command::new("schtasks")
             .args([
-                "/Create", "/TN", "PurePathElevated", "/TR", &tr, "/SC", "ONLOGON",
+                "/Create", "/TN", "OathLightElevated", "/TR", &tr, "/SC", "ONLOGON",
                 "/RL", "HIGHEST", "/F",
             ])
             .creation_flags(CREATE_NO_WINDOW)
@@ -2878,7 +2878,7 @@ fn classify_image(
         let mut guard = nsfw_state.classifier.lock().map_err(|e| e.to_string())?;
         if guard.is_none() {
             let model = nsfw::resolve_model_path().ok_or_else(|| {
-                "NSFW model not found — set PUREPATH_MODEL or place image-guard-2.0.onnx next to the app".to_string()
+                "NSFW model not found — set OATHLIGHT_MODEL or place image-guard-2.0.onnx next to the app".to_string()
             })?;
             log::info!("Loading NSFW model from {}", model.display());
             *guard = Some(Arc::new(nsfw::NsfwClassifier::load(&model)?));
@@ -2905,7 +2905,7 @@ fn start_nsfw_monitor_impl(app: &AppHandle) -> Result<(), String> {
         let mut guard = nsfw_state.classifier.lock().map_err(|e| e.to_string())?;
         if guard.is_none() {
             let model = nsfw::resolve_model_path().ok_or_else(|| {
-                "NSFW model not found — set PUREPATH_MODEL or place image-guard-2.0.onnx next to the app".to_string()
+                "NSFW model not found — set OATHLIGHT_MODEL or place image-guard-2.0.onnx next to the app".to_string()
             })?;
             log::info!("Loading NSFW model from {}", model.display());
             *guard = Some(Arc::new(nsfw::NsfwClassifier::load(&model)?));
@@ -3093,7 +3093,7 @@ fn request_uninstall(
 ) -> Result<uninstall::UninstallState, String> {
     auth::require_auth(&app, &auth)?;
     let existing = friction.get("uninstall").is_some();
-    let view = friction.request("uninstall", "Remove Pure Path from this computer", serde_json::json!({}));
+    let view = friction.request("uninstall", "Remove Oath Light from this computer", serde_json::json!({}));
     if let Ok(dir) = app.path().app_data_dir() {
         uninstall::write_marker(&dir, Some(view.requested_at));
     }
@@ -3127,7 +3127,7 @@ fn reset_uninstall_timer(
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
 ) -> Result<uninstall::UninstallState, String> {
     if UNINSTALL_FIRED.load(Ordering::SeqCst) {
-        return Err("Removal is already in progress — Pure Path is closing.".to_string());
+        return Err("Removal is already in progress — Oath Light is closing.".to_string());
     }
     if let Some(view) = friction.reset("uninstall") {
         if let Ok(dir) = app.path().app_data_dir() {
@@ -3151,7 +3151,7 @@ fn cancel_uninstall(
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
 ) -> Result<uninstall::UninstallState, String> {
     if UNINSTALL_FIRED.load(Ordering::SeqCst) {
-        return Err("Removal is already in progress — Pure Path is closing.".to_string());
+        return Err("Removal is already in progress — Oath Light is closing.".to_string());
     }
     let had = friction.cancel("uninstall");
     if let Ok(dir) = app.path().app_data_dir() {
@@ -3171,7 +3171,7 @@ fn cancel_uninstall(
 /// eagerly; a login-started one waits until something asks for it).
 fn create_main_window(app: &AppHandle) -> tauri::Result<tauri::WebviewWindow> {
     let window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
-        .title("Pure Path")
+        .title("Oath Light")
         .inner_size(1024.0, 720.0)
         .min_inner_size(820.0, 560.0)
         .resizable(true)
@@ -3184,7 +3184,7 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<tauri::WebviewWindow> {
     // protection running, instead of quitting (which would drop the watchdog
     // mutex and make the guardian resurrect a fresh, focused window in the
     // user's face). Only wired when the watchdog is active (release /
-    // PUREPATH_WATCHDOG) so ordinary `cargo run` still quits on close. Lives
+    // OATHLIGHT_WATCHDOG) so ordinary `cargo run` still quits on close. Lives
     // here (rather than in `setup`) so a window created lazily, after login
     // startup, still gets the same tray-hide behavior as one created eagerly.
     if watchdog::enabled() {
@@ -3243,23 +3243,23 @@ fn take_panic_pending() -> bool {
     PANIC_PENDING.swap(false, Ordering::SeqCst)
 }
 
-/// Install the system-tray icon. Closing the window hides Pure Path to the tray
+/// Install the system-tray icon. Closing the window hides Oath Light to the tray
 /// (it keeps running in the background); clicking the tray icon — or its "Open
-/// Pure Path" item — brings the window back. There is intentionally no "Quit":
+/// Oath Light" item — brings the window back. There is intentionally no "Quit":
 /// the only real exit is the uninstall flow, so the tray can't be used to stand
 /// down protection.
 fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem};
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-    // "I need help now" sits above "Open Pure Path" on purpose — in the moment
+    // "I need help now" sits above "Open Oath Light" on purpose — in the moment
     // that matters it should be the first thing the eye lands on (5.1).
     let panic = MenuItem::with_id(app, "panic", "I need help now", true, None::<&str>)?;
-    let open = MenuItem::with_id(app, "open", "Open Pure Path", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open Oath Light", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&panic, &open])?;
 
     let mut builder = TrayIconBuilder::new()
-        .tooltip("Pure Path — protection active")
+        .tooltip("Oath Light — protection active")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "panic" => open_panic_flow(app),
@@ -3286,16 +3286,16 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
 /// Registry paths the NSIS installer's Add/Remove Programs entry may live
 /// under (see the generated `installer.nsi`'s `UNINSTKEY`, defined as
 /// `Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}` i.e.
-/// `...\Uninstall\PurePath`, and written under `SHCTX` — HKCU for a per-user
+/// `...\Uninstall\OathLight`, and written under `SHCTX` — HKCU for a per-user
 /// install, HKLM (and, on a 32-bit-registry-view write, its WOW6432Node
 /// mirror) for a per-machine one). After the self-delete worker removes
-/// `uninstall.exe`, a leftover entry here would still show Pure Path in
+/// `uninstall.exe`, a leftover entry here would still show Oath Light in
 /// Settings -> Apps, pointing at a now-deleted uninstaller.
 #[cfg(target_os = "windows")]
 const UNINSTALL_REGISTRY_KEYS: &[&str] = &[
-    r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\PurePath",
-    r"HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\PurePath",
-    r"HKLM\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\PurePath",
+    r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\OathLight",
+    r"HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\OathLight",
+    r"HKLM\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\OathLight",
 ];
 
 /// Best-effort delete of the Add/Remove Programs registry entries above, quiet
@@ -3325,7 +3325,7 @@ fn remove_uninstall_registry_entries() {
 #[cfg(not(target_os = "windows"))]
 fn remove_uninstall_registry_entries() {}
 
-/// Tear down all of Pure Path and delete it from the machine. Idempotent via
+/// Tear down all of Oath Light and delete it from the machine. Idempotent via
 /// `UNINSTALL_FIRED`: only ever called from the explicit "Remove completely"
 /// command (once the cool-off has *unlocked* removal — it never fires on its
 /// own), and only the first caller runs anything.
@@ -3437,7 +3437,7 @@ fn perform_uninstall(app: &AppHandle) -> Result<String, String> {
     {
         use std::os::windows::process::CommandExt;
         let _ = std::process::Command::new("schtasks")
-            .args(["/Delete", "/TN", "PurePathElevated", "/F"])
+            .args(["/Delete", "/TN", "OathLightElevated", "/F"])
             .creation_flags(0x0800_0000)
             .status();
     }
@@ -3628,7 +3628,7 @@ pub fn run() {
             // protection running, instead of quitting (which would drop the
             // watchdog mutex and make the guardian resurrect a fresh, focused
             // window in the user's face). Only wired when the watchdog is active
-            // (release / PUREPATH_WATCHDOG) so ordinary `cargo run` still quits
+            // (release / OATHLIGHT_WATCHDOG) so ordinary `cargo run` still quits
             // on close. A tray icon brings the window back; the only real exit is
             // the uninstall flow.
             if watchdog::enabled() {
@@ -3740,7 +3740,7 @@ pub fn run() {
             shared_state.lock().unwrap().guard_enabled = settings_state.get().guard_enabled;
             // No background watcher for the uninstall request specifically:
             // the cool-off elapsing only flips `UninstallState.ready`,
-            // unlocking the explicit "Remove Pure Path now" action in the UI
+            // unlocking the explicit "Remove Oath Light now" action in the UI
             // (`complete_uninstall`). Nothing removes itself automatically —
             // see `perform_uninstall`. Every OTHER weakening (guard/monitor
             // disables, custom-block removals) DOES apply itself once ready —
@@ -3956,7 +3956,7 @@ pub fn run() {
             start_tcp_server(app.handle().clone(), shared_state.clone());
             start_monitor(app.handle().clone(), shared_state.clone());
 
-            log::info!("Pure Path desktop app initialized");
+            log::info!("Oath Light desktop app initialized");
             Ok(())
         })
         .run(tauri::generate_context!())

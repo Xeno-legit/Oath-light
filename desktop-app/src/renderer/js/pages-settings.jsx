@@ -84,7 +84,7 @@ function UninstallCard() {
   const doRequest = () => {
     if (!st) return;
     if (!confirm('Start the ' + delayWords(st.delay_secs) + ' uninstall waiting period?\n\n'
-      + 'Pure Path stays fully active the whole time. You can cancel whenever you like.')) return;
+      + 'Oath Light stays fully active the whole time. You can cancel whenever you like.')) return;
     setMsg('');
     setBusy(true);
     (window.PPAuth ? PPAuth.acquire() : Promise.resolve(null))
@@ -99,19 +99,19 @@ function UninstallCard() {
   const doCancel = () => { setMsg(''); run(() => window.PPNative.cancelUninstall()); };
   const doReset = () => { setMsg(''); run(() => window.PPNative.resetUninstallTimer()); };
   const doRemove = () => {
-    if (!confirm('Remove Pure Path completely?\n\n'
-      + 'This disables all protection and deletes Pure Path from your computer. This cannot be undone.')) return;
+    if (!confirm('Remove Oath Light completely?\n\n'
+      + 'This disables all protection and deletes Oath Light from your computer. This cannot be undone.')) return;
     setBusy(true);
     window.PPNative.completeUninstall()
       .then(() => {
-        setMsg('Removing Pure Path — it will close and delete itself in a moment.');
+        setMsg('Removing Oath Light — it will close and delete itself in a moment.');
         setRemoving(true);
         refresh();
       })
       // The backend refuses to tear anything down unless removal is
       // guaranteed to proceed, and its error message already says as much —
       // just surface it as-is instead of restating it.
-      .catch((e) => setMsg('Could not remove Pure Path: ' + (e && e.message ? e.message : e)))
+      .catch((e) => setMsg('Could not remove Oath Light: ' + (e && e.message ? e.message : e)))
       .finally(() => setBusy(false));
   };
 
@@ -128,9 +128,9 @@ function UninstallCard() {
       <div className="row" style={{ gap: 14, alignItems: 'flex-start' }}>
         <div className="ut-ico"><IconShield size={20} /></div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <b style={{ fontSize: 14.5, fontWeight: 800 }}>Uninstall Pure Path</b>
+          <b style={{ fontSize: 14.5, fontWeight: 800 }}>Uninstall Oath Light</b>
           <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, lineHeight: 1.5, maxWidth: '64ch' }}>
-            Removing Pure Path opens a {st ? delayWords(st.delay_secs) : '24-hour'} waiting period first — a moment
+            Removing Oath Light opens a {st ? delayWords(st.delay_secs) : '24-hour'} waiting period first — a moment
             of friction for your future self. Blocking and everything else stay fully active the entire time.
           </div>
 
@@ -373,7 +373,7 @@ function PendingChangesCard({ PP }) {
     <div className="card fade-up" style={{ marginTop: 18 }}>
       <b style={{ fontSize: 14.5, fontWeight: 800 }}>Pending changes</b>
       <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, lineHeight: 1.5, maxWidth: '64ch' }}>
-        Changes that weaken Pure Path's protection take effect only after a short delay — the same kind of
+        Changes that weaken Oath Light's protection take effect only after a short delay — the same kind of
         friction that applies to uninstalling. Canceling here leaves your protection exactly as it is now.
       </div>
       <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -438,7 +438,7 @@ function ListsUpdateCard() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <b style={{ fontSize: 14.5, fontWeight: 800 }}>Blocklist updates</b>
           <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, lineHeight: 1.5, maxWidth: '64ch' }}>
-            Pure Path checks weekly for signed blocklist updates and applies them automatically —
+            Oath Light checks weekly for signed blocklist updates and applies them automatically —
             updates can only ever add protection, never silently weaken it. The bundled lists always
             remain as a fallback.
           </div>
@@ -553,7 +553,7 @@ function SettingsPage({ s, PP }) {
       <div className="card fade-up" style={{ marginTop: 18, display: 'flex', alignItems: 'center', gap: 14 }}>
         <div className="txt" style={{ flex: 1 }}>
           <b style={{ fontSize: 14.5, fontWeight: 800 }}>Reset app data</b>
-          <div style={{ fontSize: 13, color: 'var(--muted)' }}>Restore Pure Path to its default state.</div>
+          <div style={{ fontSize: 13, color: 'var(--muted)' }}>Restore Oath Light to its default state.</div>
         </div>
         <button className="btn btn-ghost" onClick={() => { if (confirm('Reset all app data?')) PP.reset(); }}>Reset</button>
       </div>

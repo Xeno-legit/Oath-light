@@ -1,6 +1,6 @@
-# Pure Path — Implementation Plan
+# Oath Light — Implementation Plan
 
-**Companion to:** [Pure_Path_Frontier_Plan.md](Pure_Path_Frontier_Plan.md) — that document says *what and why*; this one says *how*.
+**Companion to:** [Oath_Light_Frontier_Plan.md](Oath_Light_Frontier_Plan.md) — that document says *what and why*; this one says *how*.
 **Date:** 2026-07-07 · **Status:** Living document
 
 Item numbers mirror the Frontier Plan exactly (1.1 here implements 1.1 there).
@@ -14,21 +14,21 @@ reused, and the main risk. A dependency graph and build-order live at the end.
 These four foundations are prerequisites for half the plan. They are the real
 "step one."
 
-### A.1 Cargo workspace + `purepath-core` shared crate
+### A.1 Cargo workspace + `oathlight-core` shared crate
 Today `src-tauri`, `guardian/`, and `native-host/` are three unrelated crates.
 Restructure into a workspace:
 
 ```
 desktop-app/
   Cargo.toml            ← [workspace] members = core, app, guardian, native-host, dns
-  core/                 ← NEW: purepath-core
+  core/                 ← NEW: oathlight-core
   src-tauri/            ← app (depends on core)
   guardian/             ← depends on core
   native-host/          ← depends on core
-  dns/                  ← NEW: purepath-dns (item 1.1)
+  dns/                  ← NEW: oathlight-dns (item 1.1)
 ```
 
-`purepath-core` owns everything used by more than one binary **and everything
+`oathlight-core` owns everything used by more than one binary **and everything
 mobile will need later** (Pillar 7 becomes "bind core via UniFFI" instead of a
 rewrite):
 - Domain matching (exact-and-parent walk over a `HashSet`, ported from `bg/blocklists.js`)
@@ -42,7 +42,7 @@ The engine (stems, compounds, trap-word whitelist, leetspeak normalization,
 homoglyph folding, punycode decode) lives in `extension/bg/matching.js`. The DNS
 resolver (1.1), process-name checks (1.3), and Android (Pillar 7) all need it in
 Rust.
-- Port function-for-function into `purepath-core::matching`.
+- Port function-for-function into `oathlight-core::matching`.
 - **Golden corpus:** the existing test data in `extension/tests/` (adversarial,
   IDN/punycode, domain-keywords, corpus) becomes shared JSON fixtures consumed by
   BOTH the `.cjs` harness and Rust `#[test]`s. One corpus, two runtimes, zero drift.
@@ -78,11 +78,11 @@ native bridge (`set_blocking_settings` → `blocklist_sync`-style push). Formali
 > moves functionality *out* of the extension.
 
 ### 1.1 System-level DNS filtering
-**Approach.** New crate `desktop-app/dns/` (`purepath-dns`), built on
+**Approach.** New crate `desktop-app/dns/` (`oathlight-dns`), built on
 `hickory-server` + `hickory-resolver` (the maintained fork of trust-dns):
 
 1. A `RequestHandler` that, for every query, extracts the QNAME and runs it
-   through `purepath-core::matching` — first the exact-and-parent domain walk
+   through `oathlight-core::matching` — first the exact-and-parent domain walk
    (the same algorithm as `bg/blocklists.js`), then `checkDomainKeywords`'s Rust
    port. Blocked → answer `NXDOMAIN` (v1; a blockpage IP needs a local HTTPS
    server with cert problems — skip it). Clean → forward to upstream and relay.
@@ -178,7 +178,7 @@ mitigation; never default any new entry to "kill".
 Do **not** write a signed kernel driver yet. When the time comes, prototype
 with **WinDivert** (signed, redistributable, user-mode API): intercept outbound
 443, parse the TLS ClientHello SNI, drop the handshake if the hostname fails
-`purepath-core::matching`. That validates the whole approach with zero signing
+`oathlight-core::matching`. That validates the whole approach with zero signing
 cost; a true WFP callout driver is only worth it if WinDivert's performance or
 AV-flagging proves unacceptable. Everything else in this plan works without it.
 
@@ -455,7 +455,7 @@ the FP feedback loop, then enable in the Strict preset.
 
 ### 4.1 Generalized friction: delayed weakening
 **The keystone refactor.** Extract `uninstall.rs`'s store into
-`purepath-core::friction`:
+`oathlight-core::friction`:
 ```rust
 pub struct FrictionStore {           // generalizes UninstallStore
     path: PathBuf,                   // <app_data_dir>/friction.json
@@ -564,7 +564,7 @@ strengthening-style flow with a short (60s) delay + event-log entry —
 enough friction to stop impulse, not enough to brick a workday.
 
 ### 4.5 Tamper-evident event log
-**Approach.** `purepath-core::eventlog`:
+**Approach.** `oathlight-core::eventlog`:
 - Append-only JSONL at `<app_data_dir>/events.log`; each entry
   `{seq, ts, kind, data, prev, hash}` where
   `hash = sha256(seq ‖ ts ‖ kind ‖ canonical(data) ‖ prev)`; genesis uses a
@@ -607,7 +607,7 @@ When `DEFAULT_DELAY_SECS` goes to `24*60*60` (owner decision, near Alpha):
    (5-4-3-2-1) → user's redirect target + habit-replacement options (5.6). Each
    step advances on its own timer; skippable but defaults to flowing through.
 2. Entry points: tray menu item (`install_tray` at lib.rs:1300 — add a "I need
-   help now" `MenuItem` before "Open Pure Path"); global hotkey via
+   help now" `MenuItem` before "Open Oath Light"); global hotkey via
    `tauri-plugin-global-shortcut` (default Ctrl+Shift+Space, configurable);
    a button on the extension's `blocked.html` that deep-links via the bridge
    (`{type:"open_panic"}` → desktop shows the window; if the desktop isn't
@@ -708,7 +708,7 @@ core — design review with real users before shipping.
 
 ### 6.1 Store publication
 **Order of operations matters:**
-1. **Rotate the extension key.** `purepath-extension-key.pem` is committed to
+1. **Rotate the extension key.** `oathlight-extension-key.pem` is committed to
    the repo (`desktop-app/`) — for Web Store publication the CWS-assigned ID
    supersedes it, but a public private-key must not remain the basis of
    anything. Recompute `browsers.rs::EXTENSION_ID` from the final store ID
@@ -736,7 +736,7 @@ verification in `docs/VERIFY.md`. NSIS determinism is the hard part — if the
 installer won't reproduce, publish reproducibility for the zip + exe payloads
 inside it first and say so honestly.
 
-### 6.3 "Break Pure Path" bypass bounty
+### 6.3 "Break Oath Light" bypass bounty
 `SECURITY.md` (threat model: what's in scope — bypass with standard user
 privileges, no admin/registry edits — and what's acknowledged out of scope) +
 `BYPASSES.md` hall of fame (reporter, date, technique, fix commit, regression
@@ -793,11 +793,11 @@ layout audit is the real work), Spanish, Portuguese, Hindi, Indonesian.
 ## Part H — Pillar 7: Mobile groundwork
 
 The only Phase-4/Alpha *action* for mobile is architectural discipline:
-- Everything in `purepath-core` stays `no_std`-tolerant where cheap, avoids
+- Everything in `oathlight-core` stays `no_std`-tolerant where cheap, avoids
   Windows-only deps outside `#[cfg]` blocks, and exposes a UniFFI-friendly
   surface (plain structs, no Tauri types). The A.1 crate boundary is the mobile
   strategy.
-- `purepath-dns` keeps resolver logic separate from Windows adapter takeover —
+- `oathlight-dns` keeps resolver logic separate from Windows adapter takeover —
   Android's `VpnService` DNS intercept will consume the same resolver core.
 - Model quantization (2.3) is the other hard prerequisite (mobile can't ship
   343MB FP32).

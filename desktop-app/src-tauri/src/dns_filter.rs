@@ -1,7 +1,7 @@
 //! src-tauri/src/dns_filter.rs — app-side lifecycle for the system DNS
 //! filter (plan items 1.1 + 1.2).
 //!
-//! Wraps the dependency-free `purepath-dns` resolver crate: owns the running
+//! Wraps the dependency-free `oathlight-dns` resolver crate: owns the running
 //! `DnsServer`, the taken-over/error status the UI reads, and the
 //! enable/disable/health-check/revert operations the commands and the
 //! monitor tick call into.
@@ -20,7 +20,7 @@
 //!      the last-act restore for a legitimate uninstall.
 //! Fail open on infrastructure: any doubt, put the real upstreams back.
 
-use purepath_dns::{takeover, CapturedDns};
+use oathlight_dns::{takeover, CapturedDns};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -57,7 +57,7 @@ impl Default for DnsStatus {
 /// Managed state for the DNS filter. `server` is `None` when stopped.
 pub struct DnsFilterState {
     app_data_dir: PathBuf,
-    server: Mutex<Option<purepath_dns::DnsServer>>,
+    server: Mutex<Option<oathlight_dns::DnsServer>>,
     status: Mutex<DnsStatus>,
     /// Consecutive failed health checks (reset to 0 on any success). Only
     /// touched from the single monitor thread + enable/disable under the
@@ -126,25 +126,25 @@ impl DnsFilterState {
                 // fall back to the public resolvers for the resolver itself.
                 // Takeover below will fail the same way and be reported.
                 log::warn!("dns_filter: adapter enumeration failed ({e}); using fallback upstreams");
-                (purepath_dns::FALLBACK_PRIMARY.to_string(), purepath_dns::FALLBACK_SECONDARY.to_string())
+                (oathlight_dns::FALLBACK_PRIMARY.to_string(), oathlight_dns::FALLBACK_SECONDARY.to_string())
             }
         };
         let upstreams_vec = vec![upstreams_pair.0.clone(), upstreams_pair.1.clone()];
 
         // Start listening on 127.0.0.1:53. A bind failure here is the port-53
         // conflict case — return it verbatim, take over nothing.
-        let server = purepath_dns::start(upstreams_pair).map_err(|e| {
+        let server = oathlight_dns::start(upstreams_pair).map_err(|e| {
             self.set_error(e.clone());
             e
         })?;
 
         // Load the user's custom-blocked domains into the resolver + start
         // its slow-refresh loop (idempotent across enables).
-        purepath_dns::init_custom_domains(self.custom_domains_json());
+        oathlight_dns::init_custom_domains(self.custom_domains_json());
 
         // Verify the resolver actually answers before redirecting any
         // adapter at it — never point DNS at something that isn't working.
-        if !purepath_dns::health_check(HEALTH_TIMEOUT) {
+        if !oathlight_dns::health_check(HEALTH_TIMEOUT) {
             server.stop();
             let msg = "The DNS resolver started but isn't answering on 127.0.0.1:53. \
                        No network settings were changed."
@@ -210,7 +210,7 @@ impl DnsFilterState {
         if !self.is_active() {
             return;
         }
-        if purepath_dns::health_check(HEALTH_TIMEOUT) {
+        if oathlight_dns::health_check(HEALTH_TIMEOUT) {
             self.health_failures.store(0, Ordering::SeqCst);
             return;
         }

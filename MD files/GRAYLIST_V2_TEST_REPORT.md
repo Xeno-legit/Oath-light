@@ -2,7 +2,7 @@
 
 > Handoff for the next agent. Records a full live-testing pass of the Graylist V2
 > system against real sites (via the Playwright MCP **extension bridge**, driving
-> the real browser with Pure Path installed), the bugs found, the fixes applied,
+> the real browser with Oath Light installed), the bugs found, the fixes applied,
 > and what remains. Pairs with [GRAYLIST_HANDOFF.md](GRAYLIST_HANDOFF.md) (design)
 > and [BLOCKING_STRATEGY.md](BLOCKING_STRATEGY.md) (rationale).
 >
@@ -87,7 +87,7 @@
      snake-case, confirmed correct) still scrubs client-side fetches during in-app
      navigation (the SSR gap is first-paint only). Both layers now cover it.
    - ⚠️ **Not yet live-tested through the actual extension** — in the bridge browser
-     `window.__purePathGraylistV2 === false` and `fetch` was native, i.e. **the
+     `window.__oathLightGraylistV2 === false` and `fetch` was native, i.e. **the
      extension wasn't injecting this session**. The rule logic + selectors were
      validated by replaying them in-page via the DevTools bridge; needs an extension
      reload + live confirmation (see §6 / per-site table).
@@ -117,7 +117,7 @@
 - **`fetch`/XHR patch can be clobbered per-site.** On **ArtStation** a page library had
   *replaced* `window.fetch` (axios-style) and **Rollbar** had wrapped XHR — our patch may
   not be in the chain there. On Bluesky/Tumblr our patches were intact. The methodology
-  check `window.__purePathGraylistV2===true` only proves the script *ran*, NOT that the
+  check `window.__oathLightGraylistV2===true` only proves the script *ran*, NOT that the
   patch *survived* — verify behaviourally (`String(window.fetch)` should start with our
   `function (input, init)` wrapper). ArtStation is also login-gated (mature hidden
   logged-out) so it's vacuous without creds → deferred.
@@ -284,7 +284,7 @@ that catches them.
 
 - [extension/graylist-inject.js](extension/graylist-inject.js) — scrub fix (§1.1), XHR interceptor (§1.2), Tumblr `community_labels` signal, removed DeviantArt rule/`S.deviant`/quick-match entry.
 - [extension/content.js](extension/content.js) — Newgrounds markers (`[class*="rated-a"]`/`rated-m`), removed FA/SoFurry/Inkbunny/Weasyl DOM rules, Discord 3-tier rewrite, Newgrounds-bypass → `about:blank` (TEST).
-- [extension/background.js](extension/background.js) — `PP_TESTING` block routing → `about:blank` + `[PurePath][TEST] BLOCK` log.
+- [extension/background.js](extension/background.js) — `PP_TESTING` block routing → `about:blank` + `[OathLight][TEST] BLOCK` log.
 - [extension/blocklists/domains_part3.json](extension/blocklists/domains_part3.json) — added `furaffinity.net`, `sofurry.com`, `inkbunny.net`, `weasyl.com`, `deviantart.com`.
 - [extension/graylist-sites.js](extension/graylist-sites.js) + [desktop-app/src/renderer/js/store.js](desktop-app/src/renderer/js/store.js) — removed the 5 now-blocked sites from the graylist UI.
 - [extension/manifest.json](extension/manifest.json) — version bumped (forces blacklist re-seed on reload via `onInstalled`).
@@ -344,7 +344,7 @@ that catches them.
 ## 8. Testing methodology (reuse this)
 
 - Drive the **real browser** via Playwright MCP **extension bridge** (`--extension`).
-  The extension only injects on graylist hosts, so check `window.__purePathGraylistV2`
+  The extension only injects on graylist hosts, so check `window.__oathLightGraylistV2`
   on an actual graylist page, not `example.com`. The patched `fetch.toString()`
   deliberately reports `[native code]`.
 - **Differential per site:** before the XHR patch, XHR = raw vs fetch = stripped.

@@ -8,7 +8,7 @@
 //! disk; the point is that tampering leaves unmistakable evidence, not that
 //! it's impossible — see [`verify`]/[`EventLog::load`]).
 //!
-//! Lives in `purepath-core` (not `src-tauri`) on purpose: the shape and the
+//! Lives in `oathlight-core` (not `src-tauri`) on purpose: the shape and the
 //! hashing math have nothing Tauri- or Windows-specific about them, and the
 //! future DNS resolver / mobile bindings (plan Part H) may want their own
 //! log using the exact same format.
@@ -60,7 +60,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// `prev` of the very first entry in a fresh chain (or a freshly-restarted
 /// segment that has no earlier valid entry to chain off of).
-pub const GENESIS_PREV: &str = "PUREPATH-EVENTLOG-GENESIS-V1";
+pub const GENESIS_PREV: &str = "OATHLIGHT-EVENTLOG-GENESIS-V1";
 
 /// Rotate to a new file once the current one reaches this size.
 pub const ROTATE_BYTES: u64 = 10 * 1024 * 1024; // 10MB

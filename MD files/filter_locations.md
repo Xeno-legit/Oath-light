@@ -1,4 +1,4 @@
-# Pure Path NSFW Blocker: Exhaustive Graylist Filter Map
+# Oath Light NSFW Blocker: Exhaustive Graylist Filter Map
 
 This document contains a 1:1 mapping of all filtered domains from the `Graylistfoundomains.txt` analysis.
 
