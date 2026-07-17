@@ -51,6 +51,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop-app
+      # tauri-build's build script fails if the externalBin sidecars are not
+      # already staged under src-tauri/binaries, so build them first.
+      - name: Stage Tauri sidecar binaries
+        run: node desktop-app/scripts/bundle-sidecars.mjs
       - name: cargo test (whole workspace)
         run: cargo test --workspace --manifest-path desktop-app/Cargo.toml
       - name: cargo clippy (deny warnings)
