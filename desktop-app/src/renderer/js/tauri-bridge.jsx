@@ -209,6 +209,67 @@
       return invoke('request_remove_trusted_contact', { auth: auth || null });
     },
 
+    // Tamper-evident event log (4.5) — see core/eventlog.rs for the format.
+    // `getEventLog` resolves the most recent entries in the CURRENT log
+    // segment, newest first, capped at `limit`. Never contains browsing
+    // history or screen content — event only.
+    getEventLog(limit) {
+      return invoke('get_event_log', { limit: limit == null ? null : limit })
+        .catch((e) => { console.warn('[OathLight] getEventLog failed:', e); return []; });
+    },
+    // Re-walks the WHOLE hash chain from genesis, across every rotated
+    // segment, on demand — the "Verify integrity" button. Resolves to
+    // `{ intact, entries, first_break_seq, chain_started, restarts }`; once
+    // `intact` goes false it never "heals" even if the chain resumes
+    // correctly afterward — see `VerifyReport`'s doc comment in eventlog.rs.
+    verifyEventLog() {
+      return invoke('verify_event_log')
+        .catch((e) => { console.warn('[OathLight] verifyEventLog failed:', e); return null; });
+    },
+
+    // Lockdown Mode (4.4) — whitelist-only browsing, on demand. `getLockdownState`
+    // resolves the clock-tamper-immune credited-time view:
+    // `{ active, frozen, remaining_secs, active_until }`. `active_until` is a
+    // wall-clock display estimate only, never authoritative — see lockdown.rs.
+    getLockdownState() {
+      return invoke('get_lockdown_state').catch((e) => { console.warn('[OathLight] getLockdownState failed:', e); return null; });
+    },
+    // Start (or extend/upgrade) a lockdown. STRENGTHENING — always instant,
+    // never gated: extending never shortens the remaining time, and
+    // upgrading normal -> frozen is monotonic (frozen never downgrades back).
+    // Resolves to the same `LockdownView` shape as `getLockdownState`.
+    startLockdown(durationSecs, frozen) {
+      return invoke('start_lockdown', { durationSecs, frozen: !!frozen, auth: null });
+    },
+    // End a lockdown early — the WEAKENING half of 4.4's asymmetry. A normal
+    // (non-frozen) lockdown goes through the ordinary friction delay under
+    // the "lockdown.cancel" action id (master-password gated if one is set)
+    // and resolves to the same `{ action_id, label, ..., remaining_secs,
+    // ready }` shape as `removeCustomDomain` — it shows up in
+    // `usePendingWeakenings()` like any other pending change. A FROZEN
+    // lockdown REJECTS outright (no friction entry is ever registered for
+    // one) — the promise rejects with the honest "wait it out" message;
+    // callers must not treat that as a generic error to retry.
+    cancelLockdown(auth) {
+      return invoke('cancel_lockdown', { auth: auth || null });
+    },
+    // Additively allow one domain through an active lockdown (4.4's
+    // anti-brick valve) — a short 60s friction delay under
+    // "lockdown.allow:<domain>", master-password gated if one is set.
+    requestLockdownAllow(domain, auth) {
+      return invoke('request_lockdown_allow', { domain, auth: auth || null });
+    },
+    // Schedule-from-vulnerable-hours escalation (4.4 v2): auto-start a
+    // (non-frozen) lockdown during the configured vulnerable-hours window
+    // instead of only showing reminder pop-ups. Turning ON is instant (a
+    // strengthening); turning OFF is a weakening — friction-gated under
+    // "lockdown.escalation_disable", same `{ applied, pending }`
+    // WeakeningOutcome shape as `setGuard`/`setDnsFilter`. Never touches an
+    // already-active lockdown either way.
+    setLockdownEscalation(enabled, auth) {
+      return invoke('set_lockdown_escalation', { enabled: !!enabled, auth: auth || null });
+    },
+
     // Panic / SOS flow (5.1). `onOpenPanic` subscribes to the backend's
     // `open-panic` event (tray "I need help now" / Ctrl+Shift+Space / the
     // extension blocked page's deep-link); resolves to an unlisten function,

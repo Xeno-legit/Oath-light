@@ -287,6 +287,228 @@ function DnsFilterSection() {
   );
 }
 
+// --- Lockdown Mode (Phase 4 item 4.4) ----------------------------------------
+//
+// Cold Turkey-style whitelist-only browsing, on demand — while active, only
+// the ~110-domain mainstream allowlist (plus anything additively let through
+// via the short `lockdown.allow` friction) is reachable; everything else
+// blocks, full stop. Lives HERE on the Blocking page, not Settings: it's a
+// blocking MODE that sits alongside the other enforcement controls in
+// "Tamper protection & enforcement" (uninstall guard, app blocking, DNS
+// filter) rather than an account-level preference — and it's the single most
+// drastic lever on this page, so it gets its own dedicated card instead of
+// being buried as one more settings row.
+//
+// Asymmetry (see src-tauri/lockdown.rs's module doc): starting/extending is
+// always a STRENGTHENING — instant, unconditional, monotonic (extending
+// never shortens the remaining time; upgrading normal -> frozen is allowed,
+// frozen never downgrades back). Ending one early is the WEAKENING — a
+// normal lockdown goes through the same friction delay as every other
+// weakening (`lockdown.cancel`, master-password gated); a FROZEN lockdown
+// refuses outright, on purpose — there's no cancel button for one at all,
+// because that was the whole point of choosing frozen in the first place.
+const LOCKDOWN_DURATIONS = [
+  { value: 1800, label: '30 minutes' },
+  { value: 3600, label: '1 hour' },
+  { value: 2 * 3600, label: '2 hours' },
+  { value: 4 * 3600, label: '4 hours' },
+  { value: 8 * 3600, label: '8 hours' },
+  { value: 24 * 3600, label: '24 hours' },
+];
+
+function LockdownCard() {
+  const available = !!(window.PPNative && window.PPNative.available);
+  const [view, setView] = React.useState(null); // { active, frozen, remaining_secs, active_until }
+  const [escalate, setEscalate] = React.useState(null); // null = loading
+  const [durationSecs, setDurationSecs] = React.useState(3600);
+  const [frozenChoice, setFrozenChoice] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [escBusy, setEscBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const [, tick] = React.useReducer((x) => x + 1, 0);
+  // Same anchor-and-tick pattern as UninstallCard: the backend's credited-time
+  // engine is the source of truth, this just derives a smooth 1s countdown
+  // between re-syncs instead of hammering the backend every second.
+  const ref = React.useRef({ at: 0, remaining: 0 });
+
+  const pending = (window.usePendingWeakenings || (() => []))();
+  const cancelPending = pending.find((p) => p.action_id === 'lockdown.cancel');
+  const escalationPending = pending.find((p) => p.action_id === 'lockdown.escalation_disable');
+
+  const applyView = (v) => {
+    setView(v);
+    ref.current = { at: Date.now(), remaining: v ? v.remaining_secs : 0 };
+  };
+
+  const refresh = React.useCallback(() => {
+    if (!available) return;
+    window.PPNative.getLockdownState().then((v) => { if (v) applyView(v); });
+    // No dedicated "get lockdown escalation" command — SettingsV1.lockdown is
+    // just part of the same full-settings snapshot getAppSettings() already
+    // returns (AppBlockingSection reads the same command for blocked_processes).
+    window.PPNative.getAppSettings().then((s) => { if (s) setEscalate(!!(s.lockdown && s.lockdown.escalate_vulnerable_hours)); });
+  }, [available]);
+
+  React.useEffect(() => { refresh(); }, [refresh]);
+  // Re-poll while mounted — a lockdown can end on its own (natural expiry, no
+  // click involved), and a cancel/escalation-disable friction request can
+  // resolve from elsewhere (e.g. the "Pending changes" card in Settings).
+  React.useEffect(() => {
+    if (!available) return;
+    const id = setInterval(refresh, 5000);
+    return () => clearInterval(id);
+  }, [available, refresh]);
+  React.useEffect(() => { refresh(); }, [pending.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 1s local ticker while active, re-synced from the backend every 5s above.
+  React.useEffect(() => {
+    if (!view || !view.active) return;
+    const id = setInterval(() => {
+      const left = ref.current.remaining - (Date.now() - ref.current.at) / 1000;
+      if (left <= 0) refresh(); else tick();
+    }, 1000);
+    return () => clearInterval(id);
+  }, [view, refresh]);
+
+  const liveRemaining = view && view.active
+    ? Math.max(0, Math.round(ref.current.remaining - (Date.now() - ref.current.at) / 1000))
+    : 0;
+
+  const acquireAuth = () => (window.PPAuth ? window.PPAuth.acquire() : Promise.resolve(null));
+
+  const start = () => {
+    setErr('');
+    const chosen = LOCKDOWN_DURATIONS.find((o) => o.value === durationSecs);
+    const durationLabel = chosen ? chosen.label : fmtDur(durationSecs);
+    const warn = frozenChoice
+      ? '\n\nFrozen: once started, this CANNOT be cancelled early — only waited out. There is no override, no password bypass.'
+      : '';
+    if (!confirm(`Start a ${durationLabel} lockdown?\n\nOnly your allowlist stays reachable — everything else blocks, full stop, the whole time.${warn}`)) return;
+    setBusy(true);
+    window.PPNative.startLockdown(durationSecs, frozenChoice)
+      .then((v) => applyView(v))
+      .catch((e) => setErr(e && e.message ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+
+  const cancel = () => {
+    if (!confirm('End the lockdown early?\n\nThis goes through the same waiting-period delay as any other protection change — the lockdown stays fully active until it elapses.')) return;
+    setErr('');
+    acquireAuth()
+      .then((token) => { setBusy(true); return window.PPNative.cancelLockdown(token); })
+      .then(() => refresh())
+      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
+      .finally(() => setBusy(false));
+  };
+
+  const keepLockedDown = () => { window.PPNative.cancelWeakening('lockdown.cancel').then(refresh); };
+
+  const toggleEscalation = () => {
+    setErr('');
+    if (!escalate) {
+      // Turning it on is a strengthening — instant, no auth.
+      setEscBusy(true);
+      window.PPNative.setLockdownEscalation(true, null)
+        .then(() => setEscalate(true))
+        .catch((e) => setErr(e && e.message ? e.message : String(e)))
+        .finally(() => setEscBusy(false));
+      return;
+    }
+    acquireAuth()
+      .then((token) => { setEscBusy(true); return window.PPNative.setLockdownEscalation(false, token); })
+      .then((outcome) => { if (outcome && outcome.applied) setEscalate(false); refresh(); })
+      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
+      .finally(() => setEscBusy(false));
+  };
+
+  const keepEscalationOn = () => { window.PPNative.cancelWeakening('lockdown.escalation_disable').then(refresh); };
+
+  return (
+    <div className="card fade-up" style={{ marginTop: 18 }}>
+      <div className="row" style={{ gap: 14, alignItems: 'flex-start' }}>
+        <div className="ut-ico"><IconLock size={20} /></div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <b style={{ fontSize: 14.5, fontWeight: 800 }}>Lockdown mode</b>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, lineHeight: 1.5, maxWidth: '64ch' }}>
+            The nuclear option: only a small mainstream allowlist stays reachable — everything else blocks, full
+            stop, for exactly as long as you set. Meant for a genuinely hard day, not a daily habit.
+          </div>
+
+          {!available &&
+            <div className="ut-msg" style={{ color: 'var(--muted)', marginTop: 12 }}>Available in the desktop app.</div>}
+
+          {available && !view &&
+            <div style={{ marginTop: 12, fontSize: 13, color: 'var(--muted)' }}>Loading…</div>}
+
+          {/* inactive → start */}
+          {available && view && !view.active &&
+            <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 360 }}>
+              <label className="field">
+                <span>Duration</span>
+                <select className="input" value={durationSecs} onChange={(e) => setDurationSecs(Number(e.target.value))}>
+                  {LOCKDOWN_DURATIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </label>
+              <label className="row" style={{ gap: 8, alignItems: 'flex-start', fontSize: 12.5, color: 'var(--muted)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={frozenChoice} onChange={(e) => setFrozenChoice(e.target.checked)} style={{ marginTop: 3 }} />
+                <span>
+                  <b style={{ color: frozenChoice ? '#ef4444' : 'var(--text-2)' }}>Frozen</b> — cannot be cancelled once
+                  started, only waited out. No password, no override. Only choose this if that is exactly what you want.
+                </span>
+              </label>
+              {err && <div style={{ fontSize: 12.5, color: '#ef4444' }}>{err}</div>}
+              <button className="btn btn-danger btn-sm" style={{ alignSelf: 'flex-start' }} disabled={busy} onClick={start}>
+                {busy ? 'Starting…' : 'Start lockdown'}
+              </button>
+            </div>}
+
+          {/* active */}
+          {available && view && view.active &&
+            <div className="ut-pending" style={{ marginTop: 16 }}>
+              <div className="ut-count">{fmtDur(liveRemaining)}</div>
+              <div className="ut-sub">
+                {view.frozen ? 'remaining · frozen — cannot be cancelled, only waited out' : 'remaining · lockdown active'}
+              </div>
+              {err && <div style={{ fontSize: 12.5, color: '#ef4444', marginTop: 10 }}>{err}</div>}
+
+              {!view.frozen &&
+                <button className="btn btn-ghost btn-sm" disabled={busy || !!cancelPending} onClick={cancel} style={{ marginTop: 14 }}>
+                  End lockdown early
+                </button>}
+
+              {view.frozen &&
+                <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 14 }}>
+                  This one is frozen — there is genuinely no way to cancel it. That was the point when it started.
+                </div>}
+
+              {cancelPending &&
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>
+                  Ending in {fmtDur(cancelPending.remaining_secs)} — lockdown stays active until then · cancel from
+                  Settings → Pending changes,{' '}
+                  <a href="#" onClick={(e) => { e.preventDefault(); keepLockedDown(); }} style={{ color: 'var(--accent-2)' }}>keep it locked</a>
+                </div>}
+            </div>}
+
+          {/* escalation toggle — visible regardless of whether a lockdown is active right now */}
+          <div className="setting" style={{ marginTop: 12, paddingLeft: 0, paddingRight: 0 }}>
+            <div className="txt">
+              <b>Auto-lockdown during vulnerable hours</b>
+              <span>When your vulnerable-hours window (set above, under Focus schedule &amp; reminders) starts, automatically
+                begin a lockdown instead of only showing pop-ups. Never frozen — always cancellable through the normal delay.</span>
+            </div>
+            <Switch on={!!escalate} onClick={toggleEscalation} disabled={escBusy || escalate === null || !available} />
+          </div>
+          {escalationPending &&
+            <div style={{ fontSize: 12, color: 'var(--muted)', margin: '-4px 0 0' }}>
+              Turning off in {fmtDur(escalationPending.remaining_secs)} — cancel from Settings → Pending changes,{' '}
+              <a href="#" onClick={(e) => { e.preventDefault(); keepEscalationOn(); }} style={{ color: 'var(--accent-2)' }}>keep it on</a>
+            </div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingRow({ icon: I, title, desc, on, onToggle, accent }) {
   return (
     <div className="setting">
@@ -581,6 +803,10 @@ function BlockingPage({ s, PP }) {
           </div>
         </div>
       </div>
+
+      {/* lockdown mode (4.4) — the single most drastic lever on this page, so
+          it's a dedicated card rather than one more row above */}
+      <LockdownCard />
 
     </div>);
 

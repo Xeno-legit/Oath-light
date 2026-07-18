@@ -41,6 +41,7 @@ const IconSpark = (p) => <Ico {...p}><path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22
 /* ── Time & Navigation ── */
 const IconClock = (p) => <Ico {...p}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></Ico>;
 const IconCompass = (p) => <Ico {...p}><circle cx="12" cy="12" r="10" /><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" /></Ico>;
+const IconGlobe = (p) => <Ico {...p}><circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 010 20 15.3 15.3 0 010-20z" /></Ico>;
 
 /* ── User & Profile ── */
 const IconUser = (p) => <Ico {...p}><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></Ico>;
@@ -67,6 +68,6 @@ Object.assign(window, {
   IconShield, IconGrid, IconList, IconPalette, IconSliders, IconChat, IconSpark,
   IconGear, IconUser, IconPlus, IconSearch, IconSun, IconMoon, IconLock, IconClock,
   IconChevron, IconX, IconSend, IconCheck, IconTrash, IconFlame, IconHeart, IconBell,
-  IconShieldOff, IconCompass, IconBook, IconArrowUp, IconWave, IconDroplet,
+  IconShieldOff, IconCompass, IconGlobe, IconBook, IconArrowUp, IconWave, IconDroplet,
   IconOrbs, IconStars, IconRipple, IconSmoke, IconMinimal, IconAtmosphere,
 });

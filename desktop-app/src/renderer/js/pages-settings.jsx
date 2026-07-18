@@ -588,6 +588,157 @@ function ListsUpdateCard() {
   );
 }
 
+// --- Protection history (Phase 4 item 4.5) -----------------------------------
+
+// Human-readable labels for the event log's machine `kind` tags — see
+// core/eventlog.rs for the append-only, hash-chained format and the full set
+// of `log_event` call sites in lib.rs. Falls back to a humanized version of
+// the raw kind (snake_case -> Title Case) for anything not named here, so a
+// future event kind never renders as a blank line.
+const EVENT_LABELS = {
+  uninstall_requested: 'Uninstall requested',
+  uninstall_cancelled: 'Uninstall request cancelled',
+  uninstall_completed: 'Uninstall completed',
+  extension_missing: 'Extension went missing',
+  extension_restored: 'Extension reconnected',
+  extension_missing_confirmed: 'Extension confirmed missing',
+  lockdown_started: 'Lockdown started',
+  lockdown_cancel_refused: 'Lockdown cancel refused — was frozen',
+  lockdown_escalation_enabled: 'Auto-lockdown (vulnerable hours) turned on',
+  block_burst: 'Unusual burst of blocks',
+  friction_requested: 'Protection change requested',
+  friction_cancelled: 'Protection change cancelled',
+  trusted_contact_set: 'Trusted contact set',
+  notify_sent: 'Trusted contact notified',
+  notify_failed: 'Contact notification failed',
+  auth_failed: 'Incorrect master password entered',
+  process_killed: 'Blocked app closed',
+  monitor_escalated: 'AI monitor escalated',
+  clock_anomaly: 'Clock tampering detected',
+  chain_restarted: 'Event log integrity break detected',
+  log_rotated: 'Event log rotated (routine)',
+};
+
+function humanizeKind(kind) {
+  return (kind || '').split('_').filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+}
+function eventLabel(kind) { return EVENT_LABELS[kind] || humanizeKind(kind); }
+
+// A short, honest detail line for the handful of kinds whose `data` carries
+// something worth surfacing — everything else just shows the label + time.
+// The log itself never stores browsing history or screen content (plan 4.5:
+// "event only, never content"), so there's rarely more to say than this.
+function eventDetail(e) {
+  const d = e.data || {};
+  if ((e.kind === 'friction_requested' || e.kind === 'friction_cancelled') && d.action) return d.action;
+  if ((e.kind === 'extension_missing' || e.kind === 'extension_restored' || e.kind === 'extension_missing_confirmed') && d.browser) return d.browser;
+  if (e.kind === 'lockdown_started' && d.duration_secs) return (d.frozen ? 'frozen · ' : '') + delayWords(d.duration_secs);
+  return '';
+}
+
+// "3 minutes ago" / "2 days ago" style relative time from unix seconds — a
+// companion to fmtDur (a countdown, not an "ago") above.
+function fmtAgo(unixSecs) {
+  const secs = Math.max(0, Math.floor(Date.now() / 1000) - unixSecs);
+  if (secs < 60) return 'just now';
+  const m = Math.floor(secs / 60);
+  if (m < 60) return m + (m === 1 ? ' minute ago' : ' minutes ago');
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + (h === 1 ? ' hour ago' : ' hours ago');
+  const d = Math.floor(h / 24);
+  if (d < 30) return d + (d === 1 ? ' day ago' : ' days ago');
+  return new Date(unixSecs * 1000).toLocaleDateString();
+}
+
+// Tamper-evident event log (4.5) — a plain-language recent-activity list plus
+// an on-demand "Verify integrity" button that re-walks the WHOLE hash chain
+// from genesis, across every rotated segment (`verify_event_log` / see
+// core/eventlog.rs). Honesty rule, taken straight from `VerifyReport`'s own
+// doc comment: a past break is reported forever, even once the chain resumes
+// correctly afterward — this card never hides that behind a "looks fine now".
+function ProtectionHistoryCard() {
+  const available = !!(window.PPNative && window.PPNative.available);
+  const [events, setEvents] = React.useState(null); // null = loading
+  const [report, setReport] = React.useState(null);
+  const [verifying, setVerifying] = React.useState(false);
+
+  const refresh = React.useCallback(() => {
+    if (!available) { setEvents([]); return; }
+    window.PPNative.getEventLog(8).then((list) => setEvents(Array.isArray(list) ? list : []));
+  }, [available]);
+
+  React.useEffect(() => { refresh(); }, [refresh]);
+
+  const verify = () => {
+    setVerifying(true);
+    window.PPNative.verifyEventLog().then((r) => { if (r) setReport(r); }).finally(() => setVerifying(false));
+  };
+
+  return (
+    <div className="card fade-up" style={{ marginTop: 18 }}>
+      <div className="row" style={{ gap: 14, alignItems: 'flex-start' }}>
+        <div className="ut-ico"><IconClock size={20} /></div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <b style={{ fontSize: 14.5, fontWeight: 800 }}>Protection history</b>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, lineHeight: 1.5, maxWidth: '64ch' }}>
+            A tamper-evident log of protective events — never browsing history, never screenshots, only that
+            something happened. Each entry is cryptographically chained to the one before it, so editing or
+            deleting one leaves unmistakable evidence.
+          </div>
+
+          {!available &&
+            <div className="ut-msg" style={{ color: 'var(--muted)', marginTop: 12 }}>Available in the desktop app.</div>}
+
+          {available && events === null &&
+            <div style={{ marginTop: 12, fontSize: 13, color: 'var(--muted)' }}>Loading…</div>}
+
+          {available && events && events.length === 0 &&
+            <div style={{ marginTop: 12, fontSize: 13, color: 'var(--muted)' }}>Nothing recorded yet.</div>}
+
+          {available && events && events.length > 0 &&
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column' }}>
+              {events.map((e) => {
+                const detail = eventDetail(e);
+                return (
+                  <div key={e.seq} className="row"
+                       style={{ justifyContent: 'space-between', gap: 10, padding: '8px 0', borderTop: '1px solid var(--glass-brd)' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{eventLabel(e.kind)}</div>
+                      {detail && <div style={{ fontSize: 12, color: 'var(--muted)' }}>{detail}</div>}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', flex: '0 0 auto', whiteSpace: 'nowrap' }}>{fmtAgo(e.ts)}</div>
+                  </div>
+                );
+              })}
+            </div>}
+
+          {available &&
+            <div style={{ marginTop: 14 }}>
+              <button className="btn btn-ghost btn-sm" disabled={verifying} onClick={verify}>
+                {verifying ? 'Verifying…' : 'Verify integrity'}
+              </button>
+            </div>}
+
+          {report &&
+            <div className="ut-msg" style={{ marginTop: 12, color: report.intact ? 'var(--accent-2)' : '#ef4444' }}>
+              {report.intact
+                ? <React.Fragment>
+                    <IconCheck size={13} style={{ verticalAlign: '-2px', marginRight: 5 }} />
+                    Intact — {report.entries} event{report.entries === 1 ? '' : 's'} verified back to the start.
+                  </React.Fragment>
+                : <React.Fragment>
+                    Tampering detected — the chain does not verify.{' '}
+                    {report.first_break_seq != null && ('Break at entry #' + report.first_break_seq + '. ')}
+                    {report.restarts > 0 && (report.restarts + (report.restarts === 1 ? ' restart' : ' restarts') + ' recorded. ')}
+                    {report.entries} event{report.entries === 1 ? '' : 's'} currently valid.
+                  </React.Fragment>}
+            </div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsPage({ s, PP }) {
   const p = s.profile;
   const setP = (patch) => PP.set({ profile: patch });
@@ -686,7 +837,13 @@ function SettingsPage({ s, PP }) {
       {/* master password (4.2) — gates every weakening request below */}
       <SecurityCard />
 
-      {/* pending weakenings (4.1) — guard/monitor disables, custom-block removals, trusted-contact removal */}
+      {/* blocklist OTA updates (3.5) — signed, monotonic, strengthening-only */}
+      <ListsUpdateCard />
+
+      {/* tamper-evident event log (4.5) — plain-language history + on-demand verify */}
+      <ProtectionHistoryCard />
+
+      {/* pending weakenings (4.1) — guard/monitor disables, custom-block removals, trusted-contact removal, lockdown cancel/escalation */}
       <PendingChangesCard PP={PP} />
 
       {/* uninstall — 24-hour friction request */}
