@@ -245,6 +245,9 @@ const NativeMessagingBridge = (function () {
     try { await chrome.storage.local.set({ ppBlocking: settings }); } catch (_) {}
     // Re-arm the reminder loop to reflect the new schedule immediately.
     if (typeof armReminderAlarm === 'function') armReminderAlarm();
+    // Lockdown schedule-from-vulnerable-hours (4.4 v2): arm/disarm the
+    // escalation alarm to match whatever the desktop just pushed.
+    if (typeof reconcileLockdownEscalationAlarm === 'function') reconcileLockdownEscalationAlarm();
     // Apply the opt-in YouTube Restricted Mode DNR toggle (default OFF) the
     // moment the desktop app pushes it — same channel as the redirect link.
     if (typeof applyYouTubeRestrictRuleset === 'function') applyYouTubeRestrictRuleset();
@@ -346,12 +349,22 @@ const NativeMessagingBridge = (function () {
     return send({ type: 'open_panic' });
   }
 
+  // ─ Lockdown schedule-from-vulnerable-hours (plan 4.4 v2) ───
+  // Tells the desktop app the vulnerable-hours window is currently active and
+  // how many minutes remain in it — see reminders.js's `maybeEscalateLockdown`.
+  // Only ever called while the desktop-owned `escalate_vulnerable_hours`
+  // setting is on (opt-in, off by default).
+  function sendVulnerableWindowActive(remainingMin) {
+    return send({ type: 'vulnerable_window_active', remainingMin });
+  }
+
   // ─ Public API ──────────────────────────────────────────────
   return {
     connect,
     sendStatsUpdate,
     sendBlocklistUpdate,
     sendOpenPanic,
+    sendVulnerableWindowActive,
     isConnected: () => isConnected
   };
 })();

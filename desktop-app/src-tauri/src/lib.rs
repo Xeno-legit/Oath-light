@@ -189,6 +189,20 @@ pub struct AppState {
     /// Persisted to `lockdown_allow.json`. Additions go through a short (60s)
     /// friction delay (`lockdown.allow:` action id) — see `request_lockdown_allow`.
     lockdown_allow: Vec<String>,
+    /// Recent (timestamp_ms, delta) block-count increases, for the
+    /// block-burst trusted-contact detector (5.2) — see `BLOCK_BURST_THRESHOLD`.
+    /// Bounded to the last `BLOCK_BURST_WINDOW_MS`; old entries are trimmed on
+    /// every `stats_sync`/`stats_update`, never grows unbounded.
+    block_burst_log: VecDeque<(u64, u64)>,
+    /// Wall-clock ms of the last `block_burst` trusted-contact notification,
+    /// so a sustained burst doesn't refire the notification every sync.
+    last_block_burst_notify_ms: u64,
+    /// Mirror of `SettingsV1.lockdown.escalate_vulnerable_hours` (4.4 v2), so
+    /// `broadcast_blocking` can push it down to extensions without needing a
+    /// `SettingsState` handle of its own — kept in sync by
+    /// `set_lockdown_escalation` and the `"lockdown.escalation_disable"`
+    /// applier arm, the only two places that ever change the setting.
+    lockdown_escalate: bool,
 }
 
 /// Lazily-loaded NSFW models (Phase 4 optional AI monitoring). Both are loaded
@@ -554,6 +568,14 @@ fn msg_profile_id(msg: &Value) -> Option<String> {
         .map(String::from)
 }
 
+// Block-burst trusted-contact detector (5.2): this many blocks landing within
+// `BLOCK_BURST_WINDOW_MS` of each other triggers one `block_burst` event-log
+// entry + (if configured) trusted-contact notification. Chosen as "clearly a
+// lot, in a short window" without being so low that ordinary heavy browsing
+// (a page full of ad-network subrequests) trips it constantly.
+const BLOCK_BURST_THRESHOLD: u64 = 10;
+const BLOCK_BURST_WINDOW_MS: u64 = 10 * 60 * 1000; // 10 minutes
+
 // ============================================================================
 // Message handling — messages arriving from a browser's extension
 // ============================================================================
@@ -586,6 +608,10 @@ fn handle_extension_message(
         "handshake" | "heartbeat" => { /* liveness already refreshed above */ }
 
         "stats_sync" | "stats_update" => {
+            // Block-burst trusted-contact detector (5.2): set outside the lock
+            // below if this update pushes the rolling window's total at/over
+            // `BLOCK_BURST_THRESHOLD` and the per-window cooldown has elapsed.
+            let mut burst_detected = false;
             {
                 let mut s = state.lock().unwrap();
                 // Key this source's block count by its profile id (fall back to
@@ -597,7 +623,32 @@ fn handle_extension_message(
                     .map(|c| if c.profile_id.is_empty() { format!("conn-{}", conn_id) } else { c.profile_id.clone() })
                     .unwrap_or_else(|| format!("conn-{}", conn_id));
                 if let Some(v) = msg.get("totalBlocks").and_then(|v| v.as_u64()) {
+                    // `totalBlocks` is cumulative (lifetime), so the delta since
+                    // this source's last-known value is how many NEW blocks
+                    // this update represents — a fresh source (no prior value)
+                    // contributes zero, never its whole lifetime total, so a
+                    // reconnect/resync can never look like a burst on its own.
+                    let prev = s.block_counts.get(&key).copied().unwrap_or(v);
+                    let delta = v.saturating_sub(prev);
                     s.block_counts.insert(key, v);
+                    if delta > 0 {
+                        let now_ms = now_unix_ms();
+                        s.block_burst_log.push_back((now_ms, delta));
+                        while s
+                            .block_burst_log
+                            .front()
+                            .map_or(false, |(t, _)| now_ms.saturating_sub(*t) > BLOCK_BURST_WINDOW_MS)
+                        {
+                            s.block_burst_log.pop_front();
+                        }
+                        let windowed: u64 = s.block_burst_log.iter().map(|(_, d)| d).sum();
+                        if windowed >= BLOCK_BURST_THRESHOLD
+                            && now_ms.saturating_sub(s.last_block_burst_notify_ms) >= BLOCK_BURST_WINDOW_MS
+                        {
+                            s.last_block_burst_notify_ms = now_ms;
+                            burst_detected = true;
+                        }
+                    }
                 }
                 // Aggregate = sum of every source's latest total.
                 s.stats.total_blocks = s.block_counts.values().sum();
@@ -618,6 +669,14 @@ fn handle_extension_message(
             }
             // Reflect the new global total back down to the extensions' pages.
             broadcast_app_data(state);
+            if burst_detected {
+                // Tier 1 (solo, always): a plain protective-event entry, no
+                // content — just that a burst happened. Tier 2 (optional):
+                // notify_contact is itself a no-op unless a contact is
+                // configured with this event enabled (solo-first).
+                log_event(app, "block_burst", serde_json::json!({}));
+                notify_contact(app, "block_burst");
+            }
         }
 
         "blocklist_sync" => {
@@ -653,6 +712,52 @@ fn handle_extension_message(
             // or verify here, and the blocked page runs its own self-contained
             // fallback flow whether or not this arrives.
             open_panic_flow(app);
+        }
+
+        "vulnerable_window_active" => {
+            // Lockdown schedule-from-vulnerable-hours (4.4 v2, opt-in, off by
+            // default — `SettingsV1.lockdown.escalate_vulnerable_hours`). This
+            // crate has no timezone database, so the extension (which already
+            // evaluates the vulnerable-hours window in local time for the
+            // reminder pop-ups — see `reminders.js`) is the one telling us
+            // "the window is active, here's how many minutes remain" on a
+            // short cadence; this just tops up a lockdown to match. Starting/
+            // extending a lockdown is always a strengthening (instant, no
+            // gate — see lockdown.rs), and `LockdownStore::start` is
+            // monotonic (never shortens the remaining time), so acting on a
+            // stale or duplicate message here is always safe, never a bug.
+            // Turning the ESCALATION SETTING itself off is the weakening half
+            // of the asymmetry and goes through `set_lockdown_escalation`'s
+            // friction gate instead — this arm only ever reads that setting.
+            let escalate = app
+                .try_state::<Arc<settings::SettingsState>>()
+                .map(|s| s.get().lockdown.escalate_vulnerable_hours)
+                .unwrap_or(false);
+            let mins = msg.get("remainingMin").and_then(|v| v.as_u64()).unwrap_or(0);
+            if escalate && mins > 0 {
+                if let Some(lockdown) = app.try_state::<Arc<lockdown::LockdownStore>>() {
+                    let was_active = lockdown.view().active;
+                    let view = lockdown.start(mins.saturating_mul(60), false);
+                    if let Some(settings) = app.try_state::<Arc<settings::SettingsState>>() {
+                        settings.update(|s| {
+                            s.lockdown.active_until = view.active_until;
+                            s.lockdown.frozen = view.frozen;
+                        });
+                    }
+                    let _ = broadcast_blocking(state, lockdown.inner());
+                    if !was_active {
+                        log_event(
+                            app,
+                            "lockdown_started",
+                            serde_json::json!({
+                                "duration_secs": mins * 60,
+                                "frozen": false,
+                                "reason": "vulnerable_hours_schedule",
+                            }),
+                        );
+                    }
+                }
+            }
         }
 
         _ => log::warn!("[conn {}] unknown message type: {}", conn_id, msg_type),
@@ -716,12 +821,18 @@ fn log_event(app: &AppHandle, kind: &str, data: Value) {
 /// connection drops; while connected, the desktop's explicit pushes are
 /// authoritative (a clock roll can't shorten a lockdown, only the desktop
 /// ending it can).
-fn lockdown_field(view: &lockdown::LockdownView, allow: &[String]) -> Value {
+fn lockdown_field(view: &lockdown::LockdownView, allow: &[String], escalate_vulnerable_hours: bool) -> Value {
     serde_json::json!({
         "active": view.active,
         "frozen": view.frozen,
         "ends_at_hint": view.active_until,
         "allow": allow,
+        // 4.4 v2: tells the extension whether to arm its own vulnerable-hours
+        // watcher (see reminders.js's `maybeEscalateLockdown`) — the desktop
+        // has no timezone database, so the extension is the one that decides
+        // WHEN the window is active; this flag only decides WHETHER it should
+        // bother checking at all.
+        "escalate_vulnerable_hours": escalate_vulnerable_hours,
     })
 }
 
@@ -735,12 +846,12 @@ fn lockdown_field(view: &lockdown::LockdownView, allow: &[String]) -> Value {
 /// either the base settings or the lockdown state.
 fn broadcast_blocking(state: &Arc<Mutex<AppState>>, lockdown: &lockdown::LockdownStore) -> usize {
     let view = lockdown.view();
-    let (mut settings, allow) = {
+    let (mut settings, allow, escalate) = {
         let s = state.lock().unwrap();
-        (s.ext_blocking.clone().unwrap_or_else(|| serde_json::json!({})), s.lockdown_allow.clone())
+        (s.ext_blocking.clone().unwrap_or_else(|| serde_json::json!({})), s.lockdown_allow.clone(), s.lockdown_escalate)
     };
     if let Some(obj) = settings.as_object_mut() {
-        obj.insert("lockdown".to_string(), lockdown_field(&view, &allow));
+        obj.insert("lockdown".to_string(), lockdown_field(&view, &allow, escalate));
     }
     let msg = serde_json::json!({ "type": "set_blocking", "settings": settings });
     broadcast_to_extensions(state, &msg)
@@ -777,6 +888,8 @@ fn notify_contact(app: &AppHandle, event_kind: &str) {
         "uninstall_requested" => contact.notify.uninstall_requested,
         "lockdown_cancelled" => contact.notify.lockdown_cancelled,
         "password_removal_requested" => contact.notify.password_removal_requested,
+        "ext_removed" => contact.notify.ext_removed,
+        "block_burst" => contact.notify.block_burst,
         // The unwire notification (5.2's anti-weak-moment rule) and the
         // monthly heartbeat always send when a contact exists — they're not
         // per-event opt-outs.
@@ -1520,6 +1633,13 @@ fn enforce_processes(
 // and (when configured + guard on) enforce reinstallation of a missing ext.
 // ============================================================================
 
+/// Extension-missing trusted-contact debounce (5.2): a browser must sit
+/// continuously in `extension_missing` for at least this long (while the
+/// uninstall guard is on) before `ext_removed` fires — a brief reconnect blip
+/// (browser restart, profile reload) never triggers it, only a removal that
+/// genuinely doesn't come back.
+const EXT_MISSING_NOTIFY_AFTER_MS: u64 = 5 * 60 * 1000; // 5 minutes
+
 fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
     std::thread::spawn(move || {
         // Browsers we've already enforced this session, remembering the outcome
@@ -1535,6 +1655,16 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
         // from `enforced` (which tracks policy writes) — this is purely the
         // missing/restored transition memo.
         let mut missing_seen: HashSet<String> = HashSet::new();
+        // When each currently-missing browser FIRST went missing (unix ms) —
+        // the debounce source for the `ext_removed` trusted-contact
+        // notification (5.2): a browser must sit continuously missing for at
+        // least `EXT_MISSING_NOTIFY_AFTER_MS` before it fires, so a brief
+        // reconnect blip (browser restart, profile reload) never triggers it.
+        let mut missing_since: HashMap<String, u64> = HashMap::new();
+        // Browsers already notified for the CURRENT missing streak, so the
+        // notification fires once per streak, not on every tick past the
+        // threshold. Cleared when the browser is restored.
+        let mut missing_notified: HashSet<String> = HashSet::new();
         // Process-blocking / evasion-detection noise memo (1.3) — see
         // `enforce_processes`'s doc comment for what's throttled and why.
         let mut process_memo: HashMap<String, Instant> = HashMap::new();
@@ -1595,16 +1725,35 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
             // extension_missing edge tracking (4.5): log only on the
             // transition into/out of "extension_missing" (a browser is
             // running but its extension isn't present), never every tick.
-            // Also the debounce source a later 5.2 "ext removed and not
-            // restored within N minutes" contact notification would build on
-            // (TODO(5.2 v2) — the notification itself is out of v1 scope).
+            // Also the debounce source for the 5.2 "ext removed and not
+            // restored within N minutes" trusted-contact notification below.
             for st in statuses.iter() {
                 let missing = st.state == "extension_missing";
                 if missing && !missing_seen.contains(&st.key) {
                     missing_seen.insert(st.key.clone());
+                    missing_since.insert(st.key.clone(), now);
                     log_event(&app, "extension_missing", serde_json::json!({ "browser": st.key }));
                 } else if !missing && missing_seen.remove(&st.key) {
+                    missing_since.remove(&st.key);
+                    missing_notified.remove(&st.key);
                     log_event(&app, "extension_restored", serde_json::json!({ "browser": st.key }));
+                } else if missing
+                    && guard_enabled
+                    && !missing_notified.contains(&st.key)
+                    && missing_since
+                        .get(&st.key)
+                        .is_some_and(|since| now.saturating_sub(*since) >= EXT_MISSING_NOTIFY_AFTER_MS)
+                {
+                    // 5.2, Tier 2: still missing after the debounce window AND
+                    // protection is actually supposed to be on (`guard_enabled`)
+                    // — this is exactly "extension removed and not restored
+                    // within N minutes" from the plan. Tier 1 (solo, always)
+                    // gets its own log entry regardless of whether a trusted
+                    // contact is configured; `notify_contact` itself is a
+                    // no-op unless one is (solo-first).
+                    missing_notified.insert(st.key.clone());
+                    log_event(&app, "extension_missing_confirmed", serde_json::json!({ "browser": st.key }));
+                    notify_contact(&app, "ext_removed");
                 }
             }
 
@@ -2336,6 +2485,53 @@ fn request_lockdown_allow(
     let view = friction.request(&action_id, &format!("Allow {norm} during lockdown"), serde_json::json!({ "domain": norm }));
     log_event(&app, "friction_requested", serde_json::json!({ "action": "lockdown.allow" }));
     Ok(view)
+}
+
+/// Toggle schedule-from-vulnerable-hours (4.4 v2): let the configured
+/// vulnerable-hours window automatically escalate into a (non-frozen)
+/// Lockdown instead of only showing reminder pop-ups — see the
+/// `"vulnerable_window_active"` arm in `handle_extension_message` for the
+/// actual escalation. Same asymmetry as `set_dns_filter_enabled`/`dns.disable`:
+/// turning it ON is instant (a strengthening — opting IN to more automatic
+/// protection); turning it OFF is a weakening and goes through the ordinary
+/// friction delay under the `"lockdown.escalation_disable"` action id, gated
+/// by the master password if one is set. Never touches an already-active
+/// lockdown either way — that still only ever ends via `lockdown.cancel` or
+/// natural expiry.
+#[tauri::command]
+fn set_lockdown_escalation(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Mutex<AppState>>>,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    enabled: bool,
+    auth: Option<String>,
+) -> Result<WeakeningOutcome, String> {
+    if enabled {
+        settings.update(|s| s.lockdown.escalate_vulnerable_hours = true);
+        state.lock().unwrap().lockdown_escalate = true;
+        friction.cancel("lockdown.escalation_disable");
+        log_event(&app, "lockdown_escalation_enabled", serde_json::json!({}));
+        return Ok(WeakeningOutcome { applied: true, pending: None });
+    }
+
+    let already_off = !settings.get().lockdown.escalate_vulnerable_hours;
+    if already_off {
+        return Ok(WeakeningOutcome { applied: true, pending: None });
+    }
+
+    auth::require_auth(&app, &auth)?;
+    let view = friction.request(
+        "lockdown.escalation_disable",
+        "Turn off automatic lockdown during vulnerable hours",
+        serde_json::json!({}),
+    );
+    log::warn!(
+        "lockdown escalation disable requested — {}s cool-off started (escalation stays on until it elapses)",
+        view.delay_secs
+    );
+    log_event(&app, "friction_requested", serde_json::json!({ "action": "lockdown.escalation_disable" }));
+    Ok(WeakeningOutcome { applied: false, pending: Some(view) })
 }
 
 // ============================================================================
@@ -3566,6 +3762,7 @@ pub fn run() {
             start_lockdown,
             cancel_lockdown,
             request_lockdown_allow,
+            set_lockdown_escalation,
             get_trusted_contact,
             set_trusted_contact,
             request_remove_trusted_contact,
@@ -3736,8 +3933,14 @@ pub fn run() {
             ota::init(app.handle(), &udd);
             // AppState was constructed with the hardcoded pre-setup default
             // (`guard_enabled: true`) before the persisted settings file could
-            // be read — now that it's loaded, the persisted value wins.
-            shared_state.lock().unwrap().guard_enabled = settings_state.get().guard_enabled;
+            // be read — now that it's loaded, the persisted value wins. Same
+            // for the lockdown-escalation mirror (4.4 v2) `broadcast_blocking`
+            // reads instead of a `SettingsState` handle of its own.
+            {
+                let mut s0 = shared_state.lock().unwrap();
+                s0.guard_enabled = settings_state.get().guard_enabled;
+                s0.lockdown_escalate = settings_state.get().lockdown.escalate_vulnerable_hours;
+            }
             // No background watcher for the uninstall request specifically:
             // the cool-off elapsing only flips `UninstallState.ready`,
             // unlocking the explicit "Remove Oath Light now" action in the UI
@@ -3916,6 +4119,17 @@ pub fn run() {
                                 save_lockdown_allow(&app2, &allow);
                                 let _ = broadcast_blocking(&state2, &lockdown2);
                                 log::warn!("friction: lockdown-allowed {domain} (applied)");
+                            } else if action_id == "lockdown.escalation_disable" {
+                                // 4.4 v2: the disable delay elapsed — actually
+                                // turn schedule-from-vulnerable-hours off. Does
+                                // NOT touch any lockdown already in progress
+                                // (started by this schedule or manually) — that
+                                // still only ends via `lockdown.cancel` or
+                                // natural expiry, same as always.
+                                settings2.update(|s| s.lockdown.escalate_vulnerable_hours = false);
+                                state2.lock().unwrap().lockdown_escalate = false;
+                                let _ = broadcast_blocking(&state2, &lockdown2);
+                                log::warn!("friction: lockdown schedule-from-vulnerable-hours disabled (weakening applied)");
                             } else if action_id == "trusted_contact.remove" {
                                 // 5.2: the unwire delay elapsed — actually
                                 // clear the contact. The contact was already
