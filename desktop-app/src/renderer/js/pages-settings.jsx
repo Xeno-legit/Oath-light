@@ -339,6 +339,128 @@ function SecurityCard() {
   );
 }
 
+// --- Trusted contact (Phase 4 item 5.2, Tier 2) ------------------------------
+
+// Optional, solo-first accountability amplifier: a parent, sibling, friend,
+// or mentor — or, per the plan's "trusted-contact/self notifications" intent,
+// just the user's OWN email, so a discrete event still leaves a paper trail
+// in an inbox they check even without naming a third party. Entirely
+// backend-owned (`SettingsV1.trusted_contact`, `None` by default) — this card
+// never nags a solo user, it's just how they'd opt in if they want to.
+// Wiring TO a contact is instant; removing one is friction-gated (5.2's
+// anti-weak-moment rule: the contact is notified of the REQUEST immediately)
+// and shows up in the generic `PendingChangesCard` below like any other
+// weakening, so there's no bespoke countdown UI needed here.
+function TrustedContactCard({ s }) {
+  const available = !!(window.PPNative && window.PPNative.available);
+  const [contact, setContact] = React.useState(undefined); // undefined = loading, null = none configured
+  const [name, setName] = React.useState('');
+  const [email, setEmail] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const [msg, setMsg] = React.useState('');
+
+  const refresh = React.useCallback(() => {
+    if (!available) { setContact(null); return; }
+    window.PPNative.getTrustedContact().then((c) => setContact(c || null));
+  }, [available]);
+
+  React.useEffect(() => { refresh(); }, [refresh]);
+  // Also refetch once a pending `trusted_contact.remove` actually applies
+  // (its friction delay elapsing removes the count from this list), same
+  // pattern as `AppBlockingSection`'s pending-count refetch above.
+  const pendingCount = (window.usePendingWeakenings || (() => []))().length;
+  React.useEffect(() => { refresh(); }, [pendingCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const profileEmail = (s && s.profile && s.profile.email) || '';
+  const useMyEmail = () => setEmail(profileEmail);
+
+  const save = () => {
+    setErr(''); setMsg('');
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) { setErr('Enter an email — theirs, or your own if you just want a paper trail in your own inbox.'); return; }
+    setBusy(true);
+    window.PPNative.setTrustedContact(name.trim(), trimmedEmail, {
+      uninstall_requested: true,
+      lockdown_cancelled: true,
+      password_removal_requested: true,
+      ext_removed: true,
+      block_burst: true,
+    })
+      .then(() => { setMsg('Trusted contact saved.'); setName(''); setEmail(''); refresh(); })
+      .catch((e) => setErr(e && e.message ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+
+  const acquireAuth = () => (window.PPAuth ? window.PPAuth.acquire() : Promise.resolve(null));
+
+  const remove = () => {
+    if (!confirm('Remove the trusted contact?\n\n'
+      + 'This goes through the same waiting-period delay as any other protection change, and they are notified '
+      + 'right away that removal was requested — that message can\'t be skipped.')) return;
+    setErr(''); setMsg('');
+    acquireAuth()
+      .then((token) => { setBusy(true); return window.PPNative.requestRemoveTrustedContact(token); })
+      .then(() => setMsg('Removal requested — see "Pending changes" below for the countdown.'))
+      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div className="card fade-up" style={{ marginTop: 18 }}>
+      <div className="row" style={{ gap: 14, alignItems: 'flex-start' }}>
+        <div className="ut-ico"><IconBell size={20} /></div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <b style={{ fontSize: 14.5, fontWeight: 800 }}>Trusted contact</b>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, lineHeight: 1.5, maxWidth: '64ch' }}>
+            Fully optional — Oath Light works completely on its own without this. A parent, sibling, friend, or
+            mentor (or just your own email, for a paper trail) gets a short heads-up on a few discrete events: an
+            uninstall request, a cancelled lockdown, an extension that goes missing and stays that way, an unusual
+            burst of blocks. Never browsing history, never screenshots — only that something happened.
+          </div>
+
+          {!available &&
+            <div className="ut-msg" style={{ color: 'var(--muted)', marginTop: 12 }}>Available in the desktop app.</div>}
+
+          {available && contact === undefined &&
+            <div style={{ marginTop: 12, fontSize: 13, color: 'var(--muted)' }}>Loading…</div>}
+
+          {available && contact &&
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700 }}>{contact.name || 'Trusted contact'}</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>{contact.email}</div>
+              <button className="btn btn-ghost btn-sm" style={{ marginTop: 10 }} disabled={busy} onClick={remove}>
+                Remove
+              </button>
+            </div>}
+
+          {available && contact === null &&
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 360 }}>
+              <input className="input" placeholder="Their name (optional)" value={name}
+                     onChange={(e) => setName(e.target.value)} />
+              <div className="row" style={{ gap: 8 }}>
+                <input type="email" className="input" placeholder="Their email" value={email}
+                       onChange={(e) => setEmail(e.target.value)} style={{ flex: 1 }} />
+                {profileEmail &&
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={useMyEmail}
+                          title="Prefill with your own profile email — notify yourself instead of naming someone else">
+                    Use my email
+                  </button>}
+              </div>
+              {err && <div style={{ fontSize: 12.5, color: '#ef4444' }}>{err}</div>}
+              <button className="btn btn-primary btn-sm" style={{ alignSelf: 'flex-start' }}
+                      disabled={busy || !email.trim()} onClick={save}>
+                {busy ? 'Saving…' : 'Add trusted contact'}
+              </button>
+            </div>}
+
+          {msg && <div className="ut-msg" style={{ marginTop: 12 }}>{msg}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- Pending weakenings (Phase 4 friction, 4.1) ------------------------------
 
 // Every OTHER pending weakening besides uninstall (which has its own
@@ -558,10 +680,13 @@ function SettingsPage({ s, PP }) {
         <button className="btn btn-ghost" onClick={() => { if (confirm('Reset all app data?')) PP.reset(); }}>Reset</button>
       </div>
 
+      {/* trusted contact (5.2, Tier 2) — optional accountability amplifier */}
+      <TrustedContactCard s={s} />
+
       {/* master password (4.2) — gates every weakening request below */}
       <SecurityCard />
 
-      {/* pending weakenings (4.1) — guard/monitor disables, custom-block removals */}
+      {/* pending weakenings (4.1) — guard/monitor disables, custom-block removals, trusted-contact removal */}
       <PendingChangesCard PP={PP} />
 
       {/* uninstall — 24-hour friction request */}

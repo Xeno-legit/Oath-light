@@ -183,6 +183,32 @@
       return T.event.listen('ota-status', (evt) => { if (evt && evt.payload) cb(evt.payload); });
     },
 
+    // Trusted contact (5.2, Tier 2) — optional, solo-first accountability
+    // amplifier. `getTrustedContact` resolves the configured contact or
+    // `null` (nothing configured — the honest solo default). `setTrustedContact`
+    // is a strengthening (instant) when wiring a NEW contact or editing one
+    // in place (same email); the backend itself refuses an email change on an
+    // existing contact (that's a weakening — see `requestRemoveTrustedContact`).
+    // `notify` is the raw `NotifyEventsV1` shape (snake_case keys — it's
+    // deserialized directly, not through Tauri's camelCase arg mapping):
+    // `{ uninstall_requested, lockdown_cancelled, password_removal_requested,
+    // ext_removed, block_burst }`.
+    getTrustedContact() {
+      return invoke('get_trusted_contact').catch((e) => { console.warn('[OathLight] getTrustedContact failed:', e); return null; });
+    },
+    setTrustedContact(name, email, notify) {
+      return invoke('set_trusted_contact', { name, email, notify });
+    },
+    // Removing a contact is a weakening (5.2's anti-weak-moment rule): friction-
+    // gated AND the contact is notified of the REQUEST immediately, before the
+    // delay even starts. Requires the master-password token if one is set.
+    // Resolves to the same `{ action_id, label, ..., remaining_secs, ready }`
+    // shape as `removeCustomDomain` — it shows up in `usePendingWeakenings()`
+    // like any other pending change.
+    requestRemoveTrustedContact(auth) {
+      return invoke('request_remove_trusted_contact', { auth: auth || null });
+    },
+
     // Panic / SOS flow (5.1). `onOpenPanic` subscribes to the backend's
     // `open-panic` event (tray "I need help now" / Ctrl+Shift+Space / the
     // extension blocked page's deep-link); resolves to an unlisten function,
