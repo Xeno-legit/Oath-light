@@ -47,6 +47,13 @@
 //! entries it found (never silently discards evidence) and append one
 //! `chain_restarted` entry documenting what it found, before resuming normal
 //! operation — see that function's doc comment.
+//!
+//! [`verify`]/[`EventLog::verify`] check both of the same things, but on
+//! demand (not just at load) and across EVERY rotated segment (see
+//! [`ROTATE_BYTES`]) — starting from the genesis file and following each
+//! segment's terminal `log_rotated` entry to the next, so a rotated-out file
+//! being edited or deleted after the fact is caught exactly like an in-file
+//! break; see [`walk_chain`].
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -167,14 +174,17 @@ struct WalkResult {
     broke: bool,
 }
 
-/// Walk `lines` (each expected to be one JSON `Entry`) from genesis, stopping
-/// at the first line that doesn't parse or doesn't chain correctly. Pure and
-/// side-effect-free — the file-backed callers below layer the checkpoint
-/// comparison and the `chain_restarted` repair on top of this.
-fn walk_lines(lines: &[String]) -> WalkResult {
+/// Walk `lines` (each expected to be one JSON `Entry`), stopping at the first
+/// line that doesn't parse or doesn't chain correctly, starting from
+/// `start_seq`/`start_prev` rather than always assuming true genesis — a
+/// rotated-in segment's first entry chains off the PREVIOUS file's sealing
+/// `log_rotated` hash, not [`GENESIS_PREV`] (see [`walk_chain`]). Pure and
+/// side-effect-free — the file-backed callers layer the checkpoint comparison
+/// and the `chain_restarted` repair on top of this.
+fn walk_lines_from(lines: &[String], start_seq: u64, start_prev: &str) -> WalkResult {
     let mut result = WalkResult::default();
-    let mut expected_seq = 1u64;
-    let mut expected_prev = GENESIS_PREV.to_string();
+    let mut expected_seq = start_seq;
+    let mut expected_prev = start_prev.to_string();
 
     for line in lines {
         let trimmed = line.trim();
@@ -203,6 +213,12 @@ fn walk_lines(lines: &[String]) -> WalkResult {
     result
 }
 
+/// Walk `lines` from TRUE genesis (`seq` 1, [`GENESIS_PREV`]) — the single-
+/// file case every existing caller and test uses.
+fn walk_lines(lines: &[String]) -> WalkResult {
+    walk_lines_from(lines, 1, GENESIS_PREV)
+}
+
 /// Report handed back by [`verify`] / [`EventLog::verify`].
 #[derive(Debug, Clone, Serialize)]
 pub struct VerifyReport {
@@ -224,6 +240,12 @@ pub struct VerifyReport {
     pub restarts: usize,
 }
 
+// Single-file (non-rotation-aware) report from true genesis — superseded in
+// every production call path by `report_from_chain` (which this crate's only
+// real entry points, `verify`/`EventLog::verify`, actually use), but kept
+// `#[cfg(test)]` as a direct, file-I/O-free way to unit-test the underlying
+// walk/summarize logic in isolation.
+#[cfg(test)]
 fn report_from(lines: &[String]) -> VerifyReport {
     let walk = walk_lines(lines);
     let mut restarts = 0usize;
@@ -250,14 +272,144 @@ fn report_from(lines: &[String]) -> VerifyReport {
     }
 }
 
-/// Verify the JSONL file at `path` from genesis. Standalone function (no
-/// `EventLog` needed) so a UI "Verify" button or a completely separate tool
-/// can check the file without holding the live app's lock.
-pub fn verify(path: &Path) -> VerifyReport {
-    let lines: Vec<String> = std::fs::read_to_string(path)
-        .map(|s| s.lines().map(str::to_string).collect())
-        .unwrap_or_default();
-    report_from(&lines)
+/// Like [`WalkResult`], but for the cross-file walk in [`walk_chain`]: also
+/// remembers the LOCAL (per-segment) `seq` a break happened at, since `seq`
+/// numbering restarts at 1 in every rotated-in file (see the module doc's
+/// rotation note) — a position in the concatenated, cross-file `valid` list
+/// wouldn't mean anything as a `seq`.
+#[derive(Debug, Clone, Default)]
+struct ChainWalkResult {
+    valid: Vec<Entry>,
+    broke: bool,
+    broke_seq: Option<u64>,
+}
+
+/// Walk the ENTIRE hash chain across rotation boundaries, starting from the
+/// genesis file (`<dir>/events.log`) and following each segment's terminal
+/// `log_rotated` entry to the next one named in its `data.next_file` (see
+/// `EventLog::maybe_rotate`) — so a break anywhere, INCLUDING a rotated-out
+/// segment having been deleted after the fact, is caught exactly like a
+/// mid-file break, rather than silently treated as "the chain just ends
+/// here". A missing genesis file (no `events.log` at all) is not itself a
+/// break — that's a fresh install with nothing appended yet.
+fn walk_chain(dir: &Path) -> ChainWalkResult {
+    let mut all = ChainWalkResult::default();
+    let mut path = dir.join("events.log");
+    let mut expected_seq = 1u64;
+    let mut expected_prev = GENESIS_PREV.to_string();
+    let mut first_hop = true;
+
+    loop {
+        let lines: Vec<String> = match std::fs::read_to_string(&path) {
+            Ok(s) => s.lines().map(str::to_string).collect(),
+            Err(_) => {
+                if first_hop {
+                    // Genesis file missing entirely — fresh install, not a break.
+                    break;
+                }
+                // A LATER segment, named by the previous file's own
+                // `log_rotated` entry, is missing: the rotated-out file was
+                // deleted after the fact. That is tamper evidence.
+                all.broke = true;
+                all.broke_seq = Some(1);
+                break;
+            }
+        };
+        first_hop = false;
+
+        let segment = walk_lines_from(&lines, expected_seq, &expected_prev);
+        let segment_len = segment.valid.len();
+        let rotated_to = segment.valid.last().and_then(|e| {
+            if e.kind == "log_rotated" {
+                e.data
+                    .get("next_file")
+                    .and_then(|v| v.as_str())
+                    .map(|next| (next.to_string(), e.hash.clone()))
+            } else {
+                None
+            }
+        });
+        all.valid.extend(segment.valid);
+
+        if segment.broke {
+            all.broke = true;
+            all.broke_seq = Some(segment_len as u64 + 1);
+            break;
+        }
+
+        match rotated_to {
+            Some((next_name, seal_hash)) => {
+                path = dir.join(next_name);
+                expected_seq = 1;
+                expected_prev = seal_hash;
+            }
+            // Normal end: this is the live/current segment (or an empty
+            // fresh-install genesis file), nothing further to follow.
+            None => break,
+        }
+    }
+    all
+}
+
+/// Cross-file counterpart to the single-file `report_from`: walks every rotated segment
+/// (see [`walk_chain`]) and ALSO compares the sidecar checkpoint
+/// (`<dir>/events.checkpoint.json`) against the tip the walk actually ends
+/// on — the checkpoint always tracks whichever file `EventLog` is currently
+/// appending to, and its `seq`/`hash` are per-segment (rotation resets `seq`
+/// to 1), so the last walked entry's own fields are directly comparable. A
+/// mismatch here (the live file rolled back independently of the checkpoint,
+/// e.g. edited or restored from an old backup while the app wasn't running)
+/// marks the report not-intact even when every individual entry's hash still
+/// chains correctly — this is tamper evidence #2 from the module doc, now
+/// checked by verification itself rather than only at `EventLog::load` time.
+fn report_from_chain(dir: &Path) -> VerifyReport {
+    let walk = walk_chain(dir);
+    let mut restarts = 0usize;
+    let mut last_restart_ts: Option<u64> = None;
+    let mut first_entry_ts: Option<u64> = None;
+    for e in &walk.valid {
+        if first_entry_ts.is_none() {
+            first_entry_ts = Some(e.ts);
+        }
+        if e.kind == "chain_restarted" {
+            restarts += 1;
+            last_restart_ts = Some(e.ts);
+        }
+    }
+
+    let checkpoint: Option<Checkpoint> = std::fs::read_to_string(dir.join("events.checkpoint.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
+    let (last_seq, last_hash) =
+        walk.valid.last().map(|e| (e.seq, e.hash.clone())).unwrap_or((0, GENESIS_PREV.to_string()));
+    let checkpoint_mismatch = match &checkpoint {
+        Some(cp) => cp.seq != last_seq || cp.hash != last_hash,
+        // No checkpoint at all is only expected on a fresh install with
+        // nothing appended yet — `write_checkpoint` runs on every append, so
+        // once entries exist, a missing checkpoint means the sidecar itself
+        // was deleted, which is its own tamper signal.
+        None => !walk.valid.is_empty(),
+    };
+
+    let intact = !walk.broke && restarts == 0 && !checkpoint_mismatch;
+    let first_break_seq = if walk.broke { walk.broke_seq } else { None };
+    let chain_started = if intact { first_entry_ts } else { last_restart_ts.or(first_entry_ts) };
+    VerifyReport {
+        intact,
+        entries: walk.valid.len(),
+        first_break_seq,
+        chain_started,
+        restarts,
+    }
+}
+
+/// Verify the tamper-evident chain rooted at `app_data_dir`, across EVERY
+/// rotated segment (see [`walk_chain`]) and including the sidecar checkpoint
+/// (see [`report_from_chain`]). Standalone function (no `EventLog` needed) so
+/// a UI "Verify" button or a completely separate tool can check the whole
+/// history without holding the live app's lock.
+pub fn verify(app_data_dir: &Path) -> VerifyReport {
+    report_from_chain(app_data_dir)
 }
 
 // ============================================================================
@@ -356,10 +508,13 @@ impl EventLog {
 
     /// If the current file has grown past [`ROTATE_BYTES`], seal it with a
     /// final entry naming the next file + its genesis hash, then switch the
-    /// live state over to that new (empty) file. `verify()`/`get_event_log`
-    /// only ever look at the CURRENT file — following the chain backward
-    /// across a rotation boundary is a known TODO (plan 4.5's own rotation
-    /// note), not attempted here.
+    /// live state over to that new (empty) file. [`EventLog::verify`] walks
+    /// EVERY segment from genesis, following this `log_rotated` bridge (see
+    /// [`walk_chain`]); [`EventLog::recent`] (and the `get_event_log` command
+    /// it backs) intentionally still only looks at the CURRENT file — that's
+    /// a UI listing concern, not the tamper-evidence check, and "recent
+    /// history" scrolling into a previous rotated file is a plain follow-up,
+    /// not attempted here.
     fn maybe_rotate(&self, inner: &mut Inner) {
         if Self::current_size(inner) < ROTATE_BYTES {
             return;
@@ -453,11 +608,19 @@ impl EventLog {
         entries
     }
 
-    /// Verify the CURRENT file from genesis — see the standalone [`verify`]
-    /// function; this just resolves the live path first.
+    /// Verify the WHOLE chain, across every rotated segment, from genesis —
+    /// see the standalone [`verify`] function; this just resolves the app
+    /// data directory first (the parent of whichever file is currently live).
     pub fn verify(&self) -> VerifyReport {
-        let path = self.inner.lock().unwrap().path.clone();
-        verify(&path)
+        let dir = self
+            .inner
+            .lock()
+            .unwrap()
+            .path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        verify(&dir)
     }
 }
 
@@ -575,5 +738,159 @@ mod tests {
         let h1 = compute_hash(1, 100, "k", &data, GENESIS_PREV);
         let h2 = compute_hash(1, 100, "k", &data, "different-prev");
         assert_ne!(h1, h2);
+    }
+
+    // ========================================================================
+    // Cross-file (rotation-aware) verify
+    // ========================================================================
+
+    fn tmp_dir(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("pp-eventlog-test-{tag}-{}", std::process::id()))
+    }
+
+    /// Build one rotated-in segment's lines by hand (mirrors `make_chain`, but
+    /// starting from an arbitrary `start_prev` instead of always `GENESIS_PREV`
+    /// — exactly what a segment AFTER the first one chains off of). Returns
+    /// the lines plus the final entry's hash, so the caller can chain a
+    /// further segment (or a checkpoint) off of it.
+    fn make_segment(start_prev: &str, ts_base: u64, n: usize) -> (Vec<String>, String) {
+        let mut prev = start_prev.to_string();
+        let mut out = Vec::new();
+        for i in 1..=n as u64 {
+            let ts = ts_base + i;
+            let kind = format!("seg_event_{i}");
+            let data = json!({ "i": i });
+            let hash = compute_hash(i, ts, &kind, &data, &prev);
+            let entry = Entry { seq: i, ts, kind, data, prev: prev.clone(), hash: hash.clone() };
+            out.push(serde_json::to_string(&entry).unwrap());
+            prev = hash;
+        }
+        (out, prev)
+    }
+
+    #[test]
+    fn verify_walks_across_a_rotation_boundary() {
+        let dir = tmp_dir("rotate-ok");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Segment 1 (genesis file: events.log) — two real entries, sealed
+        // with a `log_rotated` entry naming events-1.log as the next segment.
+        let (mut seg1, seg1_tip) = make_segment(GENESIS_PREV, 1000, 2);
+        let seal_data = json!({ "next_file": "events-1.log" });
+        let seal_hash = compute_hash(3, 1003, "log_rotated", &seal_data, &seg1_tip);
+        let seal = Entry {
+            seq: 3,
+            ts: 1003,
+            kind: "log_rotated".to_string(),
+            data: seal_data,
+            prev: seg1_tip,
+            hash: seal_hash.clone(),
+        };
+        seg1.push(serde_json::to_string(&seal).unwrap());
+        std::fs::write(dir.join("events.log"), seg1.join("\n") + "\n").unwrap();
+
+        // Segment 2 (rotated-in file: events-1.log) — seq restarts at 1,
+        // chained off the SEAL entry's hash, not GENESIS_PREV.
+        let (seg2, seg2_tip) = make_segment(&seal_hash, 2000, 2);
+        std::fs::write(dir.join("events-1.log"), seg2.join("\n") + "\n").unwrap();
+
+        // Checkpoint tracks the tip of the CURRENT (segment 2) file.
+        let cp = Checkpoint { seq: 2, hash: seg2_tip };
+        std::fs::write(dir.join("events.checkpoint.json"), serde_json::to_string(&cp).unwrap()).unwrap();
+
+        let report = verify(&dir);
+        assert!(report.intact, "a matching cross-file chain + checkpoint must verify intact");
+        // 2 real + 1 seal entry in segment 1, plus 2 real entries in segment 2.
+        assert_eq!(report.entries, 5);
+        assert_eq!(report.first_break_seq, None);
+        assert_eq!(report.restarts, 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn verify_detects_a_deleted_rotated_out_segment() {
+        let dir = tmp_dir("rotate-missing");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Genesis file seals to events-1.log, but that file is never written
+        // — simulates a rotated-out segment being deleted after the fact.
+        let (mut seg1, seg1_tip) = make_segment(GENESIS_PREV, 1000, 2);
+        let seal_data = json!({ "next_file": "events-1.log" });
+        let seal_hash = compute_hash(3, 1003, "log_rotated", &seal_data, &seg1_tip);
+        let seal = Entry {
+            seq: 3,
+            ts: 1003,
+            kind: "log_rotated".to_string(),
+            data: seal_data,
+            prev: seg1_tip,
+            hash: seal_hash,
+        };
+        seg1.push(serde_json::to_string(&seal).unwrap());
+        std::fs::write(dir.join("events.log"), seg1.join("\n") + "\n").unwrap();
+
+        let report = verify(&dir);
+        assert!(!report.intact, "a named-but-missing rotated segment must NOT verify intact");
+        // The 2 real entries + the seal entry from segment 1 are still valid.
+        assert_eq!(report.entries, 3);
+        // The break is reported at LOCAL seq 1 of the (missing) next segment,
+        // not some meaningless global position across files.
+        assert_eq!(report.first_break_seq, Some(1));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn verify_detects_a_checkpoint_mismatch_even_with_an_intact_chain() {
+        let dir = tmp_dir("checkpoint-mismatch");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let lines = make_chain(3);
+        std::fs::write(dir.join("events.log"), lines.join("\n") + "\n").unwrap();
+        // Checkpoint claims a completely different tip than what's on disk —
+        // simulates the live file being edited/restored while the app wasn't
+        // running to keep the sidecar in sync.
+        let cp = Checkpoint { seq: 999, hash: "not-the-real-tip".to_string() };
+        std::fs::write(dir.join("events.checkpoint.json"), serde_json::to_string(&cp).unwrap()).unwrap();
+
+        let report = verify(&dir);
+        assert!(!report.intact, "a checkpoint that doesn't match the file's own tip must not verify intact");
+        // The chain itself is perfectly self-consistent — every entry still
+        // counts as valid; only the checkpoint comparison caught this.
+        assert_eq!(report.entries, 3);
+        assert_eq!(report.first_break_seq, None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn verify_fresh_install_with_no_files_is_intact_and_empty() {
+        let dir = tmp_dir("fresh-install");
+        // Deliberately do NOT create the directory or any file in it — a
+        // brand-new install has neither `events.log` nor a checkpoint yet.
+        let report = verify(&dir);
+        assert!(report.intact);
+        assert_eq!(report.entries, 0);
+        assert_eq!(report.first_break_seq, None);
+    }
+
+    #[test]
+    fn eventlog_verify_method_matches_the_standalone_chain_verify() {
+        // `EventLog::verify` must resolve the app-data DIRECTORY (parent of
+        // whichever file is currently live) and delegate to the same
+        // cross-file walk as the standalone `verify(dir)` — not silently
+        // fall back to single-file behavior.
+        let dir = tmp_dir("eventlog-method");
+        let log = EventLog::load(&dir);
+        log.append("a", json!({}));
+        log.append("b", json!({}));
+        let via_method = log.verify();
+        let via_standalone = verify(&dir);
+        assert_eq!(via_method.entries, via_standalone.entries);
+        assert_eq!(via_method.intact, via_standalone.intact);
+        assert!(via_method.intact);
+        assert_eq!(via_method.entries, 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

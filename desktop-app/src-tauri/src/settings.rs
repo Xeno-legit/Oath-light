@@ -41,11 +41,19 @@ fn default_false() -> bool {
 /// a quick, honest-effort wall-clock estimate without pulling in the whole
 /// lockdown module.
 ///
-/// TODO(4.4 v2): schedule-from-vulnerable-hours is OUT of v1 scope. The
-/// reminder schedule already carries vulnerable-hours windows in
-/// `ext_blocking` (pushed by `pages-blocking.jsx`'s `vulnerable` field) — a
-/// later version would let one of those windows escalate into an automatic
-/// lockdown instead of just a reminder popup. Not wired here.
+/// Schedule-from-vulnerable-hours (4.4 v2, now wired): the reminder schedule
+/// already carries vulnerable-hours windows in `ext_blocking` (pushed by
+/// `pages-blocking.jsx`'s `vulnerable` field) — when `escalate_vulnerable_hours`
+/// is on, the friction applier thread's tick (see `lib.rs`) starts a Lockdown
+/// for the remainder of that window instead of just firing a reminder popup.
+/// Turning this ON is a strengthening (instant, same as any other lockdown
+/// start). Turning it OFF is the weakening half of the asymmetry: it goes
+/// through the ordinary friction delay under the `"lockdown.escalation_disable"`
+/// action id (see `set_lockdown_escalation` in lib.rs), exactly like
+/// `dns.disable`/`lockdown.cancel` — so a weak moment can't just flip this off
+/// to dodge the next window. It never touches an ALREADY-active lockdown
+/// (started or not by this schedule) — that still only ever ends via
+/// `lockdown.cancel` or natural expiry, same as always.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LockdownV1 {
     /// Unix seconds a currently-active lockdown is expected to end at —
@@ -56,6 +64,11 @@ pub struct LockdownV1 {
     /// `lockdown.rs`.
     #[serde(default)]
     pub frozen: bool,
+    /// Opt-in (default OFF): let the configured vulnerable-hours window
+    /// escalate to a (non-frozen) Lockdown automatically instead of only
+    /// showing reminder pop-ups. See the struct doc above for the asymmetry.
+    #[serde(default = "default_false")]
+    pub escalate_vulnerable_hours: bool,
 }
 
 // ============================================================================
@@ -65,11 +78,13 @@ pub struct LockdownV1 {
 /// Which discrete events the trusted contact is notified about. Solo-first:
 /// this whole struct only exists at all when `SettingsV1.trusted_contact` is
 /// `Some` — a solo user with no contact configured never sees or triggers any
-/// of this. `ext_removed` / `block_burst` are deliberately NOT here yet —
-/// TODO(5.2 v2): wire those once the extension-missing debounce and the
-/// vulnerable-hours block-burst detector both have a settled shape; v1 only
-/// covers the three friction-adjacent events that already have a single,
-/// unambiguous request site.
+/// of this. `ext_removed` (5.2 v2, now wired): fires once a browser has sat in
+/// `extension_missing` for longer than `EXT_MISSING_NOTIFY_AFTER_MS` while
+/// the uninstall guard is on — the existing `extension_missing` edge tracker
+/// in `start_monitor` (lib.rs) is the debounce source. `block_burst` (also now
+/// wired): fires once `BLOCK_BURST_THRESHOLD` blocks land within
+/// `BLOCK_BURST_WINDOW_MS` — see the `stats_sync`/`stats_update` handler in
+/// `handle_extension_message`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotifyEventsV1 {
     #[serde(default = "default_true")]
@@ -78,11 +93,21 @@ pub struct NotifyEventsV1 {
     pub lockdown_cancelled: bool,
     #[serde(default = "default_true")]
     pub password_removal_requested: bool,
+    #[serde(default = "default_true")]
+    pub ext_removed: bool,
+    #[serde(default = "default_true")]
+    pub block_burst: bool,
 }
 
 impl Default for NotifyEventsV1 {
     fn default() -> Self {
-        Self { uninstall_requested: true, lockdown_cancelled: true, password_removal_requested: true }
+        Self {
+            uninstall_requested: true,
+            lockdown_cancelled: true,
+            password_removal_requested: true,
+            ext_removed: true,
+            block_burst: true,
+        }
     }
 }
 
