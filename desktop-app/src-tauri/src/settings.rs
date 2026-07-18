@@ -44,8 +44,11 @@ fn default_false() -> bool {
 /// Schedule-from-vulnerable-hours (4.4 v2, now wired): the reminder schedule
 /// already carries vulnerable-hours windows in `ext_blocking` (pushed by
 /// `pages-blocking.jsx`'s `vulnerable` field) — when `escalate_vulnerable_hours`
-/// is on, the friction applier thread's tick (see `lib.rs`) starts a Lockdown
-/// for the remainder of that window instead of just firing a reminder popup.
+/// is on, the extension reports the active window over native messaging (the
+/// `"vulnerable_window_active"` arm in `lib.rs` — the desktop has no timezone
+/// database, so the extension owns the local-time window math) and the desktop
+/// starts a Lockdown for the remainder of that window instead of just firing
+/// a reminder popup.
 /// Turning this ON is a strengthening (instant, same as any other lockdown
 /// start). Turning it OFF is the weakening half of the asymmetry: it goes
 /// through the ordinary friction delay under the `"lockdown.escalation_disable"`
