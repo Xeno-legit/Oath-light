@@ -453,7 +453,7 @@ fn run_monitor(
             let infer_ms = t_inf.elapsed().as_secs_f64() * 1000.0;
             // Ensemble: drawn/hentai (SigLIP) OR photographic nudity (NudeNet).
             let blocked = classification.nsfw_score >= ENSEMBLE_SIGLIP_NSFW
-                || nudenet.as_ref().map_or(false, |r| r.explicit >= ENSEMBLE_NUDENET_EXPLICIT);
+                || nudenet.as_ref().is_some_and(|r| r.explicit >= ENSEMBLE_NUDENET_EXPLICIT);
 
             let payload = ScanEvent {
                 ts: now_unix_ms(),
@@ -1206,7 +1206,7 @@ fn build_status(
     let mut out: Vec<BrowserStatus> = BROWSERS
         .iter()
         .map(|def| {
-            let running_now = running.iter().any(|r| *r == def.key);
+            let running_now = running.contains(&def.key);
             let dormant_enf =
                 if browsers::enforcement_configured(def.engine) { "off" } else { "dormant" }.to_string();
 
@@ -1418,7 +1418,7 @@ fn enforce_processes(
         sys.refresh_processes_specifics(ProcessRefreshKind::new());
         for proc in sys.processes().values() {
             let name = proc.name().to_lowercase();
-            if !cfg.blocked_processes.iter().any(|b| *b == name) {
+            if !cfg.blocked_processes.contains(&name) {
                 continue;
             }
             // The kill itself is never throttled — only the log/event noise.
@@ -1913,7 +1913,7 @@ fn remove_custom_domain(
     if norm.is_empty() {
         return Err("Not a valid domain.".to_string());
     }
-    let present = state.lock().unwrap().custom_domains.iter().any(|d| *d == norm);
+    let present = state.lock().unwrap().custom_domains.contains(&norm);
     if !present {
         return Err(format!("{norm} is not in the custom blocklist."));
     }
@@ -2125,7 +2125,7 @@ fn add_blocked_process(
         return Err("Enter a bare process image name (e.g. discord.exe), not a path.".to_string());
     }
     let mut list = settings.get().blocked_processes;
-    if !list.iter().any(|p| *p == norm) {
+    if !list.contains(&norm) {
         list.push(norm.clone());
         settings.update(|s| s.blocked_processes = list.clone());
         log::info!("process blocking: added '{norm}' to the blocked-process list");
@@ -2149,7 +2149,7 @@ fn remove_blocked_process(
 ) -> Result<friction::PendingView, String> {
     crate::auth::require_auth(&app, &auth)?;
     let norm = name.trim().to_lowercase();
-    let present = settings.get().blocked_processes.iter().any(|p| *p == norm);
+    let present = settings.get().blocked_processes.contains(&norm);
     if !present {
         return Err(format!("{norm} is not in the blocked-process list."));
     }
@@ -3379,7 +3379,7 @@ fn perform_uninstall(app: &AppHandle) -> Result<String, String> {
     // touched. If it's no longer ready, unlatch so a future genuine attempt
     // isn't permanently blocked.
     if let Some(friction) = app.try_state::<Arc<friction::FrictionStore>>() {
-        if !friction.get("uninstall").map_or(false, |p| p.ready) {
+        if !friction.get("uninstall").is_some_and(|p| p.ready) {
             UNINSTALL_FIRED.store(false, Ordering::SeqCst);
             return Err("The waiting period hasn't elapsed yet.".to_string());
         }
@@ -3475,7 +3475,7 @@ fn complete_uninstall(
     app: AppHandle,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
 ) -> Result<String, String> {
-    if !friction.get("uninstall").map_or(false, |p| p.ready) {
+    if !friction.get("uninstall").is_some_and(|p| p.ready) {
         return Err("The waiting period hasn't elapsed yet.".to_string());
     }
     // Event log (4.5): record that removal was actually executed, before the
@@ -3908,7 +3908,7 @@ pub fn run() {
                                 }
                                 let allow = {
                                     let mut s = state2.lock().unwrap();
-                                    if !s.lockdown_allow.iter().any(|d| *d == domain) {
+                                    if !s.lockdown_allow.contains(&domain) {
                                         s.lockdown_allow.push(domain.clone());
                                     }
                                     s.lockdown_allow.clone()

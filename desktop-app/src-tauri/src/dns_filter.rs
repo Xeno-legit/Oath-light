@@ -36,7 +36,7 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
 const HEALTH_FAIL_LIMIT: u64 = 3;
 
 /// What the UI's DNS filter card reads.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct DnsStatus {
     /// The resolver process/threads are bound and serving on 127.0.0.1:53.
     pub running: bool,
@@ -46,12 +46,6 @@ pub struct DnsStatus {
     pub last_error: String,
     /// The upstream resolvers clean queries are being forwarded to.
     pub upstreams: Vec<String>,
-}
-
-impl Default for DnsStatus {
-    fn default() -> Self {
-        DnsStatus { running: false, taken_over: false, last_error: String::new(), upstreams: Vec::new() }
-    }
 }
 
 /// Managed state for the DNS filter. `server` is `None` when stopped.
@@ -133,9 +127,8 @@ impl DnsFilterState {
 
         // Start listening on 127.0.0.1:53. A bind failure here is the port-53
         // conflict case — return it verbatim, take over nothing.
-        let server = oathlight_dns::start(upstreams_pair).map_err(|e| {
+        let server = oathlight_dns::start(upstreams_pair).inspect_err(|e| {
             self.set_error(e.clone());
-            e
         })?;
 
         // Load the user's custom-blocked domains into the resolver + start
