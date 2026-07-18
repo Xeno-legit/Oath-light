@@ -98,4 +98,4 @@ to Oath Light operating on this device as described.
 
 ---
 
-*Questions or issues: https://github.com/Xeno-legit/Oath-Light*
+*Questions or issues: https://github.com/Xeno-legit/Oath-light*

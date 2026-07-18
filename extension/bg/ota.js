@@ -41,7 +41,7 @@ const OTA_PUBKEYS_HEX = [
 // GitHub "latest release" asset base — the same repo slug the desktop uses.
 // TODO(owner): if the project moves repos before Alpha, update this AND
 // desktop-app/src-tauri/src/ota.rs's OTA_RELEASE_BASE together.
-const OTA_RELEASE_BASE = 'https://github.com/Xeno-legit/Oath-Light/releases/latest/download';
+const OTA_RELEASE_BASE = 'https://github.com/Xeno-legit/Oath-light/releases/latest/download';
 const MANIFEST_ASSET = 'lists-manifest.json';
 const MANIFEST_SIG_ASSET = 'lists-manifest.json.sig';
 

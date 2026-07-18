@@ -165,7 +165,7 @@ The project is in beta and is currently installed from source.
 
 | Step | Action | Details |
 | :--- | :--- | :--- |
-| 1 | Clone the repository | `git clone https://github.com/Xeno-legit/Oath-Light-NSFW-blocker.git` |
+| 1 | Clone the repository | `git clone https://github.com/Xeno-legit/Oath-light.git` |
 | 2 | Load the extension | Load the `extension` folder as an unpacked extension in your browser's developer mode. |
 | 3 | Build the desktop app | In `desktop-app`, follow the build instructions in that directory's README. |
 | 4 | Configure | Complete the setup wizard to set a master password and goals. |
