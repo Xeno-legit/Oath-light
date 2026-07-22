@@ -4,313 +4,9 @@
    Theming: [data-theme] (light|dark) × [data-style] (aurora|lagoon|dawn)
    ============================================================ */
 
-/* latin-ext */
-@font-face {
-  font-family: 'Instrument Serif';
-  font-style: italic;
-  font-weight: 400;
-  font-display: swap;
-  src: url("fonts/94894e0d.woff2") format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-/* latin */
-@font-face {
-  font-family: 'Instrument Serif';
-  font-style: italic;
-  font-weight: 400;
-  font-display: swap;
-  src: url("fonts/10cc4654.woff2") format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-/* latin-ext */
-@font-face {
-  font-family: 'Instrument Serif';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("fonts/ad08fc6b.woff2") format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-/* latin */
-@font-face {
-  font-family: 'Instrument Serif';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("fonts/dec23ca1.woff2") format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-/* cyrillic-ext */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("fonts/7c1abc78.woff2") format('woff2');
-  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
-}
-/* cyrillic */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("fonts/147faed1.woff2") format('woff2');
-  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
-}
-/* greek */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("fonts/1c96cabf.woff2") format('woff2');
-  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
-}
-/* vietnamese */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("fonts/c926b65e.woff2") format('woff2');
-  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
-}
-/* latin-ext */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("fonts/f1d3ec0b.woff2") format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-/* latin */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("fonts/dad320eb.woff2") format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-/* cyrillic-ext */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("fonts/7c1abc78.woff2") format('woff2');
-  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
-}
-/* cyrillic */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("fonts/147faed1.woff2") format('woff2');
-  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
-}
-/* greek */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("fonts/1c96cabf.woff2") format('woff2');
-  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
-}
-/* vietnamese */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("fonts/c926b65e.woff2") format('woff2');
-  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
-}
-/* latin-ext */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("fonts/f1d3ec0b.woff2") format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-/* latin */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("fonts/dad320eb.woff2") format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-/* cyrillic-ext */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url("fonts/7c1abc78.woff2") format('woff2');
-  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
-}
-/* cyrillic */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url("fonts/147faed1.woff2") format('woff2');
-  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
-}
-/* greek */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url("fonts/1c96cabf.woff2") format('woff2');
-  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
-}
-/* vietnamese */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url("fonts/c926b65e.woff2") format('woff2');
-  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
-}
-/* latin-ext */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url("fonts/f1d3ec0b.woff2") format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-/* latin */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url("fonts/dad320eb.woff2") format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-/* cyrillic-ext */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url("fonts/7c1abc78.woff2") format('woff2');
-  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
-}
-/* cyrillic */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url("fonts/147faed1.woff2") format('woff2');
-  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
-}
-/* greek */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url("fonts/1c96cabf.woff2") format('woff2');
-  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
-}
-/* vietnamese */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url("fonts/c926b65e.woff2") format('woff2');
-  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
-}
-/* latin-ext */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url("fonts/f1d3ec0b.woff2") format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-/* latin */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url("fonts/dad320eb.woff2") format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-/* cyrillic-ext */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url("fonts/7c1abc78.woff2") format('woff2');
-  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
-}
-/* cyrillic */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url("fonts/147faed1.woff2") format('woff2');
-  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
-}
-/* greek */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url("fonts/1c96cabf.woff2") format('woff2');
-  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
-}
-/* vietnamese */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url("fonts/c926b65e.woff2") format('woff2');
-  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
-}
-/* latin-ext */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url("fonts/f1d3ec0b.woff2") format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-/* latin */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url("fonts/dad320eb.woff2") format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-
+/* @font-face declarations for Manrope + Instrument Serif come from
+   tokens.css (linked before this file in blocked.html / user_blocklist.html)
+   — the previous locally-duplicated font subsets were removed from here. */
 
 /* ---------- LOGO SPIN ANIMATION ---------- */
 @keyframes logo-spin-fwd {
@@ -329,21 +25,21 @@
   transform-origin: center;
   cursor: default;
 }
-.logo-spin-fwd  { animation: logo-spin-fwd    0.38s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
-.logo-spin-back { animation: logo-spring-back  0.6s  cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+.logo-spin-fwd  { animation: logo-spin-fwd    0.38s var(--ol-ease-standard) forwards; }
+.logo-spin-back { animation: logo-spring-back  0.6s  var(--ol-ease-standard) forwards; }
 
 :root {
-  --font-ui: 'Manrope', ui-sans-serif, system-ui, sans-serif;
-  --font-display: 'Instrument Serif', Georgia, serif;
+  --font-ui: var(--ol-font-ui);
+  --font-display: var(--ol-font-display);
 
-  --r-sm: 10px;
-  --r-md: 16px;
-  --r-lg: 22px;
-  --r-xl: 30px;
+  --r-sm: var(--ol-radius-sm);
+  --r-md: var(--ol-radius-md);
+  --r-lg: var(--ol-radius-lg);
+  --r-xl: var(--ol-radius-xl);
 
   --intensity: 0.7;             /* 0..1, driven from tweak (0..10)/10 */
-  --ease: cubic-bezier(.22,.61,.36,1);
-  --ease-soft: cubic-bezier(.4,0,.2,1);
+  --ease: var(--ol-ease-spring);     /* cubic-bezier(.22,.61,.36,1), exact match */
+  --ease-soft: var(--ol-ease-standard); /* cubic-bezier(.4,0,.2,1), exact match */
 
   --sidebar-w: 248px;
 }
@@ -352,15 +48,17 @@
 
 /* DARK base neutrals (tinted per style hue) */
 [data-theme="dark"] {
-  --shadow: 0 24px 60px -24px rgba(0,0,0,.65), 0 2px 8px -2px rgba(0,0,0,.4);
-  --shadow-sm: 0 8px 24px -12px rgba(0,0,0,.5);
+  --shadow: var(--ol-shadow-md);
+  --shadow-sm: var(--ol-shadow-sm);
   --glass: rgba(255,255,255,.045);
   --glass-2: rgba(255,255,255,.07);
-  --glass-brd: rgba(255,255,255,.10);
-  --glass-brd-strong: rgba(255,255,255,.16);
+  --glass-brd: var(--ol-border);
+  --glass-brd-strong: var(--ol-border-strong);
   --desktop: radial-gradient(120% 120% at 80% -10%, #241b35 0%, #14101f 55%, #0c0913 100%);
 }
 [data-theme="light"] {
+  /* shadow/glass here are aurora-era violet tints shared across every style
+     variant (not just aurora) — left hardcoded, no exact --ol- match */
   --shadow: 0 30px 70px -30px rgba(60,40,90,.28), 0 2px 10px -4px rgba(60,40,90,.12);
   --shadow-sm: 0 10px 28px -16px rgba(60,40,90,.22);
   --glass: rgba(255,255,255,.55);
@@ -370,7 +68,11 @@
   --desktop: radial-gradient(120% 120% at 80% -10%, #eee7f6 0%, #e7e2f3 55%, #ddd8ee 100%);
 }
 
-/* ---- AURORA (violet → pink) ---- */
+/* ---- AURORA (violet → pink) — its own distinct preset, unchanged.
+   theme-sync.js / blocked.js still switch between all 7 named variants
+   for anyone who has one selected; NOIR below is the one wired to
+   tokens.css, since it's the variant the design system's values were
+   promoted from. ---- */
 [data-style="aurora"][data-theme="dark"] {
   --bg-0: #16111f; --bg-1: #1c1629; --text: #f3eefa; --text-2: #c8bcdd; --muted: #9286a6;
   --accent: #b69bff; --accent-2: #f1a6e6; --accent-3: #8b7cff;
@@ -443,15 +145,19 @@
 }
 
 /* ---- NOIR (black & white — pure monochrome) ---- */
+/* NOIR is the design system default — wired straight to tokens.css so
+   editing tokens.css (via preview.html) re-skins this preset. No
+   --ol-orb-* tokens exist, so the orb triplet maps to the accent
+   triplet, the closest conceptual equivalent. */
 [data-style="noir"][data-theme="dark"] {
-  --bg-0: #0a0a0a; --bg-1: #121212; --text: #f2f2f2; --text-2: #b8b8b8; --muted: #7a7a7a;
-  --accent: #ffffff; --accent-2: #cfcfcf; --accent-3: #8f8f8f;
-  --orb-a: #3a3a3a; --orb-b: #5c5c5c; --orb-c: #262626;
+  --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1); --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
+  --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
+  --orb-a: var(--ol-accent); --orb-b: var(--ol-accent-2); --orb-c: var(--ol-accent-3);
 }
 [data-style="noir"][data-theme="light"] {
-  --bg-0: #fafafa; --bg-1: #ffffff; --text: #111111; --text-2: #3d3d3d; --muted: #7a7a7a;
-  --accent: #111111; --accent-2: #3d3d3d; --accent-3: #6e6e6e;
-  --orb-a: #d4d4d4; --orb-b: #bcbcbc; --orb-c: #e4e4e4;
+  --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1); --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
+  --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
+  --orb-a: var(--ol-accent); --orb-b: var(--ol-accent-2); --orb-c: var(--ol-accent-3);
 }
 
 /* per-style desktop bg override (dark) */
@@ -528,7 +234,7 @@ input, textarea { font-family: inherit; }
 .win-btn:hover { background: var(--glass-2); color: var(--text); }
 .win-btn.win-close:hover { background: #e81123; color: #fff; }
 .win-btn svg { width: 15px; height: 15px; stroke: currentColor; stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.tl-status { margin-left:auto; display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:600; color: var(--text-2); padding: 5px 11px; border-radius: 999px; background: var(--glass); border:1px solid var(--glass-brd); }
+.tl-status { margin-left:auto; display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:600; color: var(--text-2); padding: 5px 11px; border-radius: var(--ol-radius-pill); background: var(--glass); border:1px solid var(--glass-brd); }
 .tl-status .dot { width:8px; height:8px; border-radius:50%; background: var(--accent-2); box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent-2) 70%, transparent); animation: pulse 2.6s var(--ease-soft) infinite; }
 @keyframes pulse { 0%{ box-shadow:0 0 0 0 color-mix(in oklab, var(--accent-2) 55%, transparent);} 70%{ box-shadow:0 0 0 8px transparent;} 100%{ box-shadow:0 0 0 0 transparent;} }
 
@@ -627,7 +333,7 @@ input, textarea { font-family: inherit; }
 .nav-item.active { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--text); }
 .nav-item.active::before { content:''; position:absolute; left:-14px; top:50%; transform: translateY(-50%); width:4px; height: 20px; border-radius: 0 4px 4px 0; background: linear-gradient(var(--accent), var(--accent-2)); }
 .nav-item.active svg { opacity:1; color: var(--accent); }
-.nav-badge { margin-left:auto; font-size:11px; font-weight:700; background: var(--glass-2); padding: 2px 8px; border-radius:999px; color: var(--text-2); }
+.nav-badge { margin-left:auto; font-size:11px; font-weight:700; background: var(--glass-2); padding: 2px 8px; border-radius:var(--ol-radius-pill); color: var(--text-2); }
 
 .sidebar-foot { margin-top:auto; }
 .user-card { display:flex; align-items:center; gap:11px; padding:9px 10px; border-radius:14px; cursor:pointer; transition: background .18s; border:1px solid transparent; }
@@ -665,7 +371,7 @@ input, textarea { font-family: inherit; }
 .spread { display:flex; align-items:center; justify-content:space-between; gap:14px; }
 
 /* pill / chip */
-.chip { display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600; padding:6px 12px; border-radius:999px; background: var(--glass-2); border:1px solid var(--glass-brd); color: var(--text-2); }
+.chip { display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600; padding:6px 12px; border-radius:var(--ol-radius-pill); background: var(--glass-2); border:1px solid var(--glass-brd); color: var(--text-2); }
 
 /* buttons */
 .btn { display:inline-flex; align-items:center; justify-content:center; gap:9px; padding: 11px 18px; border-radius: 13px; font-size:14px; font-weight:700; transition: transform .14s, box-shadow .2s, background .2s, border-color .2s; border:1px solid transparent; }
@@ -678,7 +384,7 @@ input, textarea { font-family: inherit; }
 .btn-sm { padding: 8px 13px; font-size:13px; border-radius:11px; }
 
 /* toggle switch */
-.switch { width: 46px; height: 27px; border-radius:999px; background: color-mix(in oklab, var(--text) 16%, transparent); position:relative; transition: background .25s var(--ease); flex:0 0 46px; }
+.switch { width: 46px; height: 27px; border-radius:var(--ol-radius-pill); background: color-mix(in oklab, var(--text) 16%, transparent); position:relative; transition: background .25s var(--ease); flex:0 0 46px; }
 .switch::after { content:''; position:absolute; top:3px; left:3px; width:21px; height:21px; border-radius:50%; background:#fff; box-shadow: 0 2px 6px rgba(0,0,0,.3); transition: transform .26s var(--ease); }
 .switch.on { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
 .switch.on::after { transform: translateX(19px); }
@@ -696,7 +402,7 @@ input, textarea { font-family: inherit; }
 .divider { height:1px; background: var(--glass-brd); margin: 4px 0; }
 
 /* range slider */
-.pp-range { -webkit-appearance:none; appearance:none; width:100%; height:6px; border-radius:999px; outline:none; background: linear-gradient(90deg, var(--accent), var(--accent-2)) no-repeat; background-size: var(--fill, 72%) 100%; box-shadow: inset 0 0 0 100px color-mix(in oklab, var(--text) 12%, transparent); }
+.pp-range { -webkit-appearance:none; appearance:none; width:100%; height:6px; border-radius:var(--ol-radius-pill); outline:none; background: linear-gradient(90deg, var(--accent), var(--accent-2)) no-repeat; background-size: var(--fill, 72%) 100%; box-shadow: inset 0 0 0 100px color-mix(in oklab, var(--text) 12%, transparent); }
 .pp-range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:20px; height:20px; border-radius:50%; background:#fff; border: 3px solid var(--accent); box-shadow: 0 3px 10px -2px rgba(0,0,0,.4); cursor:pointer; transition: transform .15s; }
 .pp-range::-webkit-slider-thumb:hover { transform: scale(1.12); }
 .pp-range::-moz-range-thumb { width:18px; height:18px; border-radius:50%; background:#fff; border:3px solid var(--accent); cursor:pointer; }

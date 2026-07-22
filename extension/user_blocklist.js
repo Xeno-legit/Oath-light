@@ -33,11 +33,16 @@ function fmtCount(n) {
   if (n >= 1e3) return n.toLocaleString();
   return String(n);
 }
-function hint(html) {
+function hint(...parts) {
   const d = document.createElement('div');
   d.className = 'search-hint';
-  d.innerHTML = html; // trusted static strings only
+  d.append(...parts); // strings and element nodes only — no HTML parsing
   return d;
+}
+function bold(text) {
+  const b = document.createElement('b');
+  b.textContent = text;
+  return b;
 }
 function resultRow(kind, iconPaths, title, sub, chip) {
   const wrap = document.createElement('div');
@@ -92,7 +97,7 @@ function initGraylist() {
   input.addEventListener('input', () => {
     const d = cleanDomain(input.value);
     out.textContent = '';
-    if (!d) { out.appendChild(hint('Type any website to see if its explicit content is filtered. To block a site entirely, add it under <b>Custom sites</b>.')); return; }
+    if (!d) { out.appendChild(hint('Type any website to see if its explicit content is filtered. To block a site entirely, add it under ', bold('Custom sites'), '.')); return; }
     const hit = GRAYLIST.find((g) => d === g.url || d.includes(g.url) || g.url.includes(d));
     out.appendChild(hit
       ? resultRow('is-gray', ICON.wave, hit.url, hit.desc, 'Filtered')

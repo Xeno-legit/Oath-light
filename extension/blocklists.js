@@ -246,64 +246,74 @@ domainSearch.addEventListener('input', (e) => {
     domainResult.className = 'search-result found';
     
     if (exactMatch) {
-      domainResult.innerHTML = `
-        <div style="display: flex; align-items: center;">
-          <span class="result-icon">✅</span>
-          <div style="flex: 1;">
-            <div class="result-text">Exact match found</div>
-            <div class="result-detail"><strong>${exactMatch}</strong> is blocked</div>
-            ${matches.length > 1 ? `<div class="result-detail" style="margin-top: 4px;">+${matches.length - 1} similar domain(s)</div>` : ''}
-          </div>
-        </div>
-      `;
+      const detail = [
+        el('div', { className: 'result-text' }, ['Exact match found']),
+        el('div', { className: 'result-detail' }, [el('strong', {}, [exactMatch]), ' is blocked'])
+      ];
+      if (matches.length > 1) {
+        detail.push(el('div', { className: 'result-detail', style: 'margin-top: 4px;' }, [`+${matches.length - 1} similar domain(s)`]));
+      }
+      domainResult.textContent = '';
+      domainResult.appendChild(el('div', { style: 'display: flex; align-items: center;' }, [
+        el('span', { className: 'result-icon' }, ['✅']),
+        el('div', { style: 'flex: 1;' }, detail)
+      ]));
     } else {
       // Show partial matches
       const displayMatches = matches.slice(0, 3);
       const remaining = matches.length - displayMatches.length;
-      
-      domainResult.innerHTML = `
-        <div style="display: flex; align-items: flex-start;">
-          <span class="result-icon">✅</span>
-          <div style="flex: 1;">
-            <div class="result-text">${matches.length} matching domain${matches.length > 1 ? 's' : ''} found</div>
-            <div class="result-detail" style="margin-top: 8px;">
-              ${displayMatches.map(d => `<div style="margin: 2px 0; font-family: monospace; font-size: 12px;">• ${highlightMatch(d, cleanSearch)}</div>`).join('')}
-              ${remaining > 0 ? `<div style="margin-top: 4px; font-style: italic;">+${remaining} more...</div>` : ''}
-            </div>
-          </div>
-        </div>
-      `;
+
+      const list = el('div', { className: 'result-detail', style: 'margin-top: 8px;' },
+        displayMatches.map(d => el('div', { style: 'margin: 2px 0; font-family: monospace; font-size: 12px;' }, ['• ', ...highlightMatch(d, cleanSearch)])));
+      if (remaining > 0) {
+        list.appendChild(el('div', { style: 'margin-top: 4px; font-style: italic;' }, [`+${remaining} more...`]));
+      }
+      domainResult.textContent = '';
+      domainResult.appendChild(el('div', { style: 'display: flex; align-items: flex-start;' }, [
+        el('span', { className: 'result-icon' }, ['✅']),
+        el('div', { style: 'flex: 1;' }, [
+          el('div', { className: 'result-text' }, [`${matches.length} matching domain${matches.length > 1 ? 's' : ''} found`]),
+          list
+        ])
+      ]));
     }
   } else {
     domainResult.className = 'search-result not-found';
-    domainResult.innerHTML = `
-      <div style="display: flex; align-items: center;">
-        <span class="result-icon">❌</span>
-        <div style="flex: 1;">
-          <div class="result-text">No matches found</div>
-          <div class="result-detail"><strong>${cleanSearch.replace(/[<>"'&]/g, '')}</strong> is not in the blocklist</div>
-          <div class="result-detail" style="margin-top: 4px; font-size: 12px;">
-            <button class="add-from-search-btn" data-type="domain" data-value="${cleanSearch.replace(/["'\\]/g, '')}"
-                    style="background: #4dabf7; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; margin-top: 4px;">
-              + Add to blocklist
-            </button>
-          </div>
-        </div>
-      </div>
-    `;
+    const addBtn = el('button', {
+      className: 'add-from-search-btn',
+      style: 'background: #4dabf7; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; margin-top: 4px;'
+    }, ['+ Add to blocklist']);
+    addBtn.dataset.type = 'domain';
+    addBtn.dataset.value = cleanSearch;
+    domainResult.textContent = '';
+    domainResult.appendChild(el('div', { style: 'display: flex; align-items: center;' }, [
+      el('span', { className: 'result-icon' }, ['❌']),
+      el('div', { style: 'flex: 1;' }, [
+        el('div', { className: 'result-text' }, ['No matches found']),
+        el('div', { className: 'result-detail' }, [el('strong', {}, [cleanSearch]), ' is not in the blocklist']),
+        el('div', { className: 'result-detail', style: 'margin-top: 4px; font-size: 12px;' }, [addBtn])
+      ])
+    ]));
   }
 });
 
-// Helper function to highlight matching text
+// DOM builder — keeps user-derived strings out of HTML parsing (AMO no-unsanitized)
+function el(tag, props = {}, children = []) {
+  const node = document.createElement(tag);
+  if (props.className) node.className = props.className;
+  if (props.style) node.style.cssText = props.style;
+  for (const child of children) node.append(child);
+  return node;
+}
+
+// Helper function to highlight matching text — returns an array of nodes/strings
 function highlightMatch(text, search) {
   const index = text.toLowerCase().indexOf(search.toLowerCase());
-  if (index === -1) return text;
-  
-  const before = text.substring(0, index);
-  const match = text.substring(index, index + search.length);
-  const after = text.substring(index + search.length);
-  
-  return `${before}<span style="background: #fef08a; padding: 0 2px; border-radius: 2px; font-weight: 600;">${match}</span>${after}`;
+  if (index === -1) return [text];
+
+  const mark = el('span', { style: 'background: #fef08a; padding: 0 2px; border-radius: 2px; font-weight: 600;' },
+    [text.substring(index, index + search.length)]);
+  return [text.substring(0, index), mark, text.substring(index + search.length)];
 }
 
 // ADD DOMAIN FUNCTIONALITY
@@ -319,7 +329,7 @@ const domainModalMessage = document.getElementById('domainModalMessage');
 addDomainBtn.addEventListener('click', () => {
   addDomainModal.classList.remove('hidden');
   domainInput.value = '';
-  domainModalMessage.innerHTML = '';
+  domainModalMessage.textContent = '';
   domainInput.focus();
 });
 
@@ -332,7 +342,7 @@ function closeDomainModalFunc() {
     addDomainModal.classList.add('hidden');
     addDomainModal.classList.remove('closing');
     domainInput.value = '';
-    domainModalMessage.innerHTML = '';
+    domainModalMessage.textContent = '';
   }, 200);
 }
 
@@ -436,8 +446,11 @@ saveDomainBtn.addEventListener('click', () => {
 });
 
 function showDomainMessage(message, type) {
-  const className = type === 'success' ? 'success-message' : 'error-message';
-  domainModalMessage.innerHTML = `<div class="${className}">${message}</div>`;
+  const div = document.createElement('div');
+  div.className = type === 'success' ? 'success-message' : 'error-message';
+  div.textContent = message;
+  domainModalMessage.textContent = '';
+  domainModalMessage.appendChild(div);
 }
 
 domainInput.addEventListener('keypress', (e) => {

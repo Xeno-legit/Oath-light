@@ -27,6 +27,11 @@ const PANIC_BREATH_SECS = 64;      // four full 16s box cycles ≈ a minute
 const PANIC_WAVE_SECS = 24;        // enough to actually read it, twice
 const PANIC_GROUND_STEP_SECS = 20; // per grounding sense
 
+// One-tap trigger tags offered at the exit stage (5.4) — read from the
+// store's canonical PP.TRIGGERS (store.js), never redeclared, so this flow
+// and the overview's quick-log/slip dialog always offer the same vocabulary.
+const PANIC_TRIGGERS = PP.TRIGGERS;
+
 // The active "Redirect link" destination, or null — mirrors getRedirectTarget
 // in extension/background.js so desktop and extension send the user to the
 // exact same place.
@@ -82,8 +87,16 @@ function PanicPage({ s, go }) {
     return () => clearInterval(id);
   }, [pos.stage]);
 
-  // TODO(5.4): when the urge-log store exists, append a flow-completion event
-  // here (pos.stage reaching 3) and offer the one-tap urge log before exit.
+  // Urge log (5.4): the exit stage offers one optional, one-tap trigger tag
+  // (or a plain skip) that logs this flow-completion with source 'panic'.
+  // Logging is entirely optional and never gates the exit buttons below —
+  // the flow already promised leaving is always the user's own choice.
+  const [urgeLogged, setUrgeLogged] = React.useState(false);
+  const logPanicUrge = React.useCallback((trigger) => {
+    if (urgeLogged) return;
+    if (window.PP) window.PP.logUrge(trigger, 'panic');
+    setUrgeLogged(true);
+  }, [urgeLogged]);
 
   const phaseIdx = Math.floor(breathSec / 4) % 4;
   const phaseCount = Math.min(4, Math.floor(breathSec % 4) + 1);
@@ -167,6 +180,28 @@ function PanicPage({ s, go }) {
               send you straight to your safe place.
             </p>
           )}
+
+          {/* One-tap urge log (5.4) — optional, unobtrusive, never gates the
+              exit buttons above. Collapses to a quiet thank-you once tapped. */}
+          <div style={{ marginTop: 30, textAlign: 'center' }}>
+            {!urgeLogged ? (
+              <React.Fragment>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+                  What brought this on? <span style={{ opacity: .75 }}>(optional)</span>
+                </div>
+                <div className="row" style={{ justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  {PANIC_TRIGGERS.map((t) => (
+                    <button key={t.id} className="chip" onClick={() => logPanicUrge(t.id)}>{t.label}</button>
+                  ))}
+                  <button className="chip" style={{ color: 'var(--muted)' }} onClick={() => logPanicUrge(null)}>Skip</button>
+                </div>
+              </React.Fragment>
+            ) : (
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                <IconCheck size={12} /> Logged quietly — thank you for checking in.
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

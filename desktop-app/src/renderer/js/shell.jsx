@@ -5,7 +5,7 @@ const NAV = [
 { id: 'monitor', label: 'AI Monitor', icon: IconSearch },
 { id: 'blocklist', label: 'Blocklist', icon: IconShield },
 { id: 'blocking', label: 'Blocking Settings', icon: IconSliders },
-{ id: 'mentor', label: 'Personal Mentor', icon: IconChat },
+{ id: 'mentor', label: 'Recovery Program', icon: IconChat },
 { id: 'tips', label: 'Tips & Questions', icon: IconSpark },
 { id: 'themes', label: 'Themes', icon: IconPalette }];
 
@@ -105,7 +105,7 @@ const HUB_CARDS = [
 { id: 'overview', icon: IconGrid, title: 'Overview', desc: 'Your streak, progress and daily intention at a glance.', stat: (s) => `Day ${s.streak}` },
 { id: 'blocklist', icon: IconShield, title: 'Blocklist', desc: 'Check what gets blocked — blacklist, graylist and custom sites.', stat: () => 'Blocklist' },
 { id: 'blocking', icon: IconSliders, title: 'Blocking Settings', desc: 'Strictness, schedules and tamper protection.', stat: (s) => 'Manage settings' },
-{ id: 'mentor', icon: IconChat, title: 'Personal Mentor', desc: 'A calm companion for the hard moments. Always here.', stat: () => 'Coming soon' },
+{ id: 'mentor', icon: IconChat, title: 'Recovery Program', desc: 'Guided CBT/ACT exercises for the hard moments. Always here.', stat: () => '4 exercises' },
 { id: 'tips', icon: IconSpark, title: 'Tips & Questions', desc: 'Questions you might encounter, and tips to guide you.', stat: () => '15 items' },
 { id: 'themes', icon: IconPalette, title: 'Themes', desc: 'Make the space yours — light, dark and atmosphere.', stat: (s) => s.display.style }];
 

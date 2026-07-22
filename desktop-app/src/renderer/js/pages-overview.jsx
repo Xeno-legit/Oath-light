@@ -308,7 +308,409 @@ function StatTile({ icon: I, label, value, sub }) {
 
 }
 
-function OverviewPage({ s, PP }) {
+// Streak milestones (5.5) and the one-tap trigger vocabulary (5.4) both live
+// canonically on the store (store.js defines and exposes them) — read, never
+// redeclared, so the celebration/backfill logic and the panic flow's tags
+// can't drift out of lockstep with this page.
+const MILESTONES = PP.MILESTONES;
+const TRIGGER_TAGS = PP.TRIGGERS;
+
+const MIN_EVENTS_FOR_PATTERNS = 5;
+const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function fmtHour(h) {
+  const hh = ((h % 24) + 24) % 24;
+  const period = hh < 12 ? 'am' : 'pm';
+  let h12 = hh % 12; if (h12 === 0) h12 = 12;
+  return `${h12}${period}`;
+}
+
+// Local trigger analytics (5.4) — buckets every logged urge/slip (they share
+// one log; a slip mirrors into `urges` with source:'slip', see store.js) by
+// hour-of-day and day-of-week, then finds the tightest recurring 2-hour risk
+// band. Pure function of the log itself — never invents data, so a thin log
+// naturally yields an "insufficient data" read rather than a fake pattern.
+function computeUrgeAnalytics(urges) {
+  const hourCounts = new Array(24).fill(0);
+  const dayTotals = new Array(7).fill(0);
+  const events = [];
+  (urges || []).forEach((u) => {
+    const d = new Date(u && u.ts);
+    if (!isFinite(d.getTime())) return;
+    const hour = d.getHours(), dow = d.getDay();
+    hourCounts[hour]++;
+    dayTotals[dow]++;
+    events.push({ hour, dow });
+  });
+  const total = events.length;
+
+  // Slide a 2-hour window around the 24h circle; the highest-count band is
+  // the "risk window" (ties keep the earliest start).
+  const WIN = 2;
+  let bestStart = 0, bestSum = -1;
+  for (let h = 0; h < 24; h++) {
+    let sum = 0;
+    for (let k = 0; k < WIN; k++) sum += hourCounts[(h + k) % 24];
+    if (sum > bestSum) { bestSum = sum; bestStart = h; }
+  }
+  const bandHours = new Set();
+  for (let k = 0; k < WIN; k++) bandHours.add((bestStart + k) % 24);
+
+  // Which day(s) actually drive that band, so the summary can name specific
+  // days ("Tue/Fri") instead of a vague "most days" whenever the data
+  // genuinely supports it.
+  const bandDayCounts = new Array(7).fill(0);
+  let bandTotal = 0;
+  events.forEach(({ hour, dow }) => {
+    if (bandHours.has(hour)) { bandDayCounts[dow]++; bandTotal++; }
+  });
+  const rankedDays = DOW_LABELS
+    .map((label, i) => ({ label, count: bandDayCounts[i] }))
+    .filter((d) => d.count > 0)
+    .sort((a, b) => b.count - a.count);
+  const topDays = [];
+  for (const d of rankedDays) {
+    if (topDays.length >= 2) break;
+    if (topDays.length > 0 && d.count / bandTotal < 0.25) break;
+    topDays.push(d.label);
+  }
+
+  // Honesty gate: a window only counts as "meaningful" when it holds a real
+  // concentration of events — not just whichever 2h slice edges out an
+  // otherwise near-uniform spread by a single tally.
+  const meaningful = total >= MIN_EVENTS_FOR_PATTERNS && bandTotal >= 3 && (bandTotal / total) >= 0.3;
+
+  return {
+    total,
+    hourCounts,
+    dayCounts: DOW_LABELS.map((label, i) => ({ label, count: dayTotals[i] })),
+    band: { startHour: bestStart, endHour: (bestStart + WIN) % 24, bandTotal, topDays, meaningful },
+  };
+}
+
+function riskWindowSummary(band) {
+  const range = `${fmtHour(band.startHour)}–${fmtHour(band.endHour)}`;
+  const days = band.topDays.length ? band.topDays.join('/') + ' ' : '';
+  return `Your risk window looks like ${days}${range}.`;
+}
+
+// --- vulnerable-hours merge (5.4's "cover this window" one-click) ----------
+//
+// `blocking.vulnerable` (see store.js / pages-blocking.jsx) has no backend
+// friction gate of its own the way the DNS filter, uninstall guard, or app
+// blocking do (see tauri-bridge.jsx) — the Blocking page writes it straight
+// through `PP.set({ blocking: { vulnerable: {...} } })`, instant either
+// direction. So THIS is the one place that must self-police the "strengthen
+// instantly, never silently weaken" asymmetry the rest of the app enforces
+// server-side: turning the window on from off is a pure strengthening
+// (nothing existing to shrink); when a window is already on, the suggested
+// band is MERGED into it rather than replacing it, via the smallest single
+// arc that contains both — a strict superset of the existing window, so
+// applying this can only ever grow coverage, never narrow it.
+function timeToMinutes(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec((hhmm || '').trim());
+  if (!m) return null;
+  return Math.min(23, +m[1]) * 60 + Math.min(59, +m[2]);
+}
+function minutesToTime(mins) {
+  const wrapped = ((mins % 1440) + 1440) % 1440;
+  const h = Math.floor(wrapped / 60), mm = wrapped % 60;
+  return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+// Minute-set [0,1440) covered by a (possibly overnight) window. Mirrors the
+// extension's own `isWithinWindow` semantics (extension/bg/reminders.js):
+// start === end means "covers the full day".
+function coveredMinutes(startStr, endStr) {
+  const covered = new Array(1440).fill(false);
+  const a = timeToMinutes(startStr), z = timeToMinutes(endStr);
+  if (a == null || z == null) return covered;
+  if (a === z) { covered.fill(true); return covered; }
+  if (a < z) { for (let m = a; m < z; m++) covered[m] = true; }
+  else { for (let m = a; m < 1440; m++) covered[m] = true; for (let m = 0; m < z; m++) covered[m] = true; }
+  return covered;
+}
+function mergeWindowsExpandOnly(startA, endA, startB, endB) {
+  const covered = coveredMinutes(startA, endA);
+  const b = coveredMinutes(startB, endB);
+  for (let m = 0; m < 1440; m++) if (b[m]) covered[m] = true;
+  if (covered.every(Boolean)) return { start: '00:00', end: '00:00' }; // full-day, by the app's own convention
+
+  // Rotate to a clean "gap start" boundary (an uncovered minute whose
+  // predecessor is covered) so every gap reads as a simple non-wrapping run.
+  let u0 = covered.findIndex((v, i) => !v && covered[(i - 1 + 1440) % 1440]);
+  if (u0 === -1) u0 = covered.indexOf(false);
+
+  let bestLen = -1, bestGapStart = u0, bestGapEnd = u0;
+  let i = 0;
+  while (i < 1440) {
+    const m = (u0 + i) % 1440;
+    if (!covered[m]) {
+      let j = i;
+      while (j < 1440 && !covered[(u0 + j) % 1440]) j++;
+      if (j - i > bestLen) { bestLen = j - i; bestGapStart = (u0 + i) % 1440; bestGapEnd = (u0 + j) % 1440; }
+      i = j;
+    } else {
+      i++;
+    }
+  }
+  // The merged window is the circle minus its single largest gap.
+  return { start: minutesToTime(bestGapEnd), end: minutesToTime(bestGapStart) };
+}
+
+// Applies a suggested risk window through the exact same store pathway the
+// Blocking page's own `setVuln` uses (`PP.set({ blocking: { vulnerable:
+// {...} } })` — see pages-blocking.jsx), so app.jsx's existing sync effect
+// pushes it to the extensions precisely the way any other vulnerable-hours
+// edit would. No PPNative call needed here for the same reason the Blocking
+// page doesn't make one for this field.
+function applyRiskWindow(PP, blocking, band) {
+  const v = (blocking && blocking.vulnerable) || {};
+  const pad = (n) => String(n).padStart(2, '0');
+  const newStart = `${pad(band.startHour)}:00`;
+  const newEnd = `${pad(band.endHour)}:00`;
+  if (!v.on) {
+    PP.set({ blocking: { vulnerable: { on: true, start: newStart, end: newEnd } } });
+    return;
+  }
+  const merged = mergeWindowsExpandOnly(v.start, v.end, newStart, newEnd);
+  PP.set({ blocking: { vulnerable: { on: true, start: merged.start, end: merged.end } } });
+}
+
+// Sequential single-hue magnitude bars (thin, rounded tops, baseline-
+// anchored) with the detected risk band picked out in the app's existing
+// "good/highlighted" accent — no new palette, just the two hues this app
+// already uses for status everywhere else (BrowserProtectionCard, the streak
+// hero). A native `title` gives an honest exact count on hover.
+function MiniBars({ data, highlightSet }) {
+  const max = Math.max(1, ...data.map((d) => d.count));
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 56 }}>
+      {data.map((d, i) => {
+        const h = d.count > 0 ? Math.max(3, Math.round((d.count / max) * 52)) : 2;
+        const on = highlightSet && highlightSet.has(i);
+        return (
+          <div key={i} title={`${d.label}: ${d.count}`}
+            style={{
+              flex: 1, height: h, borderRadius: '3px 3px 0 0',
+              background: on
+                ? 'var(--accent-2)'
+                : `color-mix(in oklab, var(--accent) ${20 + Math.round((d.count / max) * 60)}%, transparent)`,
+            }} />
+        );
+      })}
+    </div>
+  );
+}
+
+// One-tap manual urge log (5.4) — lives right on this analytics card so
+// logging and seeing the resulting pattern are in the same place. Tapping a
+// trigger (or Skip) logs immediately; there's no separate confirm step, same
+// "one tap" contract as the panic flow's exit-stage tagging.
+function UrgeQuickLog({ PP }) {
+  const [open, setOpen] = React.useState(false);
+  const [justLogged, setJustLogged] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!justLogged) return;
+    const id = setTimeout(() => setJustLogged(false), 2400);
+    return () => clearTimeout(id);
+  }, [justLogged]);
+
+  const log = (trigger) => {
+    PP.logUrge(trigger, 'manual');
+    setOpen(false);
+    setJustLogged(true);
+  };
+
+  if (justLogged) {
+    return <span style={{ fontSize: 12.5, color: 'var(--accent-2)', fontWeight: 700 }}><IconCheck size={13} /> Logged</span>;
+  }
+  if (!open) {
+    return (
+      <button className="btn btn-ghost btn-sm" onClick={() => setOpen(true)}>
+        <IconSpark size={15} /> I had an urge
+      </button>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+      {TRIGGER_TAGS.map((t) => (
+        <button key={t.id} className="chip" onClick={() => log(t.id)}>{t.label}</button>
+      ))}
+      <button className="chip" style={{ color: 'var(--muted)' }} onClick={() => log(null)}>Skip</button>
+    </div>
+  );
+}
+
+// Local-only trigger analytics card (5.4). Every number comes straight from
+// `s.urges` — there's no sample/demo data path, so a thin log honestly says
+// so instead of drawing fake bars (see MIN_EVENTS_FOR_PATTERNS above).
+function RiskAnalyticsCard({ s, PP }) {
+  const analytics = React.useMemo(() => computeUrgeAnalytics(s.urges), [s.urges]);
+  const { total, hourCounts, dayCounts, band } = analytics;
+  const hasEnough = total >= MIN_EVENTS_FOR_PATTERNS;
+
+  const hourData = hourCounts.map((count, h) => ({ label: fmtHour(h), count }));
+  const highlightHours = new Set();
+  if (hasEnough) for (let k = 0; k < 2; k++) highlightHours.add((band.startHour + k) % 24);
+  const highlightDays = new Set();
+  if (hasEnough && band.topDays.length) {
+    dayCounts.forEach((d, i) => { if (band.topDays.indexOf(d.label) !== -1) highlightDays.add(i); });
+  }
+
+  return (
+    <div className="card fade-up" style={{ marginTop: 18 }}>
+      <div className="spread" style={{ marginBottom: 4, alignItems: 'flex-start' }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 16, letterSpacing: '-.02em' }}>Your patterns</div>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, maxWidth: '48ch' }}>
+            Built entirely from what you log here — nothing is sent anywhere, nothing is guessed.
+          </div>
+        </div>
+        <UrgeQuickLog PP={PP} />
+      </div>
+
+      {!hasEnough ? (
+        <div style={{ fontSize: 13.5, color: 'var(--muted)', padding: '18px 2px 4px', lineHeight: 1.6 }}>
+          {total === 0
+            ? 'Log an urge (or a slip) and this card starts learning your patterns — hour of day, day of week, and where your risk actually concentrates.'
+            : `${total} logged so far — a few more and a real pattern can show. Nothing meaningful yet, so nothing's drawn.`}
+        </div>
+      ) : (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 13.5, lineHeight: 1.6, marginBottom: 18 }}>
+            {riskWindowSummary(band)}{' '}
+            <span style={{ color: 'var(--muted)' }}>({band.bandTotal} of {total} logged events)</span>
+          </div>
+
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', marginBottom: 6 }}>By hour of day</div>
+          <MiniBars data={hourData} highlightSet={highlightHours} />
+          <div className="spread" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+            <span>12am</span><span>12pm</span><span>11pm</span>
+          </div>
+
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', margin: '22px 0 6px' }}>By day of week</div>
+          <MiniBars data={dayCounts} highlightSet={highlightDays} />
+          <div style={{ display: 'flex', gap: 3, marginTop: 4 }}>
+            {dayCounts.map((d, i) => (
+              <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 11, color: 'var(--muted)' }}>{d.label}</div>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 20 }}>
+            <button className="btn btn-primary btn-sm" disabled={!band.meaningful}
+              onClick={() => applyRiskWindow(PP, s.blocking, band)}>
+              <IconClock size={15} /> Cover this window with vulnerable hours
+            </button>
+            {!band.meaningful && (
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
+                The log doesn't show a strong enough pattern yet to suggest a window honestly — keep logging and this unlocks.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Compassionate slip flow (5.5) — a real two-step confirm: the "I had a
+// slip" button only opens this sheet; nothing is recorded until the user
+// explicitly confirms inside it. Copy matches MENTOR_REPLIES.slip in
+// pages-mentor.jsx ("a slip is not a collapse — it's a single moment, not
+// your identity") verbatim in spirit, so this doesn't invent a second voice
+// for the same moment.
+function SlipDialog({ PP, go, onClose }) {
+  const [stage, setStage] = React.useState('confirm'); // confirm -> done
+  const [trigger, setTrigger] = React.useState(null);
+
+  const confirmSlip = () => {
+    PP.relapse(trigger);
+    setStage('done');
+  };
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.45)' }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="card" style={{ width: 420, maxWidth: '90vw', padding: 26 }}>
+        {stage === 'confirm' ? (
+          <React.Fragment>
+            <div className="row" style={{ gap: 10, color: 'var(--accent-2)' }}>
+              <IconHeart size={18} /><span style={{ fontWeight: 800, fontSize: 15.5 }}>This stays between us</span>
+            </div>
+            <p style={{ fontSize: 13.5, color: 'var(--text-2)', lineHeight: 1.6, margin: '12px 0 18px' }}>
+              A slip is not a collapse — it's a single moment, not your identity. Logging it honestly is
+              part of recovery, not a failure report. Your best streak and everything you've already
+              learned stay exactly as they are.
+            </p>
+            <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>What was happening? (optional)</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 22 }}>
+              {TRIGGER_TAGS.map((t) => (
+                <button key={t.id} className="chip" onClick={() => setTrigger(t.id)}
+                  style={trigger === t.id ? { color: 'var(--accent)', borderColor: 'var(--accent)' } : undefined}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="row" style={{ gap: 10, justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost btn-sm" onClick={onClose}>Never mind</button>
+              <button className="btn btn-primary btn-sm" onClick={confirmSlip}>Log it &amp; start gentle mode</button>
+            </div>
+          </React.Fragment>
+        ) : (
+          <React.Fragment>
+            <div className="row" style={{ gap: 10, color: 'var(--accent-2)' }}>
+              <IconHeart size={18} /><span style={{ fontWeight: 800, fontSize: 15.5 }}>Okay. You're still here.</span>
+            </div>
+            <p style={{ fontSize: 13.5, color: 'var(--text-2)', lineHeight: 1.6, margin: '12px 0 20px' }}>
+              Gentle mode is on for the next 24 hours. Your streak resets, but your best streak and this
+              month's progress don't disappear. What would help right now?
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button className="btn btn-primary btn-sm" onClick={() => { onClose(); go('mentor'); }}>
+                <IconChat size={15} /> Talk to the Mentor
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => { onClose(); go('panic'); }}>
+                <IconWave size={15} /> Ride out an urge instead
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={onClose}>Close</button>
+            </div>
+          </React.Fragment>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Tasteful once-per-milestone celebration (5.5) — `s.lastMilestone` (store.js)
+// is the persisted "already celebrated" marker, so this only ever fires once
+// per milestone, survives restarts, and doesn't re-fire for progress a user
+// already had before this feature shipped (see store.js's backfill). No
+// desktop notification: Settings' "Milestone celebrations" row is an honest
+// disabled "Coming soon" stub (pages-settings.jsx's COMING_NOTIFS) with no
+// backend command behind it at all, and this task is renderer-only — wiring
+// one would mean inventing new backend surface, which is explicitly out of
+// scope here. This in-app banner is the whole celebration for now.
+function MilestoneBanner({ milestone, onClose }) {
+  return (
+    <div className="card fade-up" style={{
+      marginBottom: 18, padding: '20px 24px', display: 'flex', alignItems: 'center', gap: 16,
+      border: '1px solid color-mix(in oklab, var(--accent-2) 40%, transparent)',
+      background: 'color-mix(in oklab, var(--accent-2) 8%, var(--bg-1))',
+    }}>
+      <div style={{ color: 'var(--accent-2)' }}><IconFlame size={26} /></div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 800, fontSize: 15.5 }}>{milestone} days clean — that's a real milestone.</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 2 }}>Every one of those days was a choice. Well earned.</div>
+      </div>
+      <button className="btn btn-ghost btn-sm" onClick={onClose}><IconX size={14} /></button>
+    </div>
+  );
+}
+
+function OverviewPage({ s, PP, go }) {
   const extStats = useExtensionStats();
   // Total blocked = the sum reported across every connected extension/profile;
   // fall back to the local weekly count when the desktop bridge isn't live.
@@ -316,8 +718,54 @@ function OverviewPage({ s, PP }) {
     ? extStats.total_blocks
     : (s.blockedThisWeek || 0);
   const msg = DAILY_MESSAGES[new Date().getDate() % DAILY_MESSAGES.length];
-  const nextMilestone = [7, 14, 30, 60, 90, 180, 365].find((m) => m > s.streak) || s.streak + 30;
+  const nextMilestone = MILESTONES.find((m) => m > s.streak) || s.streak + 30;
   const ringVal = Math.min(100, Math.round(s.streak / nextMilestone * 100));
+  // Only actually changes when a slip is logged (or the month rolls over) —
+  // memoized on s.slips so it doesn't rescan the slip log on the app-wide
+  // re-render every store write causes.
+  const cleanDaysThisMonth = React.useMemo(() => PP.cleanDaysThisMonth(), [s.slips]);
+
+  // Compassionate streak design (5.5): while a slip's 24h gentle-mode window
+  // is active, tone the hero down instead of showing a bare "Day 0" — the
+  // window and the zero-day period line up almost exactly (both anchored to
+  // the same slip timestamp), so this naturally covers the whole "just
+  // slipped" stretch without extra bookkeeping.
+  const gentle = PP.isGentle();
+  // isGentle() reads the clock, not state, so nothing re-renders on its own
+  // when the 24h window lapses — schedule one re-render for that moment so
+  // the hero can't keep showing gentle copy past its own expiry.
+  const [, gentleTick] = React.useReducer((x) => x + 1, 0);
+  React.useEffect(() => {
+    if (!gentle) return;
+    const slips = s.slips || [];
+    const last = slips.length ? new Date(slips[slips.length - 1]).getTime() : NaN;
+    if (!isFinite(last)) return;
+    const remain = last + PP.GENTLE_MS - Date.now();
+    if (remain <= 0) return;
+    const id = setTimeout(gentleTick, remain + 1000);
+    return () => clearTimeout(id);
+  }, [gentle, s.slips]);
+
+  const [slipOpen, setSlipOpen] = React.useState(false);
+
+  // Milestone celebration (5.5) — fires at most once per milestone per
+  // streak; `s.lastMilestone` is the persisted guard (see store.js). The
+  // effect only depends on `s.streak` so writing `lastMilestone` back into
+  // the store here doesn't re-trigger itself.
+  const [celebrating, setCelebrating] = React.useState(null);
+  React.useEffect(() => {
+    const crossed = MILESTONES.filter((m) => s.streak >= m).pop();
+    if (crossed && crossed > (s.lastMilestone || 0)) {
+      PP.set({ lastMilestone: crossed });
+      setCelebrating(crossed);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.streak]);
+  React.useEffect(() => {
+    if (!celebrating) return;
+    const id = setTimeout(() => setCelebrating(null), 12000);
+    return () => clearTimeout(id);
+  }, [celebrating]);
 
   return (
     <div className="page">
@@ -327,25 +775,44 @@ function OverviewPage({ s, PP }) {
         <p className="page-sub">A calm look at how far you've come. Small, steady steps — that's the whole game.</p>
       </div>
 
+      {celebrating && <MilestoneBanner milestone={celebrating} onClose={() => setCelebrating(null)} />}
+
       <div className="grid stagger" style={{ gridTemplateColumns: '1.3fr 1fr', alignItems: 'stretch' }}>
         {/* streak hero */}
         <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 26 }}>
           <Ring value={ringVal} size={170}>
             <div>
-              <div style={{ fontSize: 46, fontWeight: 800, lineHeight: 1, letterSpacing: '-.04em' }}>{s.streak}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--muted)', marginTop: 4 }}>days clean</div>
+              {gentle ? (
+                <React.Fragment>
+                  <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.2, letterSpacing: '-.02em' }}>Be gentle</div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--muted)', marginTop: 4 }}>with yourself today</div>
+                </React.Fragment>
+              ) : (
+                <React.Fragment>
+                  <div style={{ fontSize: 46, fontWeight: 800, lineHeight: 1, letterSpacing: '-.04em' }}>{s.streak}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--muted)', marginTop: 4 }}>days clean</div>
+                </React.Fragment>
+              )}
             </div>
           </Ring>
           <div style={{ flex: 1 }}>
-            <div className="row" style={{ gap: 8, color: 'var(--accent-2)' }}>
-              <IconFlame size={19} /><span style={{ fontWeight: 800, fontSize: 15 }}>On a roll</span>
+            <div className="row" style={{ gap: 8, color: gentle ? 'var(--muted)' : 'var(--accent-2)' }}>
+              {gentle ? <IconHeart size={19} /> : <IconFlame size={19} />}
+              <span style={{ fontWeight: 800, fontSize: 15 }}>{gentle ? 'Starting again, gently' : 'On a roll'}</span>
             </div>
-            <p style={{ fontSize: 14, color: 'var(--text-2)', lineHeight: 1.55, margin: '10px 0 16px' }}>
-              You're <b style={{ color: 'var(--text)' }}>{nextMilestone - s.streak} days</b> from your next milestone of {nextMilestone} days. Keep the rhythm.
+            <p style={{ fontSize: 14, color: 'var(--text-2)', lineHeight: 1.55, margin: '10px 0 14px' }}>
+              {gentle
+                ? "A slip is a moment, not your identity. Today isn't about the number — it's about showing up again."
+                : (<React.Fragment>You're <b style={{ color: 'var(--text)' }}>{nextMilestone - s.streak} days</b> from your next milestone of {nextMilestone} days. Keep the rhythm.</React.Fragment>)}
             </p>
-            <button className="btn btn-ghost btn-sm" onClick={() => PP.relapse()}>
-              <IconFlame size={16} /> Relapsed?
-            </button>
+            <div className="chip" style={{ width: 'fit-content', marginBottom: 14 }}>
+              {cleanDaysThisMonth} clean day{cleanDaysThisMonth === 1 ? '' : 's'} this month
+            </div>
+            <div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setSlipOpen(true)}>
+                <IconHeart size={16} /> I had a slip
+              </button>
+            </div>
           </div>
         </div>
 
@@ -369,8 +836,13 @@ function OverviewPage({ s, PP }) {
         )}
       </div>
 
+      {/* urge log & trigger analytics (5.4) */}
+      <RiskAnalyticsCard s={s} PP={PP} />
+
       {/* extension connection status */}
       <BrowserProtectionCard />
+
+      {slipOpen && <SlipDialog PP={PP} go={go} onClose={() => setSlipOpen(false)} />}
     </div>);
 
 }

@@ -767,11 +767,16 @@
     host.style.cssText = 'all: initial; position: fixed; z-index: 2147483647; right: 20px; bottom: 20px;';
     const root = host.attachShadow({ mode: 'open' });
 
-    const bg = dark ? 'rgba(17,24,39,0.92)' : 'rgba(255,255,255,0.94)';
-    const fg = dark ? '#f3f4f6' : '#111827';
-    const sub = dark ? '#9ca3af' : '#4b5563';
-    const border = dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
+    // Theme values flow in as CSS custom properties (set on the host below) so the
+    // template stays a static literal — custom properties survive `all: initial`
+    // and inherit into the shadow tree.
     const accent = kind === 'checkin' ? '#34d399' : '#818cf8';
+    host.style.setProperty('--pp-bg', dark ? 'rgba(17,24,39,0.92)' : 'rgba(255,255,255,0.94)');
+    host.style.setProperty('--pp-fg', dark ? '#f3f4f6' : '#111827');
+    host.style.setProperty('--pp-sub', dark ? '#9ca3af' : '#4b5563');
+    host.style.setProperty('--pp-border', dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)');
+    host.style.setProperty('--pp-accent', accent);
+    host.style.setProperty('--pp-accent-glow', accent + '22');
 
     root.innerHTML = `
       <style>
@@ -780,23 +785,23 @@
           position: relative;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
           width: 320px; max-width: calc(100vw - 40px);
-          background: ${bg}; color: ${fg};
-          border: 1px solid ${border}; border-radius: 16px;
+          background: var(--pp-bg); color: var(--pp-fg);
+          border: 1px solid var(--pp-border); border-radius: 16px;
           box-shadow: 0 18px 50px rgba(0,0,0,0.35);
           backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
           overflow: hidden; transform: translateY(16px); opacity: 0;
           transition: transform .42s cubic-bezier(.16,1,.3,1), opacity .42s ease;
         }
         .card.in { transform: translateY(0); opacity: 1; }
-        .accent { height: 4px; background: linear-gradient(90deg, ${accent}, transparent); }
+        .accent { height: 4px; background: linear-gradient(90deg, var(--pp-accent), transparent); }
         .body { padding: 16px 18px; display: flex; gap: 12px; }
-        .dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; background: ${accent}; box-shadow: 0 0 0 4px ${accent}22; }
+        .dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; background: var(--pp-accent); box-shadow: 0 0 0 4px var(--pp-accent-glow); }
         .txt { flex: 1; min-width: 0; }
-        .brand { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: ${accent}; font-weight: 700; }
+        .brand { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--pp-accent); font-weight: 700; }
         .title { font-size: 15px; font-weight: 700; margin: 3px 0 4px; }
-        .msg { font-size: 13.5px; line-height: 1.5; color: ${sub}; }
-        .close { position: absolute; top: 10px; right: 10px; width: 24px; height: 24px; border: 0; background: transparent; color: ${sub}; font-size: 18px; line-height: 1; cursor: pointer; border-radius: 8px; }
-        .close:hover { background: ${border}; color: ${fg}; }
+        .msg { font-size: 13.5px; line-height: 1.5; color: var(--pp-sub); }
+        .close { position: absolute; top: 10px; right: 10px; width: 24px; height: 24px; border: 0; background: transparent; color: var(--pp-sub); font-size: 18px; line-height: 1; cursor: pointer; border-radius: 8px; }
+        .close:hover { background: var(--pp-border); color: var(--pp-fg); }
       </style>
       <div class="card">
         <div class="accent"></div>
