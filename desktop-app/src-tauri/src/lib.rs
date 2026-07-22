@@ -27,7 +27,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
-use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 // ============================================================================
@@ -999,143 +998,14 @@ fn start_tcp_server(app: AppHandle, state: Arc<Mutex<AppState>>) {
 }
 
 // ============================================================================
-// Update server — serves the packed CRX + update manifest over localhost so the
-// Chromium force-install policy can pull the extension fully offline.
+// Elevated-setup coordination
 // ============================================================================
-
-/// Port the update server binds. MUST match the port in `CHROMIUM_UPDATE_URL`
-/// (browsers.rs) and the codebase URL baked into `scripts/pack-extension.mjs`.
-const UPDATE_SERVER_PORT: u16 = 17244;
-
-/// Flipped true once the update server has bound its port AND holds the packed
-/// CRX + manifest. Historically the brick-safety gate for the *self-hosted*
-/// force-install (don't point a browser at a localhost URL nothing answers).
-/// Force-install now targets the Chrome Web Store, so enforcement no longer
-/// gates on this; the flag is kept only as the server's own readiness signal.
-static UPDATE_SERVER_READY: AtomicBool = AtomicBool::new(false);
 
 /// Set after an elevated setup pass completes, to tell the monitor to flush its
 /// per-session enforcement memo and re-read the policy state (which the elevated
 /// pass just wrote). Without this the monitor would keep showing the pre-
 /// elevation "needs admin" result it had already memoized.
 static RE_ENFORCE_REQUESTED: AtomicBool = AtomicBool::new(false);
-
-/// Bind the localhost update server. The Chromium `ExtensionInstallForcelist`
-/// policy points browsers at `http://127.0.0.1:17244/update_manifest.xml`; this
-/// serves that manifest and the signed `oathlight.crx` next to it. Two static
-/// files, hand-rolled HTTP/1.1, no dependency.
-///
-/// Reads both files once at startup (they're bundled Tauri resources produced by
-/// `pack-extension.mjs`). If they can't be found — e.g. the packer didn't run —
-/// it logs and does **not** bind, so browsers simply fail to resolve the update
-/// rather than being served a broken response.
-/// Load the packed CRX + update manifest, trying the bundled resource dir first
-/// (production) and then the dev source tree (`CARGO_MANIFEST_DIR/resources`,
-/// where `pack-extension.mjs` writes during `tauri dev` — the Resource base
-/// dir does not point there in dev). `None` if either file is missing anywhere.
-fn load_update_assets(app: &AppHandle) -> Option<(Vec<u8>, Vec<u8>)> {
-    let mut roots: Vec<std::path::PathBuf> = Vec::new();
-    if let Ok(p) = app.path().resolve("resources", BaseDirectory::Resource) {
-        roots.push(p);
-    }
-    roots.push(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources"));
-
-    let read_first = |name: &str| -> Option<Vec<u8>> {
-        roots.iter().find_map(|r| std::fs::read(r.join(name)).ok())
-    };
-    match (read_first("update_manifest.xml"), read_first("oathlight.crx")) {
-        (Some(x), Some(c)) => Some((x, c)),
-        _ => None,
-    }
-}
-
-fn start_update_server(app: AppHandle) {
-    let (xml, crx) = match load_update_assets(&app) {
-        Some((x, c)) => (Arc::new(x), Arc::new(c)),
-        None => {
-            // Do not start, and leave UPDATE_SERVER_READY false so enforcement
-            // never points a browser at a URL nothing will answer.
-            log::error!(
-                "update server: packed extension resources not found — not starting (enforcement stays off)"
-            );
-            return;
-        }
-    };
-
-    std::thread::spawn(move || {
-        let addr = format!("127.0.0.1:{}", UPDATE_SERVER_PORT);
-        let listener = match TcpListener::bind(&addr) {
-            Ok(l) => {
-                log::info!("update server listening on {}", addr);
-                l
-            }
-            Err(e) => {
-                log::error!("update server: failed to bind {}: {}", addr, e);
-                return;
-            }
-        };
-        // Bound and holding the assets — only now is it safe for enforcement to
-        // point browsers at us.
-        UPDATE_SERVER_READY.store(true, Ordering::SeqCst);
-        for stream in listener.incoming() {
-            let stream = match stream {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            let xml = xml.clone();
-            let crx = crx.clone();
-            std::thread::spawn(move || serve_update_conn(stream, &xml, &crx));
-        }
-    });
-}
-
-/// Handle one update-server request. We only need the request line's path; the
-/// two routes serve static bytes with `Connection: close`.
-fn serve_update_conn(mut stream: TcpStream, xml: &[u8], crx: &[u8]) {
-    use std::io::{Read, Write};
-    let peer = stream
-        .peer_addr()
-        .map(|a| a.to_string())
-        .unwrap_or_else(|_| "?".to_string());
-    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
-    let mut buf = [0u8; 1024];
-    let n = match stream.read(&mut buf) {
-        Ok(n) if n > 0 => n,
-        _ => return,
-    };
-    let req = String::from_utf8_lossy(&buf[..n]);
-    let path = req
-        .lines()
-        .next()
-        .and_then(|l| l.split_whitespace().nth(1))
-        .unwrap_or("");
-
-    let (status, ctype, body): (&str, &str, &[u8]) = if path.starts_with("/update_manifest.xml") {
-        ("200 OK", "application/xml", xml)
-    } else if path.starts_with("/oathlight.crx") {
-        ("200 OK", "application/x-chrome-extension", crx)
-    } else {
-        ("404 Not Found", "text/plain", b"not found")
-    };
-
-    // These are the only signal we have that a real Chrome ever reached the
-    // localhost update endpoint, vs. the policy silently not taking effect.
-    if status == "200 OK" {
-        log::info!("update server: {} GET {} -> 200 ({} bytes)", peer, path, body.len());
-    } else {
-        log::warn!("update server: {} GET {} -> 404", peer, path);
-    }
-
-    let header = format!(
-        "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        status,
-        ctype,
-        body.len()
-    );
-    let _ = stream.write_all(header.as_bytes());
-    let _ = stream.write_all(body);
-    let _ = stream.flush();
-}
 
 /// One native-host connection. The host sends `host_hello` first (identifying
 /// the browser that spawned it), then relays the extension's messages (which
@@ -1763,7 +1633,7 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
                 enforced.clear();
             }
 
-            // Proactive force-install: lock every Chromium browser present on
+            // Proactive force-install: lock every supported browser present on
             // this machine while the guard is on — not only ones whose extension
             // already went missing — so a fresh, healthy install is pinned
             // before any removal attempt.
@@ -1778,7 +1648,8 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
                     continue;
                 }
                 if !browsers::enforcement_configured(def.engine) {
-                    // Gecko while Firefox is on hold.
+                    // No store URL configured for this engine (defensive — both
+                    // Chromium and Gecko are configured now).
                     st.enforcement = "dormant".to_string();
                     continue;
                 }
@@ -2860,7 +2731,8 @@ fn open_external(url: String) -> Result<(), String> {
 }
 
 /// Manually (re)apply the force-install policy for one browser, or all if
-/// `browser_key` is None. No-op ("dormant") until the release update URL is set.
+/// `browser_key` is None. Chromium force-installs from the Web Store, Firefox
+/// from AMO; an engine with no store URL configured is a no-op ("dormant").
 #[tauri::command]
 fn enforce_extension(browser_key: Option<String>) -> Vec<(String, String)> {
     let targets: Vec<&BrowserDef> = match &browser_key {
@@ -2923,23 +2795,24 @@ fn request_elevated_setup() -> Result<(), String> {
 }
 
 /// The elevated one-shot (`--elevated-setup`). Runs with admin rights, writes the
-/// force-install policy for every Chromium browser, and registers an elevated
-/// logon task so future sessions re-assert the lock without a prompt. Then exits.
+/// force-install policy for every configured browser (Chromium via the Web Store,
+/// Firefox via AMO), and registers an elevated logon task so future sessions
+/// re-assert the lock without a prompt. Then exits.
 ///
-/// BRICK SAFETY: the force-install points at the published extension via the
-/// canonical Chrome Web Store update URL — Google always answers and the
-/// extension is really published — so there is no dead-URL to lock a browser
-/// against (the old self-hosted path guarded this by checking a localhost
-/// server was serving first; the Web-Store path needs no such check).
+/// BRICK SAFETY: each force-install points at the published extension via its
+/// store's canonical URL (Chrome Web Store / AMO) — the store always answers and
+/// the extension is really published — so there is no dead-URL to lock a browser
+/// against (the old self-hosted path guarded this by checking a localhost server
+/// was serving first; the store path needs no such check).
 #[cfg(target_os = "windows")]
 fn elevated_setup() {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+    // enforce_policy is a no-op (Dormant) for any engine not yet configured, so
+    // this safely covers both Chromium and Firefox.
     for def in BROWSERS {
-        if def.engine == Engine::Chromium {
-            let _ = browsers::enforce_policy(def); // elevated -> writes HKLM
-        }
+        let _ = browsers::enforce_policy(def); // elevated -> writes HKLM
     }
 
     // Elevated logon task: re-asserts the lock on future logins with no prompt.
@@ -4131,7 +4004,6 @@ pub fn run() {
                 });
             }
 
-            start_update_server(app.handle().clone());
             start_tcp_server(app.handle().clone(), shared_state.clone());
             start_monitor(app.handle().clone(), shared_state.clone());
 

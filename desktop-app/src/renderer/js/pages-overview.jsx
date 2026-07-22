@@ -233,14 +233,10 @@ function enforcementNote(b) {
     // Policy is written but the extension isn't actually installed yet. Never
     // claim "locked" here — that conflation is the bug we fixed.
     case 'pending':       return 'policy set — waiting for the browser to install it';
-    // Chrome/Edge only honor a self-hosted force-install on an enterprise-managed
-    // device (AD/Entra-joined or cloud-enrolled). On a normal PC the policy is
-    // silently ignored, so admin can't help — say so instead of faking a lock.
-    case 'unsupported_device': return 'can’t lock — needs the Web Store or a managed device';
     // Writing the policy needs admin (the Software\Policies key is admin-only in
     // both hives), so an unelevated app can't apply it — say so plainly.
     case 'failed':        return 'needs admin to lock';
-    case 'dormant':       return 'auto-restore on hold'; // Firefox, on hold
+    case 'dormant':       return 'auto-restore on hold'; // engine not configured (defensive)
     default:              return null; // 'off' or not present
   }
 }
@@ -283,7 +279,7 @@ function ExtensionRow({ b }) {
       {b.enforcement === 'failed' && PPNative.available &&
         <button className="btn btn-sm" onClick={() => PPNative.requestElevatedSetup()}>Grant admin &amp; lock</button>
       }
-      {b.enforcement !== 'failed' && b.enforcement !== 'unsupported_device' && b.state === 'extension_missing' && PPNative.available &&
+      {b.enforcement !== 'failed' && b.state === 'extension_missing' && PPNative.available &&
         <button className="btn btn-ghost btn-sm" onClick={() => PPNative.enforce(b.key)}>Restore</button>
       }
     </div>

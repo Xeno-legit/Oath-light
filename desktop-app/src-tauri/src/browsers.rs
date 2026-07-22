@@ -64,13 +64,16 @@ pub const HOST_NAME: &str = "com.oathlight.companion";
 /// — unlike a self-hosted update URL — is honored on ordinary *unmanaged*
 /// consumer machines, which is exactly what publishing unlocked (see the
 /// enforcement flow in lib.rs). Non-empty, so Chromium enforcement is LIVE.
-/// (Firefox/Gecko is intentionally still dormant — `FIREFOX_XPI_URL` below is
-/// empty while that browser's force-install format is still on hold.)
 pub const CHROMIUM_UPDATE_URL: &str = "https://clients2.google.com/service/update2/crx";
 
-/// Signed-XPI URL for the Firefox force-install policy. EMPTY until published
-/// on AMO / self-hosted. Same dormant-until-set behaviour.
-pub const FIREFOX_XPI_URL: &str = "";
+/// XPI URL used by the Firefox force-install policy (`ExtensionSettings` →
+/// `install_url`). Now that the add-on is published on AMO, this is AMO's
+/// "latest signed XPI" endpoint for our listing slug — Firefox resolves it to
+/// the current signed build for the user's platform. Non-empty, so Gecko
+/// enforcement is LIVE. A failed fetch here is non-fatal in Firefox (it just
+/// doesn't install), so there is no dead-URL brick to guard against.
+pub const FIREFOX_XPI_URL: &str =
+    "https://addons.mozilla.org/firefox/downloads/latest/oath-light-content-filter/latest.xpi";
 
 // ============================================================================
 // Browser table
@@ -436,7 +439,8 @@ pub fn unregister_all_hosts() {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum EnforceOutcome {
-    /// No update URL configured yet — nothing written. (Firefox while on hold.)
+    /// No store URL configured for this engine — nothing written. (Both Chromium
+    /// and Gecko are configured now; kept for any future engine added dormant.)
     Dormant,
     /// Policy written to `HKLM` — a machine-wide hard lock the blocked user
     /// cannot remove without elevation. Only reachable when the app itself runs
@@ -529,6 +533,67 @@ fn pick_forcelist_value(full_key: &str) -> String {
     n.to_string()
 }
 
+/// Build the Firefox `ExtensionSettings` policy JSON with our force-install
+/// entry merged into any pre-existing object (`existing` = the current value's
+/// JSON, if one is already set). Merging rather than overwriting means we never
+/// clobber another managed extension's settings — the same collision safety the
+/// Chromium forcelist writer has. Returns a compact one-line object suitable for
+/// a single `REG_MULTI_SZ` value.
+#[cfg(target_os = "windows")]
+fn extension_settings_json(existing: Option<&str>) -> String {
+    let mut obj: serde_json::Map<String, serde_json::Value> = existing
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    obj.insert(
+        GECKO_EXTENSION_ID.to_string(),
+        serde_json::json!({
+            "installation_mode": "force_installed",
+            "install_url": FIREFOX_XPI_URL,
+        }),
+    );
+    serde_json::Value::Object(obj).to_string()
+}
+
+/// Read the Firefox `ExtensionSettings` policy value (the whole JSON string) at
+/// `full_key`. Firefox stores it as one `REG_MULTI_SZ` (older setups: `REG_SZ`)
+/// holding the entire object; a single JSON object is one string element, so
+/// there is no `\0` list to split. `None` if absent/unreadable.
+#[cfg(target_os = "windows")]
+fn read_extension_settings(full_key: &str) -> Option<String> {
+    let out = reg().args(["query", full_key, "/v", "ExtensionSettings"]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    for line in text.lines() {
+        let t = line.trim_start();
+        for ty in ["REG_MULTI_SZ", "REG_SZ"] {
+            if let Some(pos) = t.find(ty) {
+                let data = t[pos + ty.len()..].trim();
+                if !data.is_empty() {
+                    return Some(data.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// True when a Firefox `ExtensionSettings` JSON string force-installs *our*
+/// add-on (its id maps to `installation_mode: force_installed`).
+#[cfg(target_os = "windows")]
+fn gecko_force_installs_us(settings_json: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(settings_json)
+        .ok()
+        .and_then(|v| {
+            v.get(GECKO_EXTENSION_ID)?
+                .get("installation_mode")?
+                .as_str()
+                .map(|m| m == "force_installed")
+        })
+        .unwrap_or(false)
+}
+
 /// If our force-install policy is **already** present, report which scope it's
 /// in (HKLM checked first, then HKCU) without writing anything. This lets the
 /// app correctly report a policy written by the elevated installer — or by a
@@ -536,12 +601,20 @@ fn pick_forcelist_value(full_key: &str) -> String {
 /// re-write it and showing "failed".
 #[cfg(target_os = "windows")]
 pub fn policy_present(def: &BrowserDef) -> Option<EnforceOutcome> {
-    if def.engine != Engine::Chromium {
-        return None; // Gecko is on hold; nothing to detect.
-    }
     for (root, strong) in [("HKLM", true), ("HKCU", false)] {
-        let key = format!(r"{}\{}\ExtensionInstallForcelist", root, def.policy_subkey);
-        if read_reg_sz_values(&key).iter().any(|(_, d)| is_our_forcelist_entry(d)) {
+        let present = match def.engine {
+            Engine::Chromium => {
+                let key = format!(r"{}\{}\ExtensionInstallForcelist", root, def.policy_subkey);
+                read_reg_sz_values(&key).iter().any(|(_, d)| is_our_forcelist_entry(d))
+            }
+            Engine::Gecko => {
+                let key = format!(r"{}\{}", root, def.policy_subkey);
+                read_extension_settings(&key)
+                    .map(|s| gecko_force_installs_us(&s))
+                    .unwrap_or(false)
+            }
+        };
+        if present {
             return Some(if strong {
                 EnforceOutcome::EnforcedMachine
             } else {
@@ -603,25 +676,19 @@ pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
             EnforceOutcome::Failed
         }
         Engine::Gecko => {
-            // KNOWN DEFECT (Firefox on hold — see Extension_Force_Install_Plan.md
-            // §7): Mozilla's `ExtensionSettings` Windows format is believed to be
-            // a single REG_SZ holding the whole JSON object, not the nested
-            // subkeys written here. Unreachable today (FIREFOX_XPI_URL is empty),
-            // so it never runs — fix this before taking Firefox off hold.
-            let base = format!(r"{}\ExtensionSettings\{}", def.policy_subkey, GECKO_EXTENSION_ID);
+            // Firefox's `ExtensionSettings` policy is ONE value holding the whole
+            // JSON object (REG_MULTI_SZ), not per-key subkeys. Merge our
+            // force-install entry into whatever object is already there so we
+            // don't clobber another managed extension, and write it back.
             for (root, strong) in HIVES {
-                let key = format!(r"{}\{}", root, base);
-                let a = reg()
-                    .args(["add", &key, "/v", "installation_mode", "/t", "REG_SZ", "/d", "force_installed", "/f"])
+                let key = format!(r"{}\{}", root, def.policy_subkey);
+                let json = extension_settings_json(read_extension_settings(&key).as_deref());
+                let ok = reg()
+                    .args(["add", &key, "/v", "ExtensionSettings", "/t", "REG_MULTI_SZ", "/d", &json, "/f"])
                     .output()
                     .map(|o| o.status.success())
                     .unwrap_or(false);
-                let b = reg()
-                    .args(["add", &key, "/v", "install_url", "/t", "REG_SZ", "/d", FIREFOX_XPI_URL, "/f"])
-                    .output()
-                    .map(|o| o.status.success())
-                    .unwrap_or(false);
-                if a && b {
+                if ok {
                     return if strong {
                         EnforceOutcome::EnforcedMachine
                     } else {
@@ -664,12 +731,28 @@ pub fn remove_policy(def: &BrowserDef) {
             }
         }
         Engine::Gecko => {
+            // Remove only OUR key from the single `ExtensionSettings` object,
+            // leaving any other managed extension's entry intact; delete the
+            // whole value only when nothing else remains.
             for root in ["HKLM", "HKCU"] {
-                let key = format!(
-                    r"{}\{}\ExtensionSettings\{}",
-                    root, def.policy_subkey, GECKO_EXTENSION_ID
-                );
-                let _ = reg().args(["delete", &key, "/f"]).output();
+                let key = format!(r"{}\{}", root, def.policy_subkey);
+                let Some(existing) = read_extension_settings(&key) else { continue };
+                let Ok(mut obj) =
+                    serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&existing)
+                else {
+                    continue;
+                };
+                if obj.remove(GECKO_EXTENSION_ID).is_none() {
+                    continue; // not ours — leave it alone
+                }
+                if obj.is_empty() {
+                    let _ = reg().args(["delete", &key, "/v", "ExtensionSettings", "/f"]).output();
+                } else {
+                    let json = serde_json::Value::Object(obj).to_string();
+                    let _ = reg()
+                        .args(["add", &key, "/v", "ExtensionSettings", "/t", "REG_MULTI_SZ", "/d", &json, "/f"])
+                        .output();
+                }
             }
         }
     }
@@ -827,5 +910,57 @@ mod tests {
             !is_our_forcelist_entry("someotherextensionidaaaaaaaaaaaa;https://x/"),
             "must not claim another managed extension's forcelist entry"
         );
+    }
+
+    #[test]
+    fn firefox_xpi_url_is_a_live_amo_endpoint() {
+        assert!(!FIREFOX_XPI_URL.is_empty(), "empty would keep Gecko dormant");
+        assert!(
+            FIREFOX_XPI_URL.starts_with("https://addons.mozilla.org/")
+                && FIREFOX_XPI_URL.ends_with(".xpi"),
+            "must be AMO's signed-XPI endpoint"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn firefox_extension_settings_force_installs_us_from_amo() {
+        let json = extension_settings_json(None);
+        // The exact object Firefox reads from the ExtensionSettings policy value.
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let entry = v.get(GECKO_EXTENSION_ID).expect("our add-on id must be a key");
+        assert_eq!(entry["installation_mode"], "force_installed");
+        assert_eq!(entry["install_url"], FIREFOX_XPI_URL);
+        assert!(gecko_force_installs_us(&json), "detector must recognize our own write");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn firefox_settings_merge_preserves_other_extensions() {
+        // A pre-existing policy from some other manager must survive our write.
+        let existing = r#"{"other@example.com":{"installation_mode":"blocked"}}"#;
+        let merged = extension_settings_json(Some(existing));
+        let v: serde_json::Value = serde_json::from_str(&merged).unwrap();
+        assert_eq!(
+            v["other@example.com"]["installation_mode"], "blocked",
+            "must not clobber another managed extension"
+        );
+        assert!(gecko_force_installs_us(&merged), "and must still add ours");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn gecko_detector_ignores_foreign_or_unforced_entries() {
+        assert!(
+            !gecko_force_installs_us(r#"{"other@example.com":{"installation_mode":"force_installed"}}"#),
+            "another add-on being force-installed is not us"
+        );
+        assert!(
+            !gecko_force_installs_us(
+                &format!(r#"{{"{}":{{"installation_mode":"allowed"}}}}"#, GECKO_EXTENSION_ID)
+            ),
+            "our id present but not force_installed is not an active lock"
+        );
+        assert!(!gecko_force_installs_us("not json"), "garbage is not a lock");
     }
 }
