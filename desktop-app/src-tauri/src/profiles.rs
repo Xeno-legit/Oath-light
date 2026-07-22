@@ -11,7 +11,7 @@
 //! anything we can't locate return `None`, and the caller falls back to the
 //! heartbeat (and never force-flags "missing" without ground truth).
 
-use crate::browsers::{BrowserDef, EXTENSION_ID};
+use crate::browsers::{BrowserDef, EXTENSION_ID, STORE_EXTENSION_ID};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -130,10 +130,13 @@ fn scan_profile_dirs(udd: &Path) -> Vec<String> {
 }
 
 fn find_ext_entry(prefs: &Value) -> Option<&Value> {
-    prefs
-        .get("extensions")?
-        .get("settings")?
-        .get(EXTENSION_ID)
+    // A store install lives under STORE_EXTENSION_ID; an unpacked/dev load under
+    // EXTENSION_ID. Look for either so a Web-Store user isn't mis-reported as
+    // "extension not installed" (which drives the unprotected-profile warning).
+    let settings = prefs.get("extensions")?.get("settings")?;
+    settings
+        .get(STORE_EXTENSION_ID)
+        .or_else(|| settings.get(EXTENSION_ID))
 }
 
 /// Read one profile dir. Returns `Some(ProfileExt)` for every profile whose

@@ -1008,10 +1008,10 @@ fn start_tcp_server(app: AppHandle, state: Arc<Mutex<AppState>>) {
 const UPDATE_SERVER_PORT: u16 = 17244;
 
 /// Flipped true once the update server has bound its port AND holds the packed
-/// CRX + manifest. Enforcement MUST NOT write a force-install policy until this
-/// is true: a policy points browsers at our update URL, and if nothing answers
-/// there the browser locks itself to an extension it can never install —
-/// policy-forced and un-removable. Gating on this is what stops that brick.
+/// CRX + manifest. Historically the brick-safety gate for the *self-hosted*
+/// force-install (don't point a browser at a localhost URL nothing answers).
+/// Force-install now targets the Chrome Web Store, so enforcement no longer
+/// gates on this; the flag is kept only as the server's own readiness signal.
 static UPDATE_SERVER_READY: AtomicBool = AtomicBool::new(false);
 
 /// Set after an elevated setup pass completes, to tell the monitor to flush its
@@ -1787,24 +1787,13 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
                     st.enforcement = "off".to_string();
                     continue;
                 }
-                // Chrome/Edge silently drop an off-Web-Store force-install on an
-                // unmanaged consumer machine (see `offstore_forceinstall_supported`).
-                // Writing the policy there only produces a "managed by your
-                // organization" browser and a dead forcelist entry that never
-                // installs anything — so we don't write it, and we report the
-                // truth. This is a hard platform limit, not a retryable failure.
-                if !browsers::offstore_forceinstall_supported() {
-                    enforced.remove(&st.key);
-                    st.enforcement = "unsupported_device".to_string();
-                    continue;
-                }
-                if !UPDATE_SERVER_READY.load(Ordering::SeqCst) {
-                    // The update server isn't serving (still starting, or its
-                    // assets are missing). Writing a policy now would point the
-                    // browser at a dead URL and lock it there — so we don't.
-                    st.enforcement = "off".to_string();
-                    continue;
-                }
+                // Web-Store force-install (STORE_EXTENSION_ID via the CWS update
+                // URL) needs neither of the guards the old self-hosted path did:
+                // it is honored on ordinary *unmanaged* consumer machines, and
+                // Google serves the CRX — so there is no enterprise-only gate and
+                // no localhost update server that has to be "ready" first. With a
+                // real published extension behind the canonical CWS URL there is
+                // no dead-URL brick to guard against either.
                 let outcome = if let Some(&cached) = enforced.get(&st.key) {
                     cached
                 } else {
@@ -1820,8 +1809,9 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
                 // not merely that the policy was written — that conflation is what
                 // made the UI claim "locked" while nothing was installed. Re-derive
                 // the reported status from profile ground truth each tick: a written
-                // policy with no real install is "pending" (a managed device may
-                // still be fetching the CRX), never a green "locked".
+                // policy with no real install is "pending" (the browser may still
+                // be fetching the extension from the Web Store), never a green
+                // "locked".
                 st.enforcement = match outcome {
                     EnforceOutcome::EnforcedMachine | EnforceOutcome::EnforcedUser
                         if !st.installed =>
@@ -2880,17 +2870,10 @@ fn enforce_extension(browser_key: Option<String>) -> Vec<(String, String)> {
     targets
         .into_iter()
         .map(|def| {
-            // Same honesty gate as the monitor: on an unmanaged device an
-            // off-store force-install can't take, so don't write a dead policy —
-            // report why instead.
-            let status = if def.engine == Engine::Chromium
-                && browsers::enforcement_configured(def.engine)
-                && !browsers::offstore_forceinstall_supported()
-            {
-                "unsupported_device".to_string()
-            } else {
-                enforce_str(browsers::enforce_policy(def)).to_string()
-            };
+            // Web-Store force-install works on unmanaged machines, so there is no
+            // "unsupported device" case to report anymore — just apply the policy
+            // (elevation still required; an unelevated write reports "failed").
+            let status = enforce_str(browsers::enforce_policy(def)).to_string();
             (def.key.to_string(), status)
         })
         .collect()
@@ -2943,37 +2926,19 @@ fn request_elevated_setup() -> Result<(), String> {
 /// force-install policy for every Chromium browser, and registers an elevated
 /// logon task so future sessions re-assert the lock without a prompt. Then exits.
 ///
-/// BRICK SAFETY: it writes a policy **only** if the localhost update server is
-/// actually answering (the running unelevated app serves it — binding a high
-/// port needs no admin). If nothing is serving, no policy is written, so a
-/// browser is never locked to a dead update URL.
+/// BRICK SAFETY: the force-install points at the published extension via the
+/// canonical Chrome Web Store update URL — Google always answers and the
+/// extension is really published — so there is no dead-URL to lock a browser
+/// against (the old self-hosted path guarded this by checking a localhost
+/// server was serving first; the Web-Store path needs no such check).
 #[cfg(target_os = "windows")]
 fn elevated_setup() {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-    let addr: std::net::SocketAddr = match format!("127.0.0.1:{}", UPDATE_SERVER_PORT).parse() {
-        Ok(a) => a,
-        Err(_) => return,
-    };
-    let serving =
-        TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2)).is_ok();
-
-    if !browsers::offstore_forceinstall_supported() {
-        // Admin doesn't help here: Chrome/Edge won't honor an off-store
-        // force-install on an unmanaged device no matter who writes the key.
-        // Writing HKLM policy would just brand the browser "managed by your
-        // organization" for nothing, so skip it.
-        log::error!(
-            "elevated-setup: unmanaged device — Chrome/Edge won't honor an off-store force-install; skipping policy write"
-        );
-    } else if !serving {
-        log::error!("elevated-setup: update server not reachable — skipping policy write (no brick)");
-    } else {
-        for def in BROWSERS {
-            if def.engine == Engine::Chromium {
-                let _ = browsers::enforce_policy(def); // elevated -> writes HKLM
-            }
+    for def in BROWSERS {
+        if def.engine == Engine::Chromium {
+            let _ = browsers::enforce_policy(def); // elevated -> writes HKLM
         }
     }
 

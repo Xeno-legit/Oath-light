@@ -28,25 +28,45 @@ fn reg() -> std::process::Command {
 // Central configuration — the one place IDs / update URLs live
 // ============================================================================
 
-/// Chromium extension ID. Derived deterministically from the public `key`
-/// pinned in `extension/manifest.json`, so it is identical in unpacked dev
-/// loads and in a packed/self-hosted build. If you change that key, recompute
-/// this (sha256 of the SPKI DER, first 16 bytes, each nibble mapped 0->a..f->p).
+/// Chromium extension ID for the **unpacked / dev / self-hosted-CRX** build.
+/// Derived deterministically from the public `key` pinned in
+/// `extension/manifest.json`, so it is identical in an unpacked dev load and in
+/// a packed CRX signed with that key. If you change that key, recompute this
+/// (sha256 of the SPKI DER, first 16 bytes, each nibble mapped 0->a..f->p).
+///
+/// This is NOT the ID real users run as. The Chrome Web Store ignores the
+/// manifest `key` on upload and assigns its own item ID (`STORE_EXTENSION_ID`
+/// below) — so a store install runs under that, while developers loading the
+/// unpacked folder run under this one. Detection paths (native-host
+/// `allowed_origins`, profile-install lookup, forcelist matching) must accept
+/// BOTH ids; the force-install we *write* targets the store id.
 pub const EXTENSION_ID: &str = "lknpaoecooklfjgenmjpkdkahgoofank";
 
+/// Chromium extension ID assigned by the **Chrome Web Store** on publication —
+/// the value in the store URL (`chromewebstore.google.com/detail/<id>`), and the
+/// `chrome-extension://<id>/` origin every store-installed copy actually runs
+/// under. CWS derives this from its own re-signing key, overriding the manifest
+/// `key`, so it differs from `EXTENSION_ID`. This is what force-install targets
+/// and what the bridge must trust for the published product.
+pub const STORE_EXTENSION_ID: &str = "oigdpcdgmldgjalfnlgekcbkmniplnad";
+
 /// Firefox (Gecko) extension ID — from `browser_specific_settings.gecko.id`.
+/// Author-defined and honored by AMO, so it is the same in dev and published
+/// (no dev/store split like Chromium has).
 pub const GECKO_EXTENSION_ID: &str = "oathlight@xeno-legit.github.io";
 
 /// Native messaging host name (must match `connectNative()` in background.js).
 pub const HOST_NAME: &str = "com.oathlight.companion";
 
-/// Update URL used by the Chromium force-install policy. Points at the update
-/// manifest the desktop app serves from localhost (see `update_server` in
-/// lib.rs); the port MUST match `UPDATE_SERVER_PORT` there and the codebase URL
-/// baked into `scripts/pack-extension.mjs`. Non-empty, so Chromium enforcement
-/// is LIVE. (Firefox/Gecko is intentionally still dormant — `FIREFOX_XPI_URL`
-/// below is empty while that browser is on hold.)
-pub const CHROMIUM_UPDATE_URL: &str = "http://127.0.0.1:17244/update_manifest.xml";
+/// Update URL used by the Chromium force-install policy. Now that the extension
+/// is published, this is the **Chrome Web Store** update endpoint: a Web-Store-
+/// hosted force-install (`STORE_EXTENSION_ID;<this url>`) is served by Google and
+/// — unlike a self-hosted update URL — is honored on ordinary *unmanaged*
+/// consumer machines, which is exactly what publishing unlocked (see the
+/// enforcement flow in lib.rs). Non-empty, so Chromium enforcement is LIVE.
+/// (Firefox/Gecko is intentionally still dormant — `FIREFOX_XPI_URL` below is
+/// empty while that browser's force-install format is still on hold.)
+pub const CHROMIUM_UPDATE_URL: &str = "https://clients2.google.com/service/update2/crx";
 
 /// Signed-XPI URL for the Firefox force-install policy. EMPTY until published
 /// on AMO / self-hosted. Same dormant-until-set behaviour.
@@ -295,6 +315,18 @@ pub fn is_installed(_def: &BrowserDef) -> bool {
 // Native messaging host manifests
 // ============================================================================
 
+/// The `chrome-extension://<id>/` origins the native host accepts. Must list
+/// **both** Chromium ids: the store build (what real users run) and the
+/// unpacked/dev build (what developers and any self-hosted CRX run) — otherwise
+/// `connectNative()` from the other one is rejected and every desktop-integrated
+/// feature goes dark for that install. Store id first (the common case).
+fn chromium_allowed_origins() -> Vec<String> {
+    [STORE_EXTENSION_ID, EXTENSION_ID]
+        .iter()
+        .map(|id| format!("chrome-extension://{}/", id))
+        .collect()
+}
+
 /// Write the two host manifests (Chromium `allowed_origins` and Gecko
 /// `allowed_extensions`) into `dir`, pointing at `host_binary`.
 /// Returns (chromium_manifest_path, gecko_manifest_path).
@@ -307,7 +339,7 @@ pub fn write_manifests(dir: &Path, host_binary: &Path) -> std::io::Result<(PathB
         "description": "Oath Light Desktop Companion — Native Messaging Host",
         "path": host_binary.to_string_lossy(),
         "type": "stdio",
-        "allowed_origins": [ format!("chrome-extension://{}/", EXTENSION_ID) ]
+        "allowed_origins": chromium_allowed_origins()
     });
     std::fs::write(&chromium_path, serde_json::to_string_pretty(&chromium).unwrap())?;
 
@@ -431,66 +463,12 @@ pub fn enforcement_configured(engine: Engine) -> bool {
     }
 }
 
-/// Whether this device can actually honor an **off-Web-Store** force-install.
-///
-/// Chrome and Edge deliberately ignore an `ExtensionInstallForcelist` entry that
-/// points at a self-hosted update URL (like ours) unless the machine is
-/// enterprise-managed: joined to an AD domain, joined to Entra/Azure AD, or
-/// enrolled in Chrome Browser Cloud Management. On a plain consumer machine the
-/// policy is accepted into the registry and shows in `chrome://policy`, but the
-/// extension is *silently never installed* — this is the exact anti-malware
-/// measure our self-hosted force-install runs into. (Web-Store-hosted
-/// force-installs are exempt and work unmanaged; self-hosted ones are not.)
-///
-/// We detect the precondition so the app can report the truth instead of a lock
-/// the browser will never apply, and so it doesn't leave a dead "managed by your
-/// organization" policy on machines where it can't work. Cached — it can't
-/// change within a session.
-#[cfg(target_os = "windows")]
-pub fn offstore_forceinstall_supported() -> bool {
-    use std::os::windows::process::CommandExt;
-    use std::sync::OnceLock;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    static CACHED: OnceLock<bool> = OnceLock::new();
-    *CACHED.get_or_init(|| {
-        // Chrome Browser Cloud Management enrollment token (Chrome or Edge).
-        for base in [
-            r"HKLM\SOFTWARE\Policies\Google\Chrome",
-            r"HKLM\SOFTWARE\Policies\Microsoft\Edge",
-        ] {
-            let enrolled = reg()
-                .args(["query", base, "/v", "CloudManagementEnrollmentToken"])
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false);
-            if enrolled {
-                return true;
-            }
-        }
-        // AD domain / Entra (Azure AD) / enterprise join, via dsregcmd.
-        if let Ok(o) = std::process::Command::new("dsregcmd")
-            .arg("/status")
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-        {
-            let t = String::from_utf8_lossy(&o.stdout)
-                .to_ascii_uppercase()
-                .replace(' ', "");
-            if t.contains("AZUREADJOINED:YES")
-                || t.contains("DOMAINJOINED:YES")
-                || t.contains("ENTERPRISEJOINED:YES")
-            {
-                return true;
-            }
-        }
-        false
-    })
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn offstore_forceinstall_supported() -> bool {
-    false
-}
+// NOTE (removed with publication): an earlier `offstore_forceinstall_supported()`
+// gated enforcement on the machine being enterprise-managed, because Chrome/Edge
+// silently ignore a *self-hosted* `ExtensionInstallForcelist` on unmanaged
+// consumer machines. Now that force-install targets the Chrome **Web Store**
+// (`STORE_EXTENSION_ID` via `CHROMIUM_UPDATE_URL`), which IS honored unmanaged,
+// that precondition no longer exists and the gate — and this helper — are gone.
 
 /// Read the `REG_SZ` values of a registry key as `(value_name, data)` pairs via
 /// `reg query`. Empty vec if the key is absent or unreadable (reading `HKLM`
@@ -523,10 +501,12 @@ fn read_reg_sz_values(full_key: &str) -> Vec<(String, String)> {
 }
 
 /// True when `data` is a forcelist entry for *our* extension (its `id;url` form
-/// starts with our ID).
+/// leads with one of our ids). Matches EITHER the store id (what we now write)
+/// or the legacy unpacked/dev id (what an older build may have written), so
+/// detection and cleanup stay correct across the switch to the Web-Store target.
 #[cfg(target_os = "windows")]
 fn is_our_forcelist_entry(data: &str) -> bool {
-    data.split(';').next() == Some(EXTENSION_ID)
+    matches!(data.split(';').next(), Some(id) if id == STORE_EXTENSION_ID || id == EXTENSION_ID)
 }
 
 /// Choose the `ExtensionInstallForcelist` value name to write under: reuse the
@@ -603,7 +583,7 @@ pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
 
     match def.engine {
         Engine::Chromium => {
-            let entry = format!("{};{}", EXTENSION_ID, CHROMIUM_UPDATE_URL);
+            let entry = format!("{};{}", STORE_EXTENSION_ID, CHROMIUM_UPDATE_URL);
             for (root, strong) in HIVES {
                 let key = format!(r"{}\{}\ExtensionInstallForcelist", root, def.policy_subkey);
                 let value = pick_forcelist_value(&key);
@@ -783,3 +763,69 @@ pub fn remove_dns_policy(def: &BrowserDef) {
 
 #[cfg(not(target_os = "windows"))]
 pub fn remove_dns_policy(_def: &BrowserDef) {}
+
+// ============================================================================
+// Tests — extension identity & force-install target
+// ============================================================================
+//
+// These pin the exact bug that publishing exposed: the store ID (`oigdpcd…`)
+// and the unpacked/dev ID (`lknpaoec…`) are different, and every detection path
+// must accept both while the force-install we write must target the store ID.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A Chromium extension ID is 32 chars from the `a..p` alphabet.
+    fn is_chromium_id(id: &str) -> bool {
+        id.len() == 32 && id.bytes().all(|b| (b'a'..=b'p').contains(&b))
+    }
+
+    #[test]
+    fn store_and_dev_ids_are_valid_and_distinct() {
+        assert!(is_chromium_id(EXTENSION_ID), "dev id shape");
+        assert!(is_chromium_id(STORE_EXTENSION_ID), "store id shape");
+        assert_ne!(
+            EXTENSION_ID, STORE_EXTENSION_ID,
+            "store id must differ from the dev id — the whole reason for this fix"
+        );
+    }
+
+    #[test]
+    fn allowed_origins_cover_store_and_dev() {
+        let origins = chromium_allowed_origins();
+        assert!(
+            origins.contains(&format!("chrome-extension://{}/", STORE_EXTENSION_ID)),
+            "published store extension must be able to reach the native host"
+        );
+        assert!(
+            origins.contains(&format!("chrome-extension://{}/", EXTENSION_ID)),
+            "unpacked/dev build must still be able to reach the native host"
+        );
+    }
+
+    #[test]
+    fn force_install_entry_targets_the_store_via_web_store_url() {
+        // The value the Chromium force-install policy writes.
+        let entry = format!("{};{}", STORE_EXTENSION_ID, CHROMIUM_UPDATE_URL);
+        let (id, url) = entry.split_once(';').unwrap();
+        assert_eq!(id, STORE_EXTENSION_ID, "must force-install the store build");
+        assert!(
+            url.starts_with("https://clients2.google.com/"),
+            "must pull from the Web Store (honored on unmanaged machines), not a self-hosted URL"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn forcelist_entry_matches_either_id_but_not_strangers() {
+        let store = format!("{};{}", STORE_EXTENSION_ID, CHROMIUM_UPDATE_URL);
+        let legacy = format!("{};{}", EXTENSION_ID, "http://127.0.0.1:17244/update_manifest.xml");
+        assert!(is_our_forcelist_entry(&store), "recognizes what we write now");
+        assert!(is_our_forcelist_entry(&legacy), "still cleans up a legacy dev-id entry");
+        assert!(
+            !is_our_forcelist_entry("someotherextensionidaaaaaaaaaaaa;https://x/"),
+            "must not claim another managed extension's forcelist entry"
+        );
+    }
+}
