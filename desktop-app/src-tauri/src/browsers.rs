@@ -756,9 +756,11 @@ pub fn remove_policy(def: &BrowserDef) {
             }
         }
     }
-    // Also drop the DoH policy (1.2), so a completed uninstall leaves no
-    // "managed by your organization" DNS setting behind.
+    // Also drop the DoH policy (1.2) and the incognito/guest/private lockdown
+    // (1.5), so a completed uninstall leaves no "managed by your organization"
+    // settings behind and restores those browser modes.
     remove_dns_policy(def);
+    remove_incognito_guest_policy(def);
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -846,6 +848,76 @@ pub fn remove_dns_policy(def: &BrowserDef) {
 
 #[cfg(not(target_os = "windows"))]
 pub fn remove_dns_policy(_def: &BrowserDef) {}
+
+// ============================================================================
+// Browser lockdown policy (plan item 1.5) — close what force-install can't cover
+// ============================================================================
+//
+// A force-installed extension still does NOT run in Incognito/Private windows,
+// and a Guest profile has no extensions at all — both are wide-open bypass
+// surfaces on an otherwise-locked browser. While the guard is on we shut them:
+// block Incognito + Guest (Chromium) / Private Browsing (Firefox). These are
+// ordinary restriction policies — they only ever DISABLE a mode — so, unlike
+// force-install, there is nothing here that could brick a browser.
+
+/// The `(value_name, dword)` restriction policies for `engine`, written directly
+/// under `policy_subkey`. Chromium: disable Incognito (`IncognitoModeAvailability
+/// = 1`) and Guest mode (`BrowserGuestModeEnabled = 0`). Firefox: disable Private
+/// Browsing (`DisablePrivateBrowsing = 1`). One list so enforce/remove stay in
+/// lock-step.
+#[cfg(target_os = "windows")]
+fn lockdown_policy_values(engine: Engine) -> &'static [(&'static str, &'static str)] {
+    match engine {
+        Engine::Chromium => {
+            &[("IncognitoModeAvailability", "1"), ("BrowserGuestModeEnabled", "0")]
+        }
+        Engine::Gecko => &[("DisablePrivateBrowsing", "1")],
+    }
+}
+
+/// Write the incognito/guest/private lockdown policy for `def` — applied for
+/// every browser while the guard is on, alongside force-install. Same
+/// HKLM-then-HKCU fallback and `EnforceOutcome` reporting as the other policy
+/// writers; every value is a DWORD.
+#[cfg(target_os = "windows")]
+pub fn enforce_incognito_guest_policy(def: &BrowserDef) -> EnforceOutcome {
+    const HIVES: [(&str, bool); 2] = [("HKLM", true), ("HKCU", false)];
+    for (root, strong) in HIVES {
+        let key = format!(r"{}\{}", root, def.policy_subkey);
+        let all_ok = lockdown_policy_values(def.engine).iter().all(|(name, val)| {
+            reg()
+                .args(["add", &key, "/v", name, "/t", "REG_DWORD", "/d", val, "/f"])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        });
+        if all_ok {
+            return if strong { EnforceOutcome::EnforcedMachine } else { EnforceOutcome::EnforcedUser };
+        }
+    }
+    EnforceOutcome::Failed
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn enforce_incognito_guest_policy(_def: &BrowserDef) -> EnforceOutcome {
+    EnforceOutcome::Unsupported
+}
+
+/// Remove the incognito/guest/private lockdown policy for `def`. Called as part
+/// of `remove_policy` on sanctioned uninstall (so a completed uninstall restores
+/// Incognito/Guest/Private). Best-effort and idempotent.
+#[cfg(target_os = "windows")]
+pub fn remove_incognito_guest_policy(def: &BrowserDef) {
+    for root in ["HKLM", "HKCU"] {
+        let key = format!(r"{}\{}", root, def.policy_subkey);
+        for (name, _) in lockdown_policy_values(def.engine) {
+            let _ = reg().args(["delete", &key, "/v", name, "/f"]).output();
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn remove_incognito_guest_policy(_def: &BrowserDef) {}
 
 // ============================================================================
 // Tests — extension identity & force-install target
@@ -962,5 +1034,24 @@ mod tests {
             "our id present but not force_installed is not an active lock"
         );
         assert!(!gecko_force_installs_us("not json"), "garbage is not a lock");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn lockdown_policy_disables_incognito_guest_and_private() {
+        let chromium: std::collections::HashMap<_, _> =
+            lockdown_policy_values(Engine::Chromium).iter().copied().collect();
+        // 1 = Incognito DISABLED. Must never be "2" — that FORCES incognito
+        // (every window private, the exact opposite of what we want).
+        assert_eq!(chromium.get("IncognitoModeAvailability"), Some(&"1"));
+        assert_eq!(chromium.get("BrowserGuestModeEnabled"), Some(&"0"), "0 = guest off");
+
+        let gecko: std::collections::HashMap<_, _> =
+            lockdown_policy_values(Engine::Gecko).iter().copied().collect();
+        assert_eq!(gecko.get("DisablePrivateBrowsing"), Some(&"1"));
+        assert!(
+            !gecko.contains_key("IncognitoModeAvailability"),
+            "guest/incognito are Chromium-only concepts"
+        );
     }
 }

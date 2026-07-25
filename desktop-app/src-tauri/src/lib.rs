@@ -1547,6 +1547,10 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
         // every tick. Cleared when the DNS filter is off (so a re-enable
         // rewrites it) and by `RE_ENFORCE_REQUESTED` (set on enable).
         let mut dns_doh_enforced: HashSet<String> = HashSet::new();
+        // Incognito/guest/private lockdown memo (1.5): same idea as the DoH memo,
+        // but gated on the guard rather than the DNS filter. Cleared when the
+        // guard is off and by `RE_ENFORCE_REQUESTED`.
+        let mut lockdown_enforced: HashSet<String> = HashSet::new();
 
         loop {
             let now = now_unix_ms();
@@ -1588,6 +1592,28 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
                 } else if !dns_doh_enforced.is_empty() {
                     dns_doh_enforced.clear();
                 }
+            }
+
+            // Browser lockdown policy (1.5): while the guard is on, close the
+            // surfaces force-install can't reach — Incognito/Private windows
+            // (the extension doesn't run there) and Guest profiles (no extensions
+            // at all). Written once per session per browser (like the DoH memo);
+            // the policy itself is removed only on sanctioned uninstall, so — as
+            // with force-install — turning the guard off stops re-asserting but
+            // does not instantly reopen the bypass.
+            if guard_enabled {
+                if RE_ENFORCE_REQUESTED.load(Ordering::SeqCst) {
+                    lockdown_enforced.clear();
+                }
+                for def in BROWSERS {
+                    if !lockdown_enforced.contains(def.key) {
+                        let o = browsers::enforce_incognito_guest_policy(def);
+                        lockdown_enforced.insert(def.key.to_string());
+                        log::info!("[{}] incognito/guest lockdown policy write: {}", def.key, enforce_str(o));
+                    }
+                }
+            } else if !lockdown_enforced.is_empty() {
+                lockdown_enforced.clear();
             }
 
             let mut statuses = build_status(&state, &running, &proc_names, now);
@@ -2746,6 +2772,9 @@ fn enforce_extension(browser_key: Option<String>) -> Vec<(String, String)> {
             // "unsupported device" case to report anymore — just apply the policy
             // (elevation still required; an unelevated write reports "failed").
             let status = enforce_str(browsers::enforce_policy(def)).to_string();
+            // Close the incognito/guest/private bypass in the same pass (1.5);
+            // reported status stays the force-install one the UI reads.
+            let _ = browsers::enforce_incognito_guest_policy(def);
             (def.key.to_string(), status)
         })
         .collect()
@@ -2810,9 +2839,11 @@ fn elevated_setup() {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     // enforce_policy is a no-op (Dormant) for any engine not yet configured, so
-    // this safely covers both Chromium and Firefox.
+    // this safely covers both Chromium and Firefox. Also write the incognito/
+    // guest/private lockdown (1.5) in the same elevated pass — it too needs HKLM.
     for def in BROWSERS {
         let _ = browsers::enforce_policy(def); // elevated -> writes HKLM
+        let _ = browsers::enforce_incognito_guest_policy(def);
     }
 
     // Elevated logon task: re-asserts the lock on future logins with no prompt.
