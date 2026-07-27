@@ -8,12 +8,12 @@
 // (it is a protection, configured with the other protections) rather than
 // standing on its own as a top-level destination.
 const NAV = [
-{ id: 'overview', label: 'Overview', icon: IconGrid },
-{ id: 'blocklist', label: 'Blocklist', icon: IconShield },
-{ id: 'blocking', label: 'Blocking Settings', icon: IconSliders },
-{ id: 'mentor', label: 'Recovery Program', icon: IconChat },
-{ id: 'tips', label: 'Tips & Questions', icon: IconSpark },
-{ id: 'themes', label: 'Themes', icon: IconPalette }];
+  { id: 'overview', label: 'Overview', icon: IconGrid },
+  { id: 'blocklist', label: 'Blocklist', icon: IconShield },
+  { id: 'blocking', label: 'Blocking Settings', icon: IconSliders },
+  { id: 'mentor', label: 'Recovery Program', icon: IconChat },
+  { id: 'tips', label: 'Tips & Questions', icon: IconSpark },
+  { id: 'themes', label: 'Themes', icon: IconPalette }];
 
 
 // Window controls for the frameless Tauri window (withGlobalTauri = true).
@@ -22,13 +22,13 @@ function winCtl(action) {
     const w = window.__TAURI__ && window.__TAURI__.window;
     const appWin = w && (w.getCurrentWindow ? w.getCurrentWindow() : w.getCurrent && w.getCurrent());
     if (appWin && appWin[action]) appWin[action]();
-  } catch (e) {/* running outside Tauri (e.g. plain browser preview) */}
+  } catch (e) {/* running outside Tauri (e.g. plain browser preview) */ }
 }
 
 function WinBtn({ label, action, danger, children }) {
   return (
     <button className={'win-btn' + (danger ? ' win-close' : '')}
-            title={label} aria-label={label} onClick={() => winCtl(action)}>
+      title={label} aria-label={label} onClick={() => winCtl(action)}>
       {children}
     </button>);
 
@@ -71,7 +71,7 @@ function Sidebar({ s, go }) {
 
       <nav className="nav">
         {NAV.map((n) =>
-        <button key={n.id} className={'nav-item' + (s.page === n.id ? ' active' : '')} onClick={() => go(n.id)}>
+          <button key={n.id} className={'nav-item' + (s.page === n.id ? ' active' : '')} onClick={() => go(n.id)}>
             <n.icon />
             <span>{n.label}</span>
 
@@ -109,12 +109,12 @@ function Sidebar({ s, go }) {
 
 /* ---------- HUB MENU (starting page) ---------- */
 const HUB_CARDS = [
-{ id: 'overview', icon: IconGrid, title: 'Overview', desc: 'Your streak, progress and daily intention at a glance.', stat: (s) => `Day ${s.streak}` },
-{ id: 'blocklist', icon: IconShield, title: 'Blocklist', desc: 'Check what gets blocked — blacklist, graylist and custom sites.', stat: () => 'Blocklist' },
-{ id: 'blocking', icon: IconSliders, title: 'Blocking Settings', desc: 'Strictness, schedules and tamper protection.', stat: (s) => 'Manage settings' },
-{ id: 'mentor', icon: IconChat, title: 'Recovery Program', desc: 'Guided CBT/ACT exercises for the hard moments. Always here.', stat: () => '4 exercises' },
-{ id: 'tips', icon: IconSpark, title: 'Tips & Questions', desc: 'Questions you might encounter, and tips to guide you.', stat: () => '15 items' },
-{ id: 'themes', icon: IconPalette, title: 'Themes', desc: 'Make the space yours — light, dark and atmosphere.', stat: (s) => s.display.style }];
+  { id: 'overview', icon: IconGrid, title: 'Overview', desc: 'Your streak, progress and daily intention at a glance.', stat: (s) => `Day ${s.streak}` },
+  { id: 'blocklist', icon: IconShield, title: 'Blocklist', desc: 'Check what gets blocked — blacklist, graylist and custom sites.', stat: () => 'Blocklist' },
+  { id: 'blocking', icon: IconSliders, title: 'Blocking Settings', desc: 'Strictness, schedules and tamper protection.', stat: (s) => 'Manage settings' },
+  { id: 'mentor', icon: IconChat, title: 'Recovery Program', desc: 'Guided CBT/ACT exercises for the hard moments. Always here.', stat: () => '4 exercises' },
+  { id: 'tips', icon: IconSpark, title: 'Tips & Questions', desc: 'Questions you might encounter, and tips to guide you.', stat: () => '15 items' },
+  { id: 'themes', icon: IconPalette, title: 'Themes', desc: 'Make the space yours — light, dark and atmosphere.', stat: (s) => s.display.style }];
 
 
 function HubMenu({ s, go }) {
@@ -134,7 +134,6 @@ function HubMenu({ s, go }) {
         <span className="stage-banner-text">
           You're running an early build of Oath Light. It's still in active
           testing — some protection may be incomplete and things can change or break.
-          Please don't rely on it as your only safeguard yet.
         </span>
       </div>
       <div className="hub-hero fade-up">
@@ -156,8 +155,8 @@ function HubMenu({ s, go }) {
           // list, not the card's own stat() fn — every other card keeps the
           // plain stat-function architecture.
           const stat = c.id === 'blocklist' ?
-          counts ? `${counts.domain_count.toLocaleString()} domains` : 'View list' :
-          c.stat(s);
+            counts ? `${counts.domain_count.toLocaleString()} domains` : 'View list' :
+            c.stat(s);
           return (
             <button key={c.id} className="card hover hub-card" onClick={() => go(c.id)}>
               <div className="hub-card-ico"><c.icon size={22} /></div>
