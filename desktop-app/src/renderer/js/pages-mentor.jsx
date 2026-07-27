@@ -383,9 +383,9 @@ function AiMentorChat({ onExit }) {
         <div className="eyebrow">AI mentor</div>
         <h1 className="page-title" style={{ fontSize: 23, marginBottom: 8 }}>Talk it through</h1>
         <p className="page-sub" style={{ maxWidth: 'none', fontSize: 13 }}>
-          This one is an AI, and what you type here is sent to Anthropic using your own API
-          key. It has no ability to change any setting in this app, and it will not help
-          weaken the filter. Nothing here is saved — closing this page clears it.
+          This one is an AI. What you type is sent to your chosen provider under your own key.
+          It can't change any setting in this app and won't help weaken the filter. Nothing is
+          saved — closing this page clears it.
         </p>
 
         <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -471,23 +471,27 @@ function AiMentorChat({ onExit }) {
 // into one produces a button that fails when pressed.
 function AiMentorCard({ cfg, onOpen, onSetup }) {
   const ready = cfg && cfg.enabled && cfg.has_key;
+  // Name the provider the user actually picked rather than hardcoding one
+  // vendor — the key is theirs, and so is the choice of who it belongs to.
+  const providerName = (cfg && (cfg.providers || []).find((p) => p.id === cfg.provider) || {}).name;
   return (
-    <div className="card fade-up" style={{ marginTop: 22, display: 'flex', gap: 14, alignItems: 'center' }}>
-      <div className="ico" style={{ width: 44, height: 44, flex: '0 0 44px', borderRadius: 12, display: 'grid', placeItems: 'center', background: 'var(--glass-2)', color: 'var(--accent-2)' }}>
-        <IconSpark size={20} />
-      </div>
-      <div style={{ flex: 1 }}>
-        <b style={{ fontSize: 14.5, fontWeight: 800 }}>AI mentor — optional, off by default</b>
-        <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 2, lineHeight: 1.5 }}>
-          {ready
-            ? 'An open-ended conversation instead of a scripted exercise. Sends what you type to Anthropic under your own API key.'
-            : 'If you want to talk instead of following a script, you can connect your own Anthropic API key in Settings. It stays off until you do, and what you type is sent to Anthropic when it is on.'}
-        </div>
-      </div>
-      {ready
-        ? <button className="btn btn-primary btn-sm" onClick={onOpen}>Open</button>
-        : <button className="btn btn-ghost btn-sm" onClick={onSetup}>Set up</button>}
-    </div>
+    <SectionCard
+      title="AI mentor"
+      sub={ready
+        ? `An open conversation instead of a script. Uses your own ${providerName || 'provider'} key.`
+        : 'Optional, and off until you connect your own API key.'}
+      info="This one is an AI, so unlike the exercises above it does send what you type — to whichever provider you choose, under your own key. It has no ability to change any setting in this app and cannot help weaken the filter. Nothing is saved: closing the page clears the conversation."
+      style={{ marginTop: 22 }}>
+      <Setting
+        icon={IconSpark}
+        title="Talk it through"
+        desc={ready ? `Connected — ${providerName || 'your provider'}` : 'Not set up yet'}
+        tone={ready ? 'ok' : undefined}>
+        {ready
+          ? <button className="btn btn-primary btn-sm" onClick={onOpen}>Open</button>
+          : <button className="btn btn-ghost btn-sm" onClick={onSetup}>Set up</button>}
+      </Setting>
+    </SectionCard>
   );
 }
 
@@ -549,30 +553,28 @@ function MentorPage({ s, PP, go }) {
     <div className="page mentor-page" style={{ maxWidth: 1040 }}>
       <div className="page-head fade-up">
         <div className="eyebrow">Recovery Program</div>
-        <h1 className="page-title">Guided exercises, <em style={{ fontFamily: 'Manrope' }}>at your own pace</em></h1>
+        <h1 className="page-title">Guided exercises, <em>at your own pace</em></h1>
         <p className="page-sub">
-          A small library of scripted CBT/ACT exercises for the hard moments — riding out an
-          urge, recovering from a slip, understanding the habit, and planning ahead. Pick one
-          below. There's an optional AI mentor at the bottom if you'd rather talk than follow
-          a script; it's off until you set it up.
+          Scripted exercises for the hard moments. Pick one below.
         </p>
       </div>
 
-      <div className="card fade-up" style={{
-        marginBottom: 22, display: 'flex', gap: 14, alignItems: 'center',
-        background: 'linear-gradient(120deg, color-mix(in oklab, var(--accent) 14%, transparent), color-mix(in oklab, var(--accent-2) 10%, transparent))',
-      }}>
-        <div className="ico" style={{ width: 44, height: 44, flex: '0 0 44px', borderRadius: 12, display: 'grid', placeItems: 'center', background: 'var(--bg-1)', color: 'var(--accent)' }}>
-          <IconShield size={20} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <b style={{ fontSize: 14.5, fontWeight: 800 }}>These exercises are scripted. Nothing you write in them leaves this device.</b>
-          <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 2, lineHeight: 1.5 }}>
-            No AI, no persona, no chatbot pretending to be a person on the other end — every
-            word below was written in advance, and your answers stay on this machine. The AI
-            mentor further down is a separate, optional thing and says so before it sends
-            anything anywhere.
-          </div>
+      {/* The old version of this card overclaimed. It announced "No AI, no
+          persona, no chatbot" as a property of the PAGE, then an AI mentor sat
+          directly underneath it — so the reassurance read as either a lie or a
+          bait-and-switch, which is corrosive on exactly the page that most
+          needs to be trusted. The promise is real but narrower than it was
+          stated: it is about the exercises, not the page. Saying so precisely
+          costs nothing and survives having the mentor below it. */}
+      <div className="privacy-note fade-up">
+        <div className="privacy-note-ico"><IconShield size={20} /></div>
+        <div>
+          <b>The exercises below are scripted, and your answers never leave this device.</b>
+          <span>
+            Every word in them was written in advance — nothing is generated, and nothing you
+            type is sent anywhere. The optional AI mentor at the bottom of this page is a
+            separate thing that works differently, and it says so before it sends anything.
+          </span>
         </div>
       </div>
 

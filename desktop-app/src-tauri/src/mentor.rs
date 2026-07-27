@@ -11,9 +11,15 @@
 //!
 //! So this is not a change to that page. It is a second, separate surface
 //! that is off until the user turns it on, states plainly that it sends what
-//! they type to Anthropic under their own key, and never claims to be a
-//! person. The scripted exercises keep their promise; this one makes a
+//! they type to the provider they chose under their own key, and never claims
+//! to be a person. The scripted exercises keep their promise; this one makes a
 //! different, narrower promise and keeps that.
+//!
+//! The provider is the user's choice (see [`PROVIDERS`]) — Anthropic, OpenAI,
+//! Google, OpenRouter, Groq, Mistral, or a custom/local OpenAI-compatible
+//! server. Only the HTTP call varies; all four layers below apply identically
+//! whichever one is selected, so choosing a provider can never widen what the
+//! mentor is able to do.
 //!
 //! # "Never negotiates about disabling protections"
 //!
@@ -52,8 +58,125 @@ use std::time::Duration;
 
 use oathlight_core::{lists, matching};
 
-/// Anthropic Messages API. The only network endpoint this module talks to.
-const API_URL: &str = "https://api.anthropic.com/v1/messages";
+// ============================================================================
+// Providers
+// ============================================================================
+//
+// The mentor used to be Anthropic-only: one hardcoded URL, one wire format, and
+// a settings field named `api_key` that could only ever mean an Anthropic key.
+// "Use your own key" is a much weaker promise when it silently means "from this
+// one company", so the provider is now the user's choice.
+//
+// Only the HTTP call varies. All four safety layers are provider-independent —
+// layer 1 (no tools) is structural, layer 2 (`weakening_intent`) runs before any
+// network call, layer 3 (`guard_reply`) runs on the returned text whatever
+// produced it, and layer 4 (the prompt) is sent to every provider. Adding a
+// provider therefore cannot widen the mentor's capabilities.
+//
+// Two wire formats cover the field: Anthropic's Messages API, and OpenAI's
+// chat-completions shape, which is the de-facto standard that OpenAI, Google's
+// compat endpoint, OpenRouter, Groq, Mistral, Ollama, LM Studio and vLLM all
+// speak. `Custom` is the escape hatch for anything else OpenAI-compatible,
+// including a local model, where the user supplies the base URL.
+
+/// The request/response shape a provider speaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wire {
+    /// `POST {base}/v1/messages`, `x-api-key` + `anthropic-version`, top-level
+    /// `system`, content as a block array.
+    Anthropic,
+    /// `POST {base}/chat/completions`, `Authorization: Bearer`, system prompt
+    /// as the first message, content as a plain string.
+    OpenAi,
+}
+
+/// A selectable provider. `base_url` is the API root the wire format is
+/// appended to; for `custom` it is supplied by the user instead.
+#[derive(Debug, Clone, Copy)]
+pub struct Provider {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub wire: Wire,
+    pub base_url: &'static str,
+    pub default_model: &'static str,
+    /// Where the user gets a key. Shown in the UI; never fetched by the app.
+    pub keys_url: &'static str,
+}
+
+/// Every provider offered in Settings. Ordered as the picker shows them.
+pub const PROVIDERS: &[Provider] = &[
+    Provider {
+        id: "anthropic",
+        name: "Anthropic (Claude)",
+        wire: Wire::Anthropic,
+        base_url: "https://api.anthropic.com",
+        default_model: "claude-opus-5",
+        keys_url: "https://console.anthropic.com/settings/keys",
+    },
+    Provider {
+        id: "openai",
+        name: "OpenAI",
+        wire: Wire::OpenAi,
+        base_url: "https://api.openai.com/v1",
+        default_model: "gpt-5.1",
+        keys_url: "https://platform.openai.com/api-keys",
+    },
+    Provider {
+        id: "google",
+        name: "Google (Gemini)",
+        wire: Wire::OpenAi,
+        base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+        default_model: "gemini-2.5-pro",
+        keys_url: "https://aistudio.google.com/apikey",
+    },
+    Provider {
+        id: "openrouter",
+        name: "OpenRouter",
+        wire: Wire::OpenAi,
+        base_url: "https://openrouter.ai/api/v1",
+        default_model: "anthropic/claude-opus-4.5",
+        keys_url: "https://openrouter.ai/keys",
+    },
+    Provider {
+        id: "groq",
+        name: "Groq",
+        wire: Wire::OpenAi,
+        base_url: "https://api.groq.com/openai/v1",
+        default_model: "llama-3.3-70b-versatile",
+        keys_url: "https://console.groq.com/keys",
+    },
+    Provider {
+        id: "mistral",
+        name: "Mistral",
+        wire: Wire::OpenAi,
+        base_url: "https://api.mistral.ai/v1",
+        default_model: "mistral-large-latest",
+        keys_url: "https://console.mistral.ai/api-keys",
+    },
+    Provider {
+        id: "custom",
+        name: "Custom / local",
+        wire: Wire::OpenAi,
+        // Supplied by the user. A local server (Ollama, LM Studio, vLLM) is the
+        // main case, and it needs no key at all — see `send`.
+        base_url: "",
+        default_model: "",
+        keys_url: "",
+    },
+];
+
+/// Look up a provider by id, falling back to Anthropic — which is also what an
+/// empty id means, so profiles written before the mentor went multi-provider
+/// keep working untouched.
+pub fn provider_by_id(id: &str) -> &'static Provider {
+    let id = id.trim();
+    if id.is_empty() {
+        return &PROVIDERS[0];
+    }
+    PROVIDERS.iter().find(|p| p.id == id).unwrap_or(&PROVIDERS[0])
+}
+
+/// Anthropic Messages API version header.
 const API_VERSION: &str = "2023-06-01";
 
 /// Server-side refusal fallbacks. Claude Opus 5's safety classifiers can
@@ -63,9 +186,8 @@ const API_VERSION: &str = "2023-06-01";
 /// category rather than us pinning a model we would then have to maintain.
 const BETA_FALLBACKS: &str = "server-side-fallback-2026-07-01";
 
-/// Default model. Overridable in settings so a user on a tighter budget can
-/// point this at a cheaper model without a rebuild.
-pub const DEFAULT_MODEL: &str = "claude-opus-5";
+// The per-provider default model now lives on each `Provider` above, so a
+// single global DEFAULT_MODEL would only ever be right for one of them.
 
 /// Cap on the reply. This covers thinking *and* visible text — thinking is on
 /// by default on Opus 5 — so it is sized well above what a few short
@@ -324,7 +446,13 @@ pub struct MentorReply {
 /// Ordering matters and is not an accident — the pre-filter runs before the
 /// key is even read, so a weakening request costs nothing and reveals
 /// nothing.
-pub fn send(api_key: &str, model: &str, history: &[Turn]) -> Result<MentorReply, String> {
+pub fn send(
+    provider_id: &str,
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    history: &[Turn],
+) -> Result<MentorReply, String> {
     let last_user = history
         .iter()
         .rev()
@@ -338,7 +466,8 @@ pub fn send(api_key: &str, model: &str, history: &[Turn]) -> Result<MentorReply,
         return Err(format!("message is too long (limit {MAX_MESSAGE_CHARS} characters)"));
     }
 
-    // Layer 2 — before the network, before the key.
+    // Layer 2 — before the network, before the key, and before the provider is
+    // even resolved. A weakening request costs nothing and reveals nothing.
     if weakening_intent(&last_user.text) {
         return Ok(MentorReply {
             text: WEAKENING_REPLY.to_string(),
@@ -347,7 +476,18 @@ pub fn send(api_key: &str, model: &str, history: &[Turn]) -> Result<MentorReply,
         });
     }
 
-    if api_key.trim().is_empty() {
+    let provider = provider_by_id(provider_id);
+
+    // A local server (Ollama/LM Studio/vLLM) legitimately has no key, so the
+    // key is only mandatory for the hosted providers. `custom` instead requires
+    // a base URL, which is the thing it cannot work without.
+    let key = api_key.trim();
+    let base = if provider.id == "custom" { base_url.trim() } else { provider.base_url };
+    if provider.id == "custom" {
+        if base.is_empty() {
+            return Err("no server URL set for the custom provider".to_string());
+        }
+    } else if key.is_empty() {
         return Err("no API key set".to_string());
     }
 
@@ -361,42 +501,47 @@ pub fn send(api_key: &str, model: &str, history: &[Turn]) -> Result<MentorReply,
         return Err("nothing to send".to_string());
     }
 
-    let model = if model.trim().is_empty() { DEFAULT_MODEL } else { model.trim() };
-
-    // No `tools` key, and there never will be one — see layer 1. `thinking`
-    // is left at its default (on, adaptive) because disabling it on Opus 5
-    // has known failure modes; `effort: low` is what keeps a short chat turn
-    // cheap and quick instead.
-    let body = serde_json::json!({
-        "model": model,
-        "max_tokens": MAX_TOKENS,
-        "system": SYSTEM_PROMPT,
-        "messages": messages,
-        "output_config": { "effort": "low" },
-        "fallbacks": "default",
-    });
+    let model = match (model.trim(), provider.default_model) {
+        ("", "") => return Err("no model set — the custom provider needs one".to_string()),
+        ("", d) => d,
+        (m, _) => m,
+    };
 
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(CONNECT_TIMEOUT)
         .timeout_read(READ_TIMEOUT)
         .build();
 
-    // `send_string` rather than `send_json`: the latter lives behind ureq's
-    // `json` feature, which the workspace does not enable (ota.rs only ever
-    // GETs bytes). Serializing here costs one allocation and keeps the
-    // dependency surface exactly as it was — the explicit content-type header
-    // above is what makes it a JSON request either way.
-    let payload = serde_json::to_string(&body).map_err(|e| format!("could not build the request: {e}"))?;
+    let (text, served_by) = match provider.wire {
+        Wire::Anthropic => call_anthropic(&agent, base, key, model, &messages)?,
+        Wire::OpenAi => call_openai(&agent, base, key, model, &messages)?,
+    };
 
-    let resp = agent
-        .post(API_URL)
-        .set("x-api-key", api_key.trim())
-        .set("anthropic-version", API_VERSION)
-        .set("anthropic-beta", BETA_FALLBACKS)
-        .set("content-type", "application/json")
-        .send_string(&payload)
-        .map_err(describe_error)?;
+    // A refusal short-circuits with its own message rather than falling into
+    // the guard, which would report it as a withheld reply.
+    if text.is_empty() && served_by.is_empty() {
+        return Ok(MentorReply {
+            text: "The model declined to answer that one. Rephrasing usually helps — \
+                   and if it doesn't, the guided exercises don't involve a model at all."
+                .to_string(),
+            blocked_locally: true,
+            model: String::new(),
+        });
+    }
 
+    // Layer 3.
+    match guard_reply(&text) {
+        Ok(clean) => Ok(MentorReply { text: clean, blocked_locally: false, model: served_by }),
+        Err(fail) => Ok(MentorReply {
+            text: fail.message().to_string(),
+            blocked_locally: true,
+            model: String::new(),
+        }),
+    }
+}
+
+/// Read and size-cap a response body, then parse it as JSON.
+fn read_json(resp: ureq::Response) -> Result<serde_json::Value, String> {
     let mut raw = Vec::new();
     resp.into_reader()
         .take(MAX_RESPONSE_BYTES + 1)
@@ -405,21 +550,54 @@ pub fn send(api_key: &str, model: &str, history: &[Turn]) -> Result<MentorReply,
     if raw.len() as u64 > MAX_RESPONSE_BYTES {
         return Err("the reply was implausibly large and was discarded".to_string());
     }
+    serde_json::from_slice(&raw).map_err(|e| format!("could not parse the reply: {e}"))
+}
 
-    let json: serde_json::Value =
-        serde_json::from_slice(&raw).map_err(|e| format!("could not parse the reply: {e}"))?;
+/// Anthropic Messages API. Returns `(text, served_by_model)`; an empty pair
+/// signals a classifier refusal, which `send` renders as its own message.
+///
+/// No `tools` key, and there never will be one — see layer 1. `thinking` is
+/// left at its default (on, adaptive on Opus 5) because disabling it has known
+/// failure modes; `effort: low` is what keeps a short chat turn cheap instead.
+fn call_anthropic(
+    agent: &ureq::Agent,
+    base: &str,
+    api_key: &str,
+    model: &str,
+    messages: &[serde_json::Value],
+) -> Result<(String, String), String> {
+    let body = serde_json::json!({
+        "model": model,
+        "max_tokens": MAX_TOKENS,
+        "system": SYSTEM_PROMPT,
+        "messages": messages,
+        "output_config": { "effort": "low" },
+        "fallbacks": "default",
+    });
+    // `send_string` rather than `send_json`: the latter lives behind ureq's
+    // `json` feature, which the workspace does not enable (ota.rs only ever
+    // GETs bytes). Serializing here costs one allocation and keeps the
+    // dependency surface exactly as it was — the explicit content-type header
+    // is what makes it a JSON request either way.
+    let payload =
+        serde_json::to_string(&body).map_err(|e| format!("could not build the request: {e}"))?;
+
+    let resp = agent
+        .post(&format!("{}/v1/messages", base.trim_end_matches('/')))
+        .set("x-api-key", api_key)
+        .set("anthropic-version", API_VERSION)
+        .set("anthropic-beta", BETA_FALLBACKS)
+        .set("content-type", "application/json")
+        .send_string(&payload)
+        .map_err(describe_error)?;
+
+    let json = read_json(resp)?;
 
     // Check the stop reason BEFORE reading content: a classifier refusal
     // returns HTTP 200 with empty or partial content, so code that indexes
     // straight into content[0] breaks here rather than reporting honestly.
     if json.get("stop_reason").and_then(|v| v.as_str()) == Some("refusal") {
-        return Ok(MentorReply {
-            text: "The model declined to answer that one. Rephrasing usually helps — \
-                   and if it doesn't, the guided exercises don't involve a model at all."
-                .to_string(),
-            blocked_locally: true,
-            model: String::new(),
-        });
+        return Ok((String::new(), String::new()));
     }
 
     // Concatenate every `text` block. Blocks of other types (`thinking`,
@@ -443,16 +621,73 @@ pub fn send(api_key: &str, model: &str, history: &[Turn]) -> Result<MentorReply,
         .unwrap_or_default();
 
     let served_by = json.get("model").and_then(|m| m.as_str()).unwrap_or(model).to_string();
+    Ok((text, served_by))
+}
 
-    // Layer 3.
-    match guard_reply(&text) {
-        Ok(clean) => Ok(MentorReply { text: clean, blocked_locally: false, model: served_by }),
-        Err(fail) => Ok(MentorReply {
-            text: fail.message().to_string(),
-            blocked_locally: true,
-            model: String::new(),
-        }),
+/// OpenAI-compatible chat-completions. Covers OpenAI, Google's compat endpoint,
+/// OpenRouter, Groq, Mistral and any local server speaking the same shape.
+///
+/// Differences from the Anthropic call that actually matter: the system prompt
+/// is the first message rather than a top-level field, `max_tokens` is
+/// `max_completion_tokens` on current OpenAI models, and the reply is a plain
+/// string at `choices[0].message.content`. No `tools` key here either.
+fn call_openai(
+    agent: &ureq::Agent,
+    base: &str,
+    api_key: &str,
+    model: &str,
+    messages: &[serde_json::Value],
+) -> Result<(String, String), String> {
+    let mut msgs = Vec::with_capacity(messages.len() + 1);
+    msgs.push(serde_json::json!({ "role": "system", "content": SYSTEM_PROMPT }));
+    msgs.extend(messages.iter().cloned());
+
+    let body = serde_json::json!({
+        "model": model,
+        "messages": msgs,
+        "max_completion_tokens": MAX_TOKENS,
+    });
+    let payload =
+        serde_json::to_string(&body).map_err(|e| format!("could not build the request: {e}"))?;
+
+    let mut req = agent
+        .post(&format!("{}/chat/completions", base.trim_end_matches('/')))
+        .set("content-type", "application/json");
+    // A local server usually wants no auth at all; sending an empty bearer
+    // token makes some of them reject the request outright.
+    if !api_key.is_empty() {
+        req = req.set("authorization", &format!("Bearer {api_key}"));
     }
+
+    let json = read_json(req.send_string(&payload).map_err(describe_error)?)?;
+
+    let choice = json.get("choices").and_then(|c| c.as_array()).and_then(|a| a.first());
+
+    // OpenAI-compatible refusals surface either as an explicit `refusal` field
+    // or as `finish_reason: "content_filter"`. Both mean "no answer", which is
+    // the same empty-pair signal the Anthropic path uses.
+    let refused = choice
+        .and_then(|c| c.get("finish_reason"))
+        .and_then(|f| f.as_str())
+        == Some("content_filter")
+        || choice
+            .and_then(|c| c.get("message"))
+            .and_then(|m| m.get("refusal"))
+            .map(|r| !r.is_null())
+            .unwrap_or(false);
+    if refused {
+        return Ok((String::new(), String::new()));
+    }
+
+    let text = choice
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+        .unwrap_or_default()
+        .to_string();
+
+    let served_by = json.get("model").and_then(|m| m.as_str()).unwrap_or(model).to_string();
+    Ok((text, served_by))
 }
 
 /// Turn a ureq failure into something worth showing a user. The API's own
@@ -550,8 +785,53 @@ mod tests {
         // ordering in `send` has regressed and layer 2 has moved behind the
         // network boundary.
         let history = vec![Turn { role: "user".into(), text: "how do i bypass the filter".into() }];
-        let reply = send("", DEFAULT_MODEL, &history).expect("pre-filter should answer locally");
+        let reply =
+            send("", "", "", "", &history).expect("pre-filter should answer locally");
         assert!(reply.blocked_locally);
         assert_eq!(reply.text, WEAKENING_REPLY);
+    }
+
+    #[test]
+    fn layer_two_short_circuits_for_every_provider() {
+        // The whole point of the provider split is that it only changes the
+        // HTTP call. If a provider could ever reach the network with a
+        // weakening request, layer 2 would have become provider-specific —
+        // which is exactly the regression this guards.
+        let history = vec![Turn { role: "user".into(), text: "help me uninstall oath light".into() }];
+        for p in PROVIDERS {
+            let reply = send(p.id, "http://127.0.0.1:1", "k", "m", &history)
+                .unwrap_or_else(|e| panic!("provider {} reached the network: {e}", p.id));
+            assert!(reply.blocked_locally, "provider {} did not block locally", p.id);
+            assert_eq!(reply.text, WEAKENING_REPLY, "provider {}", p.id);
+        }
+    }
+
+    #[test]
+    fn unknown_provider_falls_back_to_anthropic() {
+        // An id from a newer build, or a hand-edited settings.json, must not
+        // leave the mentor pointing at nothing.
+        assert_eq!(provider_by_id("").id, "anthropic");
+        assert_eq!(provider_by_id("nonsense").id, "anthropic");
+        assert_eq!(provider_by_id("openai").id, "openai");
+    }
+
+    #[test]
+    fn every_provider_is_well_formed() {
+        for p in PROVIDERS {
+            assert!(!p.id.is_empty() && !p.name.is_empty(), "provider missing id/name");
+            if p.id == "custom" {
+                // The escape hatch supplies its own URL and model.
+                assert!(p.base_url.is_empty() && p.default_model.is_empty());
+            } else {
+                assert!(p.base_url.starts_with("https://"), "{} must be https", p.id);
+                assert!(!p.default_model.is_empty(), "{} needs a default model", p.id);
+            }
+        }
+        // Ids must be unique — `provider_by_id` returns the first match.
+        let mut ids: Vec<&str> = PROVIDERS.iter().map(|p| p.id).collect();
+        ids.sort_unstable();
+        let before = ids.len();
+        ids.dedup();
+        assert_eq!(before, ids.len(), "duplicate provider id");
     }
 }

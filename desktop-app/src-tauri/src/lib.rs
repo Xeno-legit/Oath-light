@@ -2283,13 +2283,48 @@ struct MentorConfigView {
     enabled: bool,
     has_key: bool,
     model: String,
+    /// Selected provider id (always resolved — never the empty string, so the
+    /// renderer's picker has something concrete to select).
+    provider: String,
+    base_url: String,
+    /// The full provider catalog, so Settings builds its picker from the same
+    /// source of truth the request path uses rather than a duplicated list.
+    providers: Vec<MentorProviderView>,
+}
+
+/// One selectable provider, as the renderer needs it.
+#[derive(serde::Serialize)]
+struct MentorProviderView {
+    id: String,
+    name: String,
+    default_model: String,
+    keys_url: String,
+    /// True for the custom/local option, which needs a URL instead of a key.
+    needs_url: bool,
 }
 
 fn mentor_view(m: &settings::MentorV1) -> MentorConfigView {
+    let p = mentor::provider_by_id(&m.provider);
     MentorConfigView {
         enabled: m.enabled,
         has_key: !m.api_key.trim().is_empty(),
-        model: if m.model.trim().is_empty() { mentor::DEFAULT_MODEL.to_string() } else { m.model.clone() },
+        model: if m.model.trim().is_empty() {
+            p.default_model.to_string()
+        } else {
+            m.model.clone()
+        },
+        provider: p.id.to_string(),
+        base_url: m.base_url.clone(),
+        providers: mentor::PROVIDERS
+            .iter()
+            .map(|p| MentorProviderView {
+                id: p.id.to_string(),
+                name: p.name.to_string(),
+                default_model: p.default_model.to_string(),
+                keys_url: p.keys_url.to_string(),
+                needs_url: p.base_url.is_empty(),
+            })
+            .collect(),
     }
 }
 
@@ -2312,6 +2347,8 @@ fn set_mentor_config(
     enabled: bool,
     api_key: Option<String>,
     model: Option<String>,
+    provider: Option<String>,
+    base_url: Option<String>,
 ) -> MentorConfigView {
     settings.update(|s| {
         s.mentor.enabled = enabled;
@@ -2321,9 +2358,32 @@ fn set_mentor_config(
         if let Some(m) = model {
             s.mentor.model = m.trim().to_string();
         }
-        // Enabling without a key would leave a surface that looks armed and
-        // fails on first use. Treat it as still-off until a key exists.
-        if s.mentor.api_key.trim().is_empty() {
+        if let Some(b) = base_url {
+            s.mentor.base_url = b.trim().to_string();
+        }
+        if let Some(p) = provider {
+            // Resolve through the catalog so an unknown id can never be
+            // persisted — it would leave the mentor pointing at nothing.
+            let resolved = mentor::provider_by_id(&p);
+            if resolved.id != s.mentor.provider {
+                // Switching provider invalidates the stored model: a model name
+                // is provider-specific, and carrying e.g. a Claude id over to
+                // OpenAI produces a confusing 404 on first use. Empty means
+                // "use the new provider's default".
+                s.mentor.model = String::new();
+            }
+            s.mentor.provider = resolved.id.to_string();
+        }
+        // Enabling without the credential that provider actually needs would
+        // leave a surface that looks armed and fails on first use. The custom /
+        // local option needs a URL rather than a key.
+        let p = mentor::provider_by_id(&s.mentor.provider);
+        let unusable = if p.base_url.is_empty() {
+            s.mentor.base_url.trim().is_empty()
+        } else {
+            s.mentor.api_key.trim().is_empty()
+        };
+        if unusable {
             s.mentor.enabled = false;
         }
     });
@@ -2346,9 +2406,11 @@ async fn mentor_send(
     if !cfg.enabled {
         return Err("The AI mentor is turned off.".to_string());
     }
-    tauri::async_runtime::spawn_blocking(move || mentor::send(&cfg.api_key, &cfg.model, &history))
-        .await
-        .map_err(|e| format!("mentor request failed to run: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        mentor::send(&cfg.provider, &cfg.base_url, &cfg.api_key, &cfg.model, &history)
+    })
+    .await
+    .map_err(|e| format!("mentor request failed to run: {e}"))?
 }
 
 /// Add a process image name to the blocked-process list. A strengthening —

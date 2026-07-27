@@ -75,16 +75,26 @@
     // AI mentor (optional, opt-in — see src-tauri/src/mentor.rs). The API key
     // lives in Rust and never crosses this bridge: `getMentorConfig` reports
     // `has_key`, never the key, and `setMentorConfig` is write-only for it.
-    // Resolves to { enabled, has_key, model }.
-    getMentorConfig() { return invoke('get_mentor_config').catch(() => ({ enabled: false, has_key: false, model: '' })); },
-    // `apiKey`/`model` are tri-state: omit (or pass null) to leave the stored
-    // value alone, pass '' to clear it. That's what lets the enable toggle
-    // work without the renderer ever holding the key.
-    setMentorConfig({ enabled, apiKey, model }) {
+    // Resolves to { enabled, has_key, model, provider, base_url, providers },
+    // where `providers` is the catalog the Settings picker is built from —
+    // sourced from Rust so the UI can't offer a provider the request path
+    // doesn't know how to talk to.
+    getMentorConfig() {
+      return invoke('get_mentor_config').catch(() => ({
+        enabled: false, has_key: false, model: '',
+        provider: 'anthropic', base_url: '', providers: [],
+      }));
+    },
+    // `apiKey`/`model`/`provider`/`baseUrl` are tri-state: omit (or pass null)
+    // to leave the stored value alone, pass '' to clear it. That's what lets
+    // the enable toggle work without the renderer ever holding the key.
+    setMentorConfig({ enabled, apiKey, model, provider, baseUrl }) {
       return invoke('set_mentor_config', {
         enabled: !!enabled,
         apiKey: apiKey === undefined ? null : apiKey,
         model: model === undefined ? null : model,
+        provider: provider === undefined ? null : provider,
+        baseUrl: baseUrl === undefined ? null : baseUrl,
       });
     },
     // Send the conversation, get one reply. `history` is [{role, text}, …]

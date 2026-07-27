@@ -1060,6 +1060,8 @@ function LanguageCard({ s, PP }) {
 function AiMentorCard() {
   const [cfg, setCfg] = React.useState(null);
   const [key, setKey] = React.useState('');
+  const [url, setUrl] = React.useState('');
+  const [model, setModel] = React.useState('');
   const [saving, setSaving] = React.useState(false);
   const [note, setNote] = React.useState('');
 
@@ -1067,12 +1069,24 @@ function AiMentorCard() {
 
   React.useEffect(() => {
     let alive = true;
-    if (!native) { setCfg({ enabled: false, has_key: false, model: '' }); return undefined; }
-    PPNative.getMentorConfig().then((c) => { if (alive) setCfg(c); });
+    if (!native) {
+      setCfg({ enabled: false, has_key: false, model: '', provider: 'anthropic', base_url: '', providers: [] });
+      return undefined;
+    }
+    PPNative.getMentorConfig().then((c) => { if (alive) { setCfg(c); setUrl(c.base_url || ''); } });
     return () => { alive = false; };
   }, [native]);
 
   if (!cfg) return null;
+
+  // The catalog comes from Rust (mentor::PROVIDERS) rather than being retyped
+  // here, so the picker can't drift from what the request path can actually
+  // talk to.
+  const providers = cfg.providers || [];
+  const current = providers.find((p) => p.id === cfg.provider) || providers[0] || {};
+  const needsUrl = !!current.needs_url;
+  // A local server needs a URL and usually no key; a hosted one needs a key.
+  const usable = needsUrl ? !!(cfg.base_url || '').trim() : cfg.has_key;
 
   async function apply(patch) {
     setSaving(true);
@@ -1080,14 +1094,21 @@ function AiMentorCard() {
     try {
       const next = await PPNative.setMentorConfig({
         enabled: patch.enabled !== undefined ? patch.enabled : cfg.enabled,
-        // `undefined` means "leave the stored key alone" — that's what lets
+        // `undefined` means "leave the stored value alone" — that's what lets
         // the toggle work without the renderer ever holding the key.
         apiKey: patch.apiKey,
+        provider: patch.provider,
+        baseUrl: patch.baseUrl,
+        model: patch.model,
       });
       setCfg(next);
+      setUrl(next.base_url || '');
       if (patch.apiKey !== undefined) setKey('');
+      if (patch.model !== undefined) setModel('');
       if (patch.apiKey === '') setNote('Key removed.');
       else if (patch.apiKey) setNote('Key saved.');
+      else if (patch.provider) setNote(`Switched to ${(providers.find((p) => p.id === patch.provider) || {}).name || patch.provider}.`);
+      else if (patch.model) setNote('Model saved.');
     } catch (e) {
       setNote(String(e && e.message ? e.message : e));
     } finally {
@@ -1100,37 +1121,75 @@ function AiMentorCard() {
       <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>AI mentor</div>
       <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.6 }}>
         An optional open-ended conversation, separate from the guided exercises. It is
-        <b> off unless you turn it on</b>, and when it is on, what you type is sent to
-        Anthropic's API using your own key and billed to your own account. It cannot change
-        any setting in this app and will not help you weaken the filter — that's enforced
-        here, not just asked for in a prompt. The guided exercises are unaffected and still
-        send nothing anywhere.
+        <b> off unless you turn it on</b>, and when it is on, what you type is sent to the
+        provider you pick below using your own key, billed to your own account. It cannot
+        change any setting in this app and will not help you weaken the filter — that's
+        enforced here, not just asked for in a prompt. The guided exercises are unaffected
+        and still send nothing anywhere.
       </div>
 
-      <div className="setting">
+      {/* Provider choice. This used to be Anthropic-only, hardcoded from the
+          settings field name all the way down to the request builder — which
+          made "bring your own key" mean "bring your own Anthropic key". */}
+      <label className="field" style={{ maxWidth: 340 }}>
+        <span>Provider</span>
+        <select
+          className="input"
+          value={cfg.provider}
+          disabled={saving}
+          onChange={(e) => apply({ provider: e.target.value })}>
+          {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </label>
+
+      <div className="setting" style={{ marginTop: 6 }}>
         <div className="ico"><IconSpark size={20} /></div>
         <div className="txt">
           <b>Enable the AI mentor</b>
-          <span>{cfg.has_key ? `Using ${cfg.model}.` : 'Needs an API key below before it can be turned on.'}</span>
+          <span>{usable
+            ? `Using ${cfg.model || 'the provider default'}.`
+            : needsUrl ? 'Needs a server URL below before it can be turned on.'
+                       : 'Needs an API key below before it can be turned on.'}</span>
         </div>
         <button
           className={'switch ' + (cfg.enabled ? 'on' : '')}
-          disabled={saving || !cfg.has_key}
+          disabled={saving || !usable}
           aria-label="Enable the AI mentor"
           onClick={() => apply({ enabled: !cfg.enabled })}
         />
       </div>
 
+      {/* Custom/local: a server URL replaces the key. Ollama, LM Studio and
+          vLLM all speak the OpenAI shape and usually want no auth at all. */}
+      {needsUrl &&
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>Server URL</div>
+          <div className="row" style={{ gap: 8 }}>
+            <input
+              className="input" style={{ flex: 1 }} type="url"
+              placeholder="http://localhost:11434/v1"
+              value={url} autoComplete="off"
+              onChange={(e) => setUrl(e.target.value)} />
+            <button className="btn btn-primary btn-sm" disabled={saving || !url.trim()}
+                    onClick={() => apply({ baseUrl: url.trim() })}>Save</button>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8, lineHeight: 1.55 }}>
+            Any OpenAI-compatible endpoint — a local Ollama, LM Studio or vLLM server, or a
+            gateway of your own. A local model sends nothing off this machine at all.
+          </div>
+        </div>}
+
       <div style={{ marginTop: 12 }}>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
-          Anthropic API key {cfg.has_key && <span style={{ color: 'var(--muted)', fontWeight: 600 }}>· one is saved</span>}
+          API key{needsUrl && <span style={{ color: 'var(--muted)', fontWeight: 600 }}> · optional for a local server</span>}
+          {cfg.has_key && <span style={{ color: 'var(--muted)', fontWeight: 600 }}> · one is saved</span>}
         </div>
         <div className="row" style={{ gap: 8 }}>
           <input
             className="input"
             type="password"
             style={{ flex: 1 }}
-            placeholder={cfg.has_key ? 'Enter a new key to replace the saved one' : 'sk-ant-…'}
+            placeholder={cfg.has_key ? 'Enter a new key to replace the saved one' : 'Paste your key'}
             value={key}
             autoComplete="off"
             onChange={(e) => setKey(e.target.value)}
@@ -1144,13 +1203,32 @@ function AiMentorCard() {
             </button>}
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8, lineHeight: 1.55 }}>
-          Get a key at console.anthropic.com. It is stored in plaintext in this app's settings
-          file on this machine — the same as the email password for trusted-contact
-          notifications. It is never sent to the browser extension and never leaves your
-          device except as the authorization header on your own API requests.
+          {current.keys_url ? <>Get a key at {current.keys_url.replace(/^https?:\/\//, '')}. </> : null}
+          It is stored in plaintext in this app's settings file on this machine — the same as
+          the email password for trusted-contact notifications. It is never sent to the
+          browser extension and never leaves your device except as the authorization header
+          on your own API requests.
         </div>
-        {note && <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginTop: 8 }}>{note}</div>}
       </div>
+
+      {/* Model override. Cleared automatically on a provider switch, because a
+          model name from one provider is meaningless to another. */}
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+          Model <span style={{ color: 'var(--muted)', fontWeight: 600 }}>· optional</span>
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          <input
+            className="input" style={{ flex: 1 }}
+            placeholder={cfg.model || current.default_model || 'Provider default'}
+            value={model} autoComplete="off"
+            onChange={(e) => setModel(e.target.value)} />
+          <button className="btn btn-ghost btn-sm" disabled={saving || !model.trim()}
+                  onClick={() => apply({ model: model.trim() })}>Save</button>
+        </div>
+      </div>
+
+      {note && <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginTop: 10 }}>{note}</div>}
     </div>
   );
 }

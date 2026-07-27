@@ -158,16 +158,33 @@ pub struct MentorV1 {
     /// Off until explicitly enabled. Nothing is sent anywhere while false.
     #[serde(default = "default_false")]
     pub enabled: bool,
-    /// The user's own Anthropic API key, plaintext, same as the SMTP
-    /// app-password in `notify.rs`. Plaintext because the alternative on a
-    /// machine where the app must read it unattended is obfuscation dressed
-    /// up as encryption — the UI states this outright rather than implying a
-    /// vault that does not exist. Never sent to the renderer: `mentor_config`
-    /// reports only whether a key is present.
+    /// Which provider the key belongs to — a `mentor::PROVIDERS` id such as
+    /// `"anthropic"`, `"openai"`, `"openrouter"` or `"custom"`. Empty means the
+    /// default (Anthropic), which is what every profile written before the
+    /// mentor became multi-provider will deserialize to.
+    ///
+    /// This exists because the mentor was hardwired to one vendor: the settings
+    /// field was literally named for Anthropic and the request builder could
+    /// only speak that wire format. "Bring your own key" is a much weaker
+    /// promise if it means "bring your own key, from this one company".
+    #[serde(default)]
+    pub provider: String,
+    /// Endpoint override. Required for `provider = "custom"` (a local Ollama /
+    /// LM Studio / vLLM server, or any OpenAI-compatible gateway); ignored for
+    /// the built-in providers, which carry their own base URL.
+    #[serde(default)]
+    pub base_url: String,
+    /// The user's own API key, plaintext, same as the SMTP app-password in
+    /// `notify.rs`. Plaintext because the alternative on a machine where the
+    /// app must read it unattended is obfuscation dressed up as encryption —
+    /// the UI states this outright rather than implying a vault that does not
+    /// exist. Never sent to the renderer: `mentor_config` reports only whether
+    /// a key is present.
     #[serde(default)]
     pub api_key: String,
-    /// Empty = mentor.rs's `DEFAULT_MODEL`. Overridable so someone on a
-    /// tighter budget can point it at a cheaper model without a rebuild.
+    /// Empty = the selected provider's own default model. Overridable so
+    /// someone on a tighter budget can point it at a cheaper model without a
+    /// rebuild.
     #[serde(default)]
     pub model: String,
 }

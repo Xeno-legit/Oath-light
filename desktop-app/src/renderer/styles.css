@@ -673,6 +673,24 @@ input, textarea { font-family: inherit; }
 /* Status chips with meaning, not just colour. */
 .chip-ok { color: var(--ol-ok); border-color: color-mix(in oklab, var(--ol-ok) 40%, transparent); }
 
+/* Standing privacy/reassurance note at the top of a page. Deliberately calm
+   rather than alarm-coloured — it is stating a guarantee, not warning. */
+.privacy-note {
+  display: flex; gap: 14px; align-items: flex-start;
+  margin-bottom: 22px; padding: 16px 18px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--ol-ok) 8%, transparent);
+  border: 1px solid color-mix(in oklab, var(--ol-ok) 26%, transparent);
+}
+.privacy-note-ico {
+  width: 40px; height: 40px; flex: 0 0 40px; border-radius: 12px;
+  display: grid; place-items: center;
+  background: color-mix(in oklab, var(--ol-ok) 16%, transparent);
+  color: var(--ol-ok);
+}
+.privacy-note b { display: block; font-size: 14.5px; font-weight: 800; }
+.privacy-note span { display: block; font-size: 13px; color: var(--text-2); line-height: 1.5; margin-top: 3px; max-width: 68ch; }
+
 /* Label available to screen readers only — for controls whose visible text
    lives in a sibling element (see .strict-choice-hit). */
 .sr-only {
