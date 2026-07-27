@@ -279,6 +279,10 @@ const NativeMessagingBridge = (function () {
     const S = typeof globalThis !== 'undefined' ? globalThis.OL_STRINGS : null;
     if (!S) return;
     const s = settings && typeof settings === 'object' ? settings : {};
+    // Locale before voice: `t()` resolves locale first, then voice within it.
+    // The worker has no DOM, so there is no `dir` to apply here — direction
+    // only matters on the pages, and voice-sync.js sets it there.
+    S.setLocale(s.locale || S.defaultLocale);
     S.setVoice(s.voice || S.defaultVoice);
     S.setSeriousMode(!!s.serious);
   }

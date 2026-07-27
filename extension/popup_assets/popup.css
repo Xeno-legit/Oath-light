@@ -19,6 +19,11 @@
   --r-lg: 18px;  /* ditto */
   --r-xl: 22px;  /* ditto (coincides with --ol-radius-lg's value but a different scale tier — left explicit) */
 
+  /* Foreground for anything painted on an accent fill — see tokens.css's
+     --ol-accent-ink. Noir's dark accent is white, so a literal #fff on the
+     protection pill made its own label invisible. */
+  --accent-ink: #ffffff;
+
   --intensity: 0.85;
   --ease: var(--ol-ease-spring);     /* cubic-bezier(.22,.61,.36,1), exact match */
   --ease-soft: var(--ol-ease-standard); /* cubic-bezier(.4,0,.2,1), exact match */
@@ -121,11 +126,13 @@
 [data-style="noir"][data-theme="dark"] {
   --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1); --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
   --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
+  --accent-ink: var(--ol-accent-ink);
   --orb-a: var(--ol-accent); --orb-b: var(--ol-accent-2); --orb-c: var(--ol-accent-3);
 }
 [data-style="noir"][data-theme="light"] {
   --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1); --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
   --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
+  --accent-ink: var(--ol-accent-ink);
   --orb-a: var(--ol-accent); --orb-b: var(--ol-accent-2); --orb-c: var(--ol-accent-3);
 }
 
@@ -189,7 +196,7 @@ input { font-family: inherit; }
 }
 .bb-omni svg { width: 14px; height: 14px; flex: 0 0 14px; opacity: .8; }
 .bb-omni span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bb-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.bb-actions { display: flex; align-items: center; gap: 4px; margin-inline-start: auto; }
 .bb-ico {
   width: 32px; height: 32px; border-radius: 9px;
   display: grid; place-items: center; color: var(--muted);
@@ -207,7 +214,7 @@ input { font-family: inherit; }
 [data-theme="dark"] .bb-pp { background: rgba(255,255,255,.06); }
 .bb-pp img { width: 18px; height: 18px; display: block; }
 .bb-pp::after {
-  content: ''; position: absolute; top: -3px; right: -3px;
+  content: ''; position: absolute; top: -3px; inset-inline-end: -3px;
   width: 9px; height: 9px; border-radius: 50%;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   border: 2px solid var(--bg-0);
@@ -265,7 +272,7 @@ input { font-family: inherit; }
 .pp-name { font-size: 19px; font-weight: 800; letter-spacing: -.025em; line-height: 1; white-space: nowrap; }
 .pp-ver { font-size: 12px; color: var(--muted); font-weight: 600; margin-top: 4px; }
 .pp-settings {
-  margin-left: auto; width: 34px; height: 34px; border-radius: 10px;
+  margin-inline-start: auto; width: 34px; height: 34px; border-radius: 10px;
   display: grid; place-items: center; color: var(--muted);
   border: 1px solid transparent; transition: background .15s, color .15s, border-color .15s;
 }
@@ -290,13 +297,13 @@ input { font-family: inherit; }
 }
 .protect-knob {
   width: 26px; height: 26px; border-radius: 50%; flex: 0 0 26px;
-  background: #fff;
-  box-shadow: 0 0 0 0 rgba(255,255,255,.85), 0 2px 8px rgba(0,0,0,.22);
+  background: var(--accent-ink);
+  box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent-ink) 85%, transparent), 0 2px 8px rgba(0,0,0,.22);
   animation: knob-glow 2.4s var(--ease-soft) infinite;
 }
 @keyframes knob-glow {
-  0%, 100% { box-shadow: 0 0 6px 1px rgba(255,255,255,.5), 0 2px 8px rgba(0,0,0,.22); }
-  50%      { box-shadow: 0 0 18px 5px rgba(255,255,255,.9), 0 2px 8px rgba(0,0,0,.22); }
+  0%, 100% { box-shadow: 0 0 6px 1px color-mix(in oklab, var(--accent-ink) 50%, transparent), 0 2px 8px rgba(0,0,0,.22); }
+  50%      { box-shadow: 0 0 18px 5px color-mix(in oklab, var(--accent-ink) 90%, transparent), 0 2px 8px rgba(0,0,0,.22); }
 }
 .protect.is-off .protect-knob {
   background: color-mix(in oklab, var(--text) 22%, var(--bg-1));
@@ -305,8 +312,8 @@ input { font-family: inherit; }
 }
 .protect-label { flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; min-width: 0; }
 .protect-spacer { flex: 0 0 26px; }
-.protect-label b { font-size: 16px; font-weight: 800; letter-spacing: -.01em; color: #fff; }
-.protect-label span { font-size: 12px; font-weight: 600; color: rgba(255,255,255,.8); }
+.protect-label b { font-size: 16px; font-weight: 800; letter-spacing: -.01em; color: var(--accent-ink); }
+.protect-label span { font-size: 12px; font-weight: 600; color: color-mix(in oklab, var(--accent-ink) 80%, transparent); }
 .protect.is-off .protect-label b { color: var(--text); }
 .protect.is-off .protect-label span { color: var(--muted); }
 
@@ -346,9 +353,9 @@ input { font-family: inherit; }
 .quote-mark {
   font-family: var(--font-display); font-size: 56px; line-height: .6;
   color: color-mix(in oklab, var(--accent) 55%, transparent);
-  position: absolute; top: 16px; left: 14px; pointer-events: none;
+  position: absolute; top: 16px; inset-inline-start: 14px; pointer-events: none;
 }
-.quote-body { padding-left: 30px; }
+.quote-body { padding-inline-start: 30px; }
 .quote-text {
   font-family: var(--font-ui); font-style: normal; font-weight: 600;
   font-size: 15px; line-height: 1.45; color: var(--text);
@@ -378,7 +385,7 @@ input { font-family: inherit; }
 }
 .btn:active { transform: scale(.97); }
 .btn svg { width: 16px; height: 16px; }
-.btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; box-shadow: 0 10px 24px -12px color-mix(in oklab, var(--accent) 85%, transparent); }
+.btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--accent-ink); box-shadow: 0 10px 24px -12px color-mix(in oklab, var(--accent) 85%, transparent); }
 .btn-primary:hover { box-shadow: 0 14px 30px -12px color-mix(in oklab, var(--accent) 95%, transparent); transform: translateY(-1px); }
 .btn-primary:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; transform: none; }
 
@@ -394,7 +401,7 @@ input { font-family: inherit; }
 .blocklist-btn:hover { border-color: var(--glass-brd-strong); background: color-mix(in oklab, var(--accent) 8%, var(--glass-2)); }
 .blocklist-btn .bl-ico { width: 19px; height: 19px; flex: 0 0 19px; opacity: .9; }
 .blocklist-btn .bl-count {
-  margin-left: auto; font-size: 12px; font-weight: 700;
+  margin-inline-start: auto; font-size: 12px; font-weight: 700;
   background: color-mix(in oklab, var(--accent) 18%, transparent); color: var(--accent);
   padding: 3px 9px; border-radius: var(--ol-radius-pill);
 }
@@ -447,3 +454,40 @@ input { font-family: inherit; }
 .pp-foot.is-off .live { background: var(--muted); animation: none; }
 @keyframes livepulse { 0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent-2) 55%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
+/* ==========================================================================
+ * RTL — what logical properties can't express
+ * --------------------------------------------------------------------------
+ * Layout mirroring is already handled: the physical margin/padding/border/
+ * text-align/inset declarations in this file were converted to their logical
+ * equivalents (`margin-inline-start`, `inset-inline-end`, `text-align: start`
+ * …), which flip automatically off <html dir>. voice-sync.js sets that
+ * attribute from the active locale — never set `dir` by hand.
+ *
+ * Three things logical properties genuinely cannot cover, so they live here:
+ *
+ *   1. `transform: translateX()`. A transform is geometry, not layout — it
+ *      has no logical form and does not know about direction. The toggle
+ *      knob would slide off the wrong end without this.
+ *   2. Direction-sensitive ICONS. An arrow that means "back" points left in
+ *      English and right in Arabic. `.ico-back` / `.ico-forward` mark the
+ *      icons whose meaning is directional; a checkmark, a clock, or a
+ *      downward arrow is NOT directional and must never get these classes —
+ *      mirroring those makes them look broken, not translated.
+ *   3. Anything that must stay LTR inside RTL text: URLs, domain names,
+ *      version numbers, hashes. `.force-ltr` pins those, because a domain
+ *      rendered right-to-left is not just ugly, it is wrong — the user
+ *      cannot read back what they blocked.
+ * ========================================================================== */
+
+[dir="rtl"] .switch.on::after { transform: translateX(-19px); }
+
+/* Directional icons. Base rotation is the LTR meaning; RTL cancels or
+ * mirrors it. Applied via className, never inline, so the stylesheet can
+ * win — an inline `transform` would beat this rule. */
+.ico-back { transform: rotate(180deg); }
+[dir="rtl"] .ico-back { transform: rotate(0deg); }
+[dir="rtl"] .ico-forward { transform: rotate(180deg); }
+
+/* Latin-script data embedded in RTL prose. `unicode-bidi: isolate` stops a
+ * trailing dot or slash from being reordered into the surrounding sentence. */
+.force-ltr { direction: ltr; unicode-bidi: isolate; text-align: start; }

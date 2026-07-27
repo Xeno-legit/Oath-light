@@ -191,11 +191,11 @@ function ThemesPage({ s, PP }) {
         <button key={o.id} className={'card hover bg-card' + (d.bg === o.id ? ' sel' : '')} onClick={() => apply({ bg: o.id })}>
             <div className="row" style={{ gap: 12 }}>
               <div className="bg-card-ico"><o.icon size={20} /></div>
-              <div style={{ textAlign: 'left' }}>
+              <div style={{ textAlign: 'start' }}>
                 <b style={{ fontSize: 14.5, fontWeight: 800 }}>{o.name}</b>
                 <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>{o.desc}</div>
               </div>
-              {d.bg === o.id && <span className="style-check" style={{ marginLeft: 'auto', position: 'static' }}><IconCheck size={15} /></span>}
+              {d.bg === o.id && <span className="style-check" style={{ marginInlineStart: 'auto', position: 'static' }}><IconCheck size={15} /></span>}
             </div>
           </button>
         )}

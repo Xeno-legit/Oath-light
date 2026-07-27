@@ -1,7 +1,8 @@
-/* voice-sync.js — keeps an extension page's VOICE in lockstep with the desktop
- * app, exactly the way theme-sync.js does for the palette (UX Direction §2).
+/* voice-sync.js — keeps an extension page's VOICE and LOCALE in lockstep with
+ * the desktop app, exactly the way theme-sync.js does for the palette (UX
+ * Direction §2).
  *
- * Where the two values come from:
+ * Where the three values come from:
  *   voice   — the user's onboarding choice ('companion' | 'serious'). The
  *             renderer owns it and pushes it inside the blocking-settings
  *             object (`ppBlocking.voice`), same channel as the redirect target.
@@ -11,6 +12,12 @@
  *             as `ppBlocking.serious` and, when on, forces the hard voice
  *             regardless of `voice` — that override lives in strings.js's
  *             `t()`, not here, so every surface gets it identically.
+ *   locale   — the UI language ('en' | 'ar' | …), `ppBlocking.locale`. A
+ *             presentation preference like voice, and it rides the same push
+ *             so the extension never has to ask. Text direction is NOT a
+ *             separate setting: it is read off the locale (strings.js's
+ *             `dir()`) and written to <html dir> here, so the two can never
+ *             drift apart.
  *
  * Declarative binding: any element with `data-ol-str="some.key"` has its text
  * replaced with the active-voice string, and `data-ol-str-attr="placeholder"`
@@ -60,12 +67,29 @@
     } catch (e) { /* no DOM (shouldn't happen on a page) — ignore */ }
   }
 
+  // The other half of the locale flip. `dir` drives the CSS (styles are
+  // written with logical properties plus a `[dir="rtl"]` layer), and `lang`
+  // drives font selection, hyphenation and screen-reader pronunciation —
+  // both are set from the locale so a page can never be Arabic-in-an-LTR-
+  // layout. Set on <html> rather than <body> so it also covers anything
+  // rendered outside the body (dialogs, the scrollbar side).
+  function applyLocaleAttrs() {
+    if (!S) return;
+    try {
+      const el = document.documentElement;
+      el.setAttribute('dir', S.dir());
+      el.setAttribute('lang', S.locale().code);
+    } catch (e) { /* no DOM (shouldn't happen on a page) — ignore */ }
+  }
+
   function apply(cfg) {
     if (!S) return;
     const c = cfg || {};
+    S.setLocale(c.locale || S.defaultLocale);
     S.setVoice(c.voice || S.defaultVoice);
     S.setSeriousMode(!!c.serious);
     applySeriousAttr(!!c.serious);
+    applyLocaleAttrs();
     paint();
   }
 
@@ -73,7 +97,7 @@
     if (typeof chrome === 'undefined' || !chrome.storage) { cb({}); return; }
     chrome.storage.local.get(['ppBlocking'], (r) => {
       const b = r && r.ppBlocking && typeof r.ppBlocking === 'object' ? r.ppBlocking : {};
-      cb({ voice: b.voice, serious: !!b.serious });
+      cb({ voice: b.voice, serious: !!b.serious, locale: b.locale });
     });
   }
 
@@ -92,5 +116,8 @@
     paint,
     t: (key, params) => (S ? S.t(key, params) : key),
     isSerious: () => !!(S && S.seriousMode),
+    // For the rare page script that needs to branch on direction in JS
+    // (a chart axis, a swipe gesture) rather than in CSS. Prefer CSS.
+    dir: () => (S ? S.dir() : 'ltr'),
   };
 })();

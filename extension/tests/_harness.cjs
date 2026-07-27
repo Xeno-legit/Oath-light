@@ -35,6 +35,13 @@ const BG_FILES = [
   // MV3 service worker), so it loads first and anything below can call
   // OL_STRINGS.t() for user-facing copy.
   'strings.js',
+  // Locale tables (i18n). Each registers itself onto OL_STRINGS, so they must
+  // land after strings.js and before anything that calls t(). One entry per
+  // shipped language — a worker cannot lazily import a locale, so they are
+  // plain scripts like everything else here. test-load-order.cjs asserts this
+  // list stays equal to design-system/locales/ on disk, which is what catches
+  // "added a language, forgot the manifest".
+  'locales/ar.js',
   'bg/blocklists.js',
   'bg/matching.js',
   'bg/graylist.js',

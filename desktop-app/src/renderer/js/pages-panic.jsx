@@ -6,7 +6,7 @@
  * own timer but stays skippable — the flow defaults to carrying the user
  * through, never trapping them.
  *
- * Reached from: the sidebar "SOS — I need help" item, the tray's "I need help
+ * Reached from: the sidebar "I need help" item, the tray's "I need help
  * now", the global Ctrl+Shift+Space hotkey, and the extension blocked page's
  * deep-link (all funnel through the `open-panic` event — see app.jsx). */
 

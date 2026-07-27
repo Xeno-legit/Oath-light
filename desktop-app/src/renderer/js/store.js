@@ -109,26 +109,29 @@
     },
 
     blocking: {
-      // Strictness preset (6.4): standard | strict | lockdown. See PP.PRESETS
-      // for what each one actually changes — this is no longer a decorative
-      // label, the extension reads it to decide whether the higher-false-
-      // positive layers are armed. Older builds stored gentle|balanced|strict;
-      // those migrate on load (see migrateStrictness).
-      strictness: 'standard',
-      sensitivity: 72,
-      lock: true,
+      // Strictness preset (6.4): strict | lockdown. See PP.PRESETS for what
+      // each one actually changes — this is no longer a decorative label, the
+      // extension reads it to decide whether the higher-false-positive layers
+      // are armed. Strict IS the baseline: the old "Standard" tier is gone,
+      // because a blocker whose default setting is the weaker one is a blocker
+      // that ships mostly-off. Older builds stored gentle|balanced|standard;
+      // those migrate up on load (see migrateStrictness).
+      strictness: 'strict',
       uninstallGuard: true,
-      safeSearch: true,
       youtubeRestrict: false, // opt-in strictness — enforced by the extension via a YouTube-Restrict header rule
-      blockApps: true,
-      incognitoBlock: true,
-      breakRequest: true,
       redirectUrl: '',
       redirectLinkOn: false,
-      redirectOffline: false,
-      redirectOfflinePath: '',
-      bgSongEnabled: false,
-      bgSongPath: '',
+      // Removed here, deliberately: `sensitivity`, `lock`, `safeSearch`,
+      // `blockApps`, `incognitoBlock`, `breakRequest`, `redirectOffline`,
+      // `redirectOfflinePath`, `bgSongEnabled`, `bgSongPath`. Every one was
+      // written by the UI and read by nothing — no backend command, no
+      // extension payload, no other renderer file. The switches bound to them
+      // looked like protections and were not, which is worse than not offering
+      // them. The real versions live where they're actually enforced:
+      // SafeSearch and incognito/guest blocking are unconditional (extension
+      // and browser policy respectively), and app blocking is the backend's
+      // `blocked_processes` list. A stale copy of any of these in a persisted
+      // profile merges in harmlessly and is never read.
       vulnerable: { on: true, start: '22:00', end: '06:00' },
       // Grayscale the display during the vulnerable-hours window (5.6).
       // Backend-owned (settings.rs) — this is the renderer's mirror; the
@@ -165,6 +168,15 @@
     // a plain preference and lives here; Serious Mode (below) is NOT, and
     // overrides it whenever it's on.
     voice: 'companion',
+
+    // UI language. A plain presentation preference like `voice`, and resolved
+    // against the same OL_STRINGS instance — a string is addressed by
+    // key + locale + voice. 'en' is the base table and the per-key fallback,
+    // so an untranslated key renders in English rather than as a raw key.
+    // Text direction is NOT stored here: it is a property of the locale
+    // (OL_STRINGS.dir()), applied by syncVoice(). Keeping direction out of
+    // the store is what stops it from drifting away from the language.
+    locale: 'en',
 
     // Serious Mode (UX Direction §1) — MIRROR ONLY. The backend
     // (settings.rs `serious_mode`) is the source of truth, because turning it
@@ -213,36 +225,36 @@
   // from the renderer would be a hole straight through 4.1's whole design.
   // `backendOn` lists protections a preset asks to turn ON — a strengthening,
   // always instant and safe. Nothing here ever turns one off.
+  // Strict is the FLOOR, not the middle option — there is no weaker tier to
+  // drop to. `desc` is the one-line summary shown on the control; `info` is
+  // the longer explanation, revealed from an info dot instead of sitting on
+  // the page as a wall of text.
   const PRESETS = [
-    {
-      id: 'standard',
-      name: 'Standard',
-      desc: 'The full blocklist, graylist filtering and SafeSearch. What most people want.',
-      settings: { safeSearch: true, youtubeRestrict: false },
-      backendOn: [],
-    },
     {
       id: 'strict',
       name: 'Strict',
-      desc: 'Adds YouTube Restricted Mode and URL-pattern matching on unlisted sites. Blocks more, and occasionally blocks something innocent.',
-      settings: { safeSearch: true, youtubeRestrict: true },
+      desc: 'The default. Blocks the most it can without guessing.',
+      info: 'The full blocklist, graylist filtering and SafeSearch, plus YouTube Restricted Mode and URL-pattern matching on sites that aren\'t listed. Occasionally catches something innocent — report it and it gets fixed.',
+      settings: { youtubeRestrict: true },
       backendOn: [],
     },
     {
       id: 'lockdown',
       name: 'Lockdown',
-      desc: 'Everything in Strict, plus your vulnerable hours automatically escalate to allowlist-only browsing.',
-      settings: { safeSearch: true, youtubeRestrict: true, vulnerable: { on: true } },
+      desc: 'Strict, plus your vulnerable hours go allowlist-only.',
+      info: 'Everything in Strict. On top of that, when your vulnerable-hours window starts, browsing automatically narrows to the allowlist until it ends.',
+      settings: { youtubeRestrict: true, vulnerable: { on: true } },
       backendOn: ['lockdownEscalation'],
     },
   ];
 
-  // Older builds stored gentle|balanced|strict. Map them onto the real presets
-  // rather than leaving a value nothing understands: gentle/balanced were both
-  // "the defaults", and strict keeps its name and meaning.
+  // Older builds stored gentle|balanced|standard as the weaker tiers. That tier
+  // no longer exists, so they all migrate UP to Strict — the new floor. Moving
+  // someone to a STRONGER setting on upgrade is a strengthening, which this
+  // codebase always allows instantly; the reverse would need friction, which is
+  // exactly why the migration never runs the other way.
   function migrateStrictness(value) {
-    if (value === 'gentle' || value === 'balanced') return 'standard';
-    return PRESETS.some((p) => p.id === value) ? value : 'standard';
+    return PRESETS.some((p) => p.id === value) ? value : 'strict';
   }
 
   // Cap for the urges/slips logs — old entries drop off the front so a
@@ -288,21 +300,32 @@
     if (state && state.blocking) state.blocking.strictness = migrateStrictness(state.blocking.strictness);
   } catch (e) {}
 
-  // ── Voice layer (UX Direction §2) ─────────────────────────────────────────
-  // Push the store's voice/serious values into the shared OL_STRINGS instance
-  // (strings.js, byte-identical to design-system/strings.js) and mirror
-  // Serious Mode onto the root element, which is where tokens.css hangs its
-  // `[data-serious]` visual overrides. Called on load and after every state
-  // change, so `PP.t()` never has to re-derive anything per call and a flip
-  // repaints copy AND chrome together in one render.
+  // ── Voice + locale layer (UX Direction §2) ────────────────────────────────
+  // Push the store's locale/voice/serious values into the shared OL_STRINGS
+  // instance (strings.js, byte-identical to design-system/strings.js) and
+  // mirror the results onto the root element: `[data-serious]` is where
+  // tokens.css hangs its Serious Mode visual overrides, and `dir`/`lang` are
+  // where every stylesheet's logical properties and the browser's font and
+  // screen-reader handling read the language from.
+  //
+  // Called on load and after every state change, so `PP.t()` never has to
+  // re-derive anything per call and a flip repaints copy AND chrome together
+  // in one render.
+  //
+  // `dir` is derived from the locale rather than stored: direction is a
+  // property of the language, and a separate setting is just an opportunity
+  // for the two to disagree.
   function syncVoice() {
     try {
       const S = window.OL_STRINGS;
+      const el = document.documentElement;
       if (S) {
+        S.setLocale(state.locale || S.defaultLocale);
         S.setVoice(state.voice || S.defaultVoice);
         S.setSeriousMode(!!state.serious);
+        el.setAttribute('dir', S.dir());
+        el.setAttribute('lang', S.locale().code);
       }
-      const el = document.documentElement;
       if (state.serious) el.setAttribute('data-serious', '');
       else el.removeAttribute('data-serious');
     } catch (e) { /* never let a voice sync break a render */ }

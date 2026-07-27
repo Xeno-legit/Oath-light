@@ -139,6 +139,39 @@ pub struct TrustedContactV1 {
     pub last_heartbeat: u64,
 }
 
+// ============================================================================
+// AI mentor (optional, opt-in) — see mentor.rs
+// ============================================================================
+
+/// Config for the optional AI mentor. Every default here is the "off,
+/// nothing configured" state, and that is the whole point: this is the only
+/// feature in the app that sends anything the user types off the device, so
+/// it must be inert until they explicitly turn it on.
+///
+/// Note this is NOT a protection, and so it is deliberately **outside** the
+/// friction rule: turning it off is instant. The asymmetry exists to stop
+/// someone weakening their own filter in a bad moment — applying it to a
+/// chat feature would mean a 24-hour wait to stop sending your words to a
+/// third party, which is the rule pointed exactly backwards.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MentorV1 {
+    /// Off until explicitly enabled. Nothing is sent anywhere while false.
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    /// The user's own Anthropic API key, plaintext, same as the SMTP
+    /// app-password in `notify.rs`. Plaintext because the alternative on a
+    /// machine where the app must read it unattended is obfuscation dressed
+    /// up as encryption — the UI states this outright rather than implying a
+    /// vault that does not exist. Never sent to the renderer: `mentor_config`
+    /// reports only whether a key is present.
+    #[serde(default)]
+    pub api_key: String,
+    /// Empty = mentor.rs's `DEFAULT_MODEL`. Overridable so someone on a
+    /// tighter budget can point it at a cheaper model without a rebuild.
+    #[serde(default)]
+    pub model: String,
+}
+
 /// Persisted shape, written to `<app_data_dir>/settings.json`. Every field
 /// has a `#[serde(default = ...)]` so an old file on disk — from before a
 /// field existed — still deserializes cleanly and simply gains the field's
@@ -202,6 +235,9 @@ pub struct SettingsV1 {
     /// the friction rule where it does no good. See grayscale.rs.
     #[serde(default = "default_false")]
     pub grayscale_vulnerable_hours: bool,
+    /// Optional AI mentor (mentor.rs) — off, and with no key, by default.
+    #[serde(default)]
+    pub mentor: MentorV1,
 }
 
 impl Default for SettingsV1 {
@@ -217,6 +253,7 @@ impl Default for SettingsV1 {
             trusted_contact: None,
             serious_mode: false,
             grayscale_vulnerable_hours: false,
+            mentor: MentorV1::default(),
         }
     }
 }

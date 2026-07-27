@@ -1,8 +1,14 @@
 /* shell.jsx — window chrome, sidebar, and the hub menu (starting page) */
 
+// One flat list — there is no "Main" vs "Support" split any more. The sidebar
+// is short enough that grouping headings only added chrome to read past, and
+// the panic entry below is set apart by its own styling, not by a heading.
+//
+// AI Monitor is deliberately absent: it now lives inside Blocking Settings
+// (it is a protection, configured with the other protections) rather than
+// standing on its own as a top-level destination.
 const NAV = [
 { id: 'overview', label: 'Overview', icon: IconGrid },
-{ id: 'monitor', label: 'AI Monitor', icon: IconSearch },
 { id: 'blocklist', label: 'Blocklist', icon: IconShield },
 { id: 'blocking', label: 'Blocking Settings', icon: IconSliders },
 { id: 'mentor', label: 'Recovery Program', icon: IconChat },
@@ -34,7 +40,7 @@ function TitleBar({ s }) {
       <div className="tl-brand" data-tauri-drag-region>
         <span className="tl-logo"><Logo size={18} /></span>
         <span className="tl-title">Oath Light</span>
-        <span className="beta-badge" title="Open beta build — features are still in testing and may change or misbehave.">BETA</span>
+        <span className="stage-badge" title="Alpha build — features are still in testing and may change or misbehave.">ALPHA</span>
       </div>
       <div className="tl-drag" data-tauri-drag-region style={{ flex: 1, alignSelf: 'stretch' }} />
       <div className="win-ctrls">
@@ -63,7 +69,6 @@ function Sidebar({ s, go }) {
         </div>
       </div>
 
-      <div className="nav-label">Main</div>
       <nav className="nav">
         {NAV.map((n) =>
         <button key={n.id} className={'nav-item' + (s.page === n.id ? ' active' : '')} onClick={() => go(n.id)}>
@@ -74,14 +79,16 @@ function Sidebar({ s, go }) {
         )}
       </nav>
 
-      {/* Panic / SOS (5.1) — deliberately its own section, always visible,
-          never buried in the page list. Also reachable from the tray item,
-          Ctrl+Shift+Space, and the extension's blocked page. */}
-      <div className="nav-label" style={{ marginTop: 16 }}>Support</div>
-      <nav className="nav">
+      {/* Panic (5.1) — set apart by a rule and its own styling, always
+          visible, never buried in the page list. Also reachable from the tray
+          item, Ctrl+Shift+Space, and the extension's blocked page. The label
+          matches every other entry point ("I need help now") instead of
+          shouting SOS at someone who is already having a hard time. */}
+      <nav className="nav" style={{ marginTop: 14 }}>
+        <div className="divider" style={{ margin: '0 6px 10px' }} />
         <button className={'nav-item nav-sos' + (s.page === 'panic' ? ' active' : '')} onClick={() => go('panic')}>
           <IconHeart />
-          <span>SOS — I need help</span>
+          <span>I need help</span>
         </button>
       </nav>
 
@@ -93,7 +100,7 @@ function Sidebar({ s, go }) {
             <b>{s.profile.name}</b>
             <span>{s.profile.email}</span>
           </div>
-          <IconGear size={17} style={{ marginLeft: 'auto', opacity: .6 }} />
+          <IconGear size={17} style={{ marginInlineStart: 'auto', opacity: .6 }} />
         </div>
       </div>
     </aside>);
@@ -122,10 +129,10 @@ function HubMenu({ s, go }) {
   const counts = (window.useBlocklistCounts || (() => null))();
   return (
     <div className="page hub" style={{ maxWidth: 1040 }}>
-      <div className="beta-banner fade-up" role="note">
-        <span className="beta-banner-tag">OPEN BETA</span>
-        <span className="beta-banner-text">
-          You're running an early public build of Oath Light. It's still in active
+      <div className="stage-banner fade-up" role="note">
+        <span className="stage-banner-tag">ALPHA</span>
+        <span className="stage-banner-text">
+          You're running an early build of Oath Light. It's still in active
           testing — some protection may be incomplete and things can change or break.
           Please don't rely on it as your only safeguard yet.
         </span>

@@ -2,8 +2,8 @@
 
 The single design system shared by all four surfaces (extension popup/blocked/
 options, desktop renderer, website, store assets). This is the prerequisite
-layer for the full UI rebuild ([../ROADMAP.md](../ROADMAP.md) §5.1) and Serious
-Mode's whole-personality flip ([../docs/VISION.md](../docs/VISION.md) §3.3):
+layer for the full UI rebuild (see [../ROADMAP.md](../ROADMAP.md)) and Serious
+Mode's whole-personality flip:
 visuals flow from `tokens.css`, copy flows from `strings.js`, and nothing ships
 hardcoded per-surface again.
 

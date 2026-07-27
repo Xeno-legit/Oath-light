@@ -394,6 +394,12 @@
   --ol-accent: #ffffff;
   --ol-accent-2: #cfcfcf;
   --ol-accent-3: #8f8f8f;
+  /* Ink that sits ON an accent fill (primary button label, avatar initials,
+     the user's own chat bubble). This exists because Noir's dark accent IS
+     white — hardcoding #fff on an accent background made every primary
+     button's label invisible. Any surface that paints var(--ol-accent) as a
+     background must take its foreground from here, never from a literal. */
+  --ol-accent-ink: #0a0a0a;
   --ol-ok: #3ecf8e;
   --ol-warn: #d9a441;
   --ol-danger: #e5565b;
@@ -487,6 +493,7 @@
   --ol-accent: #111111;
   --ol-accent-2: #3d3d3d;
   --ol-accent-3: #6e6e6e;
+  --ol-accent-ink: #fafafa;
   --ol-ok: #16a34a;
   --ol-warn: #b45309;
   --ol-danger: #c83a40;
@@ -514,6 +521,7 @@
   --ol-accent: #ff3b3b;
   --ol-accent-2: #ff5e3a;
   --ol-accent-3: #c83a40;
+  --ol-accent-ink: #ffffff;
 
   --ol-radius-sm: 6px;
   --ol-radius-md: 8px;

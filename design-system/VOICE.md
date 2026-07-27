@@ -1,9 +1,9 @@
 # Oath Light — Voice System
 
 Source of truth for the string/voice layer (`strings.js`) in this directory. Read
-[docs/VISION.md](../docs/VISION.md) §3.3–3.5 first (Serious Mode, voice, and the
-"status yes, map no" rule) — this doc is the working reference for anyone
-writing or reviewing copy day to day.
+the rules at the end of [docs/MASTER_PLAN.md](../docs/MASTER_PLAN.md) first —
+this doc is the working reference for anyone writing or reviewing copy day to
+day.
 
 ## The two voices
 

@@ -24,16 +24,16 @@ into the test suite so a hole reported once stays closed forever.
 - A false positive that blocks something genuinely innocent — these matter just
   as much. A filter people have to turn off is a filter that protects nobody.
 
-**Out of scope** — not bugs, by design (see [SECURITY.md](SECURITY.md)):
+**Out of scope** — these are the app working as designed, not bugs:
 
-- "I used a different computer / phone / OS account." Yes. Nothing in the
-  architecture claims otherwise.
-- "I uninstalled it after waiting 24 hours." That is the feature working.
-- "I edited the source and rebuilt it." You are the administrator of your
+- Using a different computer, phone, or OS account. Oath Light protects the
+  machine it is installed on.
+- Uninstalling after waiting out the cool-off. That is the feature.
+- Editing the source and rebuilding it. You are the administrator of your own
   machine; that was never in question.
-- "Safe Mode." Already documented as a real, known gap — see SECURITY.md.
-  Reports that *close* it are extremely welcome; reports that *observe* it are
-  already known.
+
+Reports that *close* a hole are what this page is for. A report that only points
+out that something is hard to cover isn't one.
 
 ---
 

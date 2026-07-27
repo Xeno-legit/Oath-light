@@ -72,6 +72,28 @@
     startNsfwMonitor() { return invoke('start_nsfw_monitor'); },
     stopNsfwMonitor(auth) { return invoke('stop_nsfw_monitor', { auth: auth || null }); },
 
+    // AI mentor (optional, opt-in — see src-tauri/src/mentor.rs). The API key
+    // lives in Rust and never crosses this bridge: `getMentorConfig` reports
+    // `has_key`, never the key, and `setMentorConfig` is write-only for it.
+    // Resolves to { enabled, has_key, model }.
+    getMentorConfig() { return invoke('get_mentor_config').catch(() => ({ enabled: false, has_key: false, model: '' })); },
+    // `apiKey`/`model` are tri-state: omit (or pass null) to leave the stored
+    // value alone, pass '' to clear it. That's what lets the enable toggle
+    // work without the renderer ever holding the key.
+    setMentorConfig({ enabled, apiKey, model }) {
+      return invoke('set_mentor_config', {
+        enabled: !!enabled,
+        apiKey: apiKey === undefined ? null : apiKey,
+        model: model === undefined ? null : model,
+      });
+    },
+    // Send the conversation, get one reply. `history` is [{role, text}, …]
+    // oldest first, ending with the new user message. Resolves to
+    // { text, blocked_locally, model }; `blocked_locally` means the text came
+    // from Rust (a refusal or a withheld reply), NOT from the model — the UI
+    // must label those differently rather than passing them off as the AI.
+    mentorSend(history) { return invoke('mentor_send', { history }); },
+
     // Friction (4.1/4.3): every pending "weakening" of protection (uninstall
     // guard, AI monitor, a custom-block removal) — the backend is the source
     // of truth for the countdown, never the renderer's own clock.

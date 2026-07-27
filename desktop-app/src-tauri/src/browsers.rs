@@ -513,6 +513,95 @@ fn is_our_forcelist_entry(data: &str) -> bool {
     matches!(data.split(';').next(), Some(id) if id == STORE_EXTENSION_ID || id == EXTENSION_ID)
 }
 
+/// Chromium list-policies that must accompany the forcelist entry, as
+/// `(subkey_under_policy_root, value_data)`.
+///
+/// Why this exists — the Edge bug: `ExtensionInstallForcelist` alone is enough
+/// on Chrome, and Edge was being treated as "just another Chromium", so it got
+/// the forcelist and nothing else. But Edge does not trust the Chrome Web Store
+/// by default: a forcelist entry whose update URL points at CWS is accepted as
+/// *policy* and then dropped at install time because the source isn't permitted.
+/// That is the observed symptom — Chrome installs, Edge never does, and neither
+/// surfaces an error anywhere the user can see.
+///
+/// `ExtensionInstallSources` permits CWS as an install origin and
+/// `ExtensionInstallAllowlist` names our ID explicitly, which also keeps us
+/// installable on a machine with a blocklist-everything (`*`) policy. Both are
+/// additive allow-rules — they can only ever permit our own extension, never
+/// restrict anything else — and both are no-ops on Chrome, which already trusts
+/// its own store. Written for every Chromium browser rather than special-casing
+/// Edge: the other forks inherit Edge-like store restrictions at their own pace,
+/// and an unnecessary allow-entry costs nothing.
+#[cfg(target_os = "windows")]
+fn chromium_allow_list_policies() -> [(&'static str, String); 2] {
+    [
+        ("ExtensionInstallSources", "https://clients2.google.com/*".to_string()),
+        ("ExtensionInstallAllowlist", STORE_EXTENSION_ID.to_string()),
+    ]
+}
+
+/// Write the accompanying allow-policies into `root` (a hive prefix). Each is a
+/// numbered-value list key exactly like the forcelist, so the same
+/// don't-clobber-someone-else's-entry rule applies. Best-effort: these support
+/// the forcelist, and a failure is reported by the forcelist write itself.
+#[cfg(target_os = "windows")]
+fn write_chromium_allow_lists(root: &str, def: &BrowserDef) {
+    for (subkey, data) in chromium_allow_list_policies() {
+        let key = format!(r"{}\{}\{}", root, def.policy_subkey, subkey);
+        let existing = read_reg_sz_values(&key);
+        let value = existing
+            .iter()
+            .find(|(_, d)| *d == data)
+            .map(|(n, _)| n.clone())
+            .unwrap_or_else(|| {
+                let used: std::collections::HashSet<u32> =
+                    existing.iter().filter_map(|(n, _)| n.parse::<u32>().ok()).collect();
+                let mut n = 1u32;
+                while used.contains(&n) {
+                    n += 1;
+                }
+                n.to_string()
+            });
+        let _ = reg()
+            .args(["add", &key, "/v", &value, "/t", "REG_SZ", "/d", &data, "/f"])
+            .output();
+    }
+}
+
+/// Create the policy key tree for `def` without writing any value into it.
+///
+/// Why this exists — the "needs a restart" bug: Chromium watches its policy key
+/// for changes and reloads policy live, so a forcelist written while the browser
+/// is running should take effect within seconds. That only holds if the key
+/// **already existed** when the browser started. On a machine that has never had
+/// a managed browser, `Software\Policies\<vendor>` does not exist at all, so
+/// there is nothing for the browser to watch and the first value we write goes
+/// unnoticed until the next launch — precisely the "installed properly after a
+/// restart" behaviour.
+///
+/// Creating the (empty) keys early fixes it: an empty policy key changes no
+/// behaviour, but it gives the browser something to register a change
+/// notification on, so the later forcelist write is picked up live. Called on
+/// startup for every known browser, installed or not — a stray empty policy key
+/// is inert.
+#[cfg(target_os = "windows")]
+pub fn ensure_policy_key(def: &BrowserDef) {
+    for root in ["HKLM", "HKCU"] {
+        let base = format!(r"{}\{}", root, def.policy_subkey);
+        let _ = reg().args(["add", &base, "/f"]).output();
+        if def.engine == Engine::Chromium {
+            for sub in
+                ["ExtensionInstallForcelist", "ExtensionInstallSources", "ExtensionInstallAllowlist"]
+            {
+                let _ = reg().args(["add", &format!(r"{}\{}", base, sub), "/f"]).output();
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn ensure_policy_key(_def: &BrowserDef) {}
+
 /// Choose the `ExtensionInstallForcelist` value name to write under: reuse the
 /// one already holding our ID if present, otherwise the lowest positive ordinal
 /// not already taken. This avoids clobbering another managed extension's entry —
@@ -646,10 +735,19 @@ pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
     if !enforcement_configured(def.engine) {
         return EnforceOutcome::Dormant;
     }
-    // Already set (e.g. by the elevated installer)? Report it, don't re-write.
-    if let Some(existing) = policy_present(def) {
-        return existing;
+    // Already machine-wide? That is the strongest outcome — nothing to do.
+    let existing = policy_present(def);
+    if existing == Some(EnforceOutcome::EnforcedMachine) {
+        return EnforceOutcome::EnforcedMachine;
     }
+    // A user-level policy is NOT a reason to stop. The previous code returned
+    // early on ANY existing policy, which meant a profile that had once taken
+    // the HKCU fallback could never be upgraded to the machine-wide lock — no
+    // matter how many times the user granted admin afterwards, this saw
+    // "already enforced" and wrote nothing. Falling through re-attempts HKLM,
+    // which succeeds once elevated; if it still fails we report the user-level
+    // policy we already have rather than a spurious Failed.
+    let had_user_policy = existing.is_some();
 
     // (hive prefix, is this the strong machine-wide scope?)
     const HIVES: [(&str, bool); 2] = [("HKLM", true), ("HKCU", false)];
@@ -666,6 +764,11 @@ pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
                     .map(|o| o.status.success())
                     .unwrap_or(false);
                 if ok {
+                    // Permit the Chrome Web Store as an install source in the
+                    // SAME hive the forcelist landed in. Without this Edge
+                    // accepts the forcelist and then declines to install from a
+                    // store it does not trust — see chromium_allow_list_policies.
+                    write_chromium_allow_lists(root, def);
                     return if strong {
                         EnforceOutcome::EnforcedMachine
                     } else {
@@ -673,7 +776,7 @@ pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
                     };
                 }
             }
-            EnforceOutcome::Failed
+            if had_user_policy { EnforceOutcome::EnforcedUser } else { EnforceOutcome::Failed }
         }
         Engine::Gecko => {
             // Firefox's `ExtensionSettings` policy is ONE value holding the whole
@@ -696,7 +799,7 @@ pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
                     };
                 }
             }
-            EnforceOutcome::Failed
+            if had_user_policy { EnforceOutcome::EnforcedUser } else { EnforceOutcome::Failed }
         }
     }
 }

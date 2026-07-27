@@ -1,9 +1,14 @@
 /*!
  * Oath Light — strings.js
  * ------------------------------------------------------------------------
- * Single, dependency-free strings/voice layer shared by every surface:
- * the MV3 extension (service worker via importScripts + extension pages),
- * the Tauri desktop renderer, and the static website.
+ * Single, dependency-free strings/voice/locale layer shared by every
+ * surface: the MV3 extension (service worker via importScripts +
+ * extension pages), the Tauri desktop renderer, and the static website.
+ *
+ * A string is addressed by three things: key, locale, voice. English is
+ * the base table below and the fallback for every other locale; other
+ * locales register themselves from `locales/<code>.js`. See the Locales
+ * block further down for why they load as plain scripts.
  *
  * HARD CONSTRAINTS — do not violate these when editing this file:
  *   - No `window`, `document`, `chrome.*`, `localStorage`, or any other
@@ -11,8 +16,12 @@
  *   - No `import`/`export` statements (must load via plain <script src>
  *     AND via `importScripts()` in a worker).
  *   - No build step, no dependencies.
- *   - Persistence of the chosen voice is the CALLER's job. This module
- *     only holds state in memory for the lifetime of the page/worker.
+ *   - Persistence of the chosen voice AND locale is the CALLER's job.
+ *     This module only holds state in memory for the lifetime of the
+ *     page/worker. See voice-sync.js for how each surface rehydrates.
+ *   - Never throw. Every public method swallows its own errors and
+ *     degrades (to English, to the key, to 'ltr'). A malformed locale
+ *     file must not be able to kill the service worker that imports it.
  *
  * See VOICE.md (same directory) for the voice registers, key-naming
  * conventions, and the hard content rules every string here must follow.
@@ -272,6 +281,44 @@
   };
 
   /* ---------------------------------------------------------------
+   * Locales (i18n).
+   *
+   * The registry below is a SECOND dimension over the same keys: a
+   * string is resolved by locale first, then by voice. English is the
+   * built-in base and is also the fallback for every other locale — a
+   * key a translator hasn't reached yet renders in English rather than
+   * rendering as a raw dotted key, so a half-finished locale degrades
+   * to "some English" instead of "visibly broken".
+   *
+   * Locales load as plain sibling scripts (`locales/<code>.js`) that
+   * call `registerLocale` at load time. That shape is forced by this
+   * file's hard constraints: no build step, no `import`, and it has to
+   * survive `importScripts()` in the MV3 service worker — so a locale
+   * cannot be fetched lazily or pulled in as a module. Every shipped
+   * locale is therefore listed in the manifest / the page's <script>
+   * tags alongside this file. At ~94 keys each that costs a few KB.
+   *
+   * `dir` is part of the locale, not a separate setting: the direction
+   * of the UI is a property of the language, and letting them drift
+   * apart is how you end up with an RTL language in an LTR layout.
+   * --------------------------------------------------------------- */
+  var LOCALES = {
+    en: {
+      code: 'en',
+      name: 'English',
+      nativeName: 'English',
+      dir: 'ltr',
+      // `reviewed` is a claim about the COPY, not about the code: true
+      // means a human fluent in the language has read it. Machine-drafted
+      // locales ship with false and the picker says so out loud, because
+      // silently shipping unreviewed recovery language to someone in a
+      // hard moment is worse than shipping English.
+      reviewed: true,
+      strings: STRINGS,
+    },
+  };
+
+  /* ---------------------------------------------------------------
    * Interpolation: replaces {token} with params[token]. Leaves the
    * placeholder untouched if the param is missing, so a bad call is
    * visible instead of silently corrupting the sentence.
@@ -283,13 +330,31 @@
     });
   }
 
+  // Pull one voice's text out of a locale's entry for `key`, or null.
+  // Within a locale, a missing `serious` falls back to that locale's
+  // own `companion` before the caller falls back to English — a
+  // translator who wrote only the warm voice should not silently get
+  // English in serious mode when their own wording exists.
+  function pick(table, key, voice) {
+    if (!table) return null;
+    var entry = table[key];
+    if (!entry) return null;
+    var str = entry[voice];
+    if (str == null) str = entry.companion;
+    return str == null ? null : str;
+  }
+
   var OL_STRINGS = {
-    version: 1,
+    version: 2,
     voices: ['companion', 'serious'],
     defaultVoice: 'companion',
     activeVoice: 'companion',
     seriousMode: false,
     strings: STRINGS,
+
+    defaultLocale: 'en',
+    activeLocale: 'en',
+    localeTable: LOCALES,
 
     // Ignores unknown voices — callers can pass anything without a guard.
     setVoice: function (v) {
@@ -304,16 +369,83 @@
       } catch (e) { /* never throw */ }
     },
 
-    // Returns the active-voice string for `key`, interpolating {params}.
-    // Serious mode ALWAYS wins regardless of activeVoice. Falls back
-    // companion -> the key itself. Never throws.
+    /* --- locale API ------------------------------------------------ */
+
+    // Called by `locales/<code>.js` at load. Rejects anything missing a
+    // code or a strings table; never throws, because a malformed locale
+    // file must degrade to "that language isn't offered" rather than
+    // taking down the service worker that imported it.
+    registerLocale: function (def) {
+      try {
+        if (!def || typeof def.code !== 'string' || !def.code) return false;
+        if (!def.strings || typeof def.strings !== 'object') return false;
+        if (def.code === 'en') return false; // the base is not replaceable
+        LOCALES[def.code] = {
+          code: def.code,
+          name: def.name || def.code,
+          nativeName: def.nativeName || def.name || def.code,
+          dir: def.dir === 'rtl' ? 'rtl' : 'ltr',
+          reviewed: !!def.reviewed,
+          strings: def.strings,
+        };
+        return true;
+      } catch (e) {
+        return false;
+      }
+    },
+
+    // Ignores unknown codes, so a persisted preference for a locale that
+    // is no longer shipped falls back to English instead of blanking the UI.
+    setLocale: function (code) {
+      try {
+        if (Object.prototype.hasOwnProperty.call(LOCALES, code)) this.activeLocale = code;
+      } catch (e) { /* never throw */ }
+    },
+
+    // The active locale's descriptor (never null — English is always registered).
+    locale: function () {
+      try {
+        return LOCALES[this.activeLocale] || LOCALES.en;
+      } catch (e) {
+        return LOCALES.en;
+      }
+    },
+
+    // Every registered locale, English first then alphabetical by code, so
+    // the picker's order doesn't depend on script load order.
+    locales: function () {
+      try {
+        var codes = Object.keys(LOCALES).sort();
+        var out = [LOCALES.en];
+        for (var i = 0; i < codes.length; i++) {
+          if (codes[i] !== 'en') out.push(LOCALES[codes[i]]);
+        }
+        return out;
+      } catch (e) {
+        return [LOCALES.en];
+      }
+    },
+
+    // 'rtl' | 'ltr' for the active locale — feed this straight into the
+    // document's `dir` attribute. Callers must not infer direction from
+    // the locale code themselves.
+    dir: function () {
+      return this.locale().dir;
+    },
+
+    // Returns the active-locale, active-voice string for `key`, interpolating
+    // {params}. Serious mode ALWAYS wins over activeVoice. Resolution is
+    // locale+voice -> locale+companion -> English+voice -> English+companion
+    // -> the key itself. Never throws.
     t: function (key, params) {
       try {
-        var entry = this.strings && this.strings[key];
-        if (!entry) return key;
         var voice = this.seriousMode ? 'serious' : this.activeVoice;
-        var str = entry[voice];
-        if (str == null) str = entry.companion;
+        var str = null;
+        if (this.activeLocale !== 'en') {
+          var loc = LOCALES[this.activeLocale];
+          str = pick(loc && loc.strings, key, voice);
+        }
+        if (str == null) str = pick(this.strings, key, voice);
         if (str == null) return key;
         return interpolate(str, params);
       } catch (e) {

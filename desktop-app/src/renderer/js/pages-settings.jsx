@@ -762,7 +762,7 @@ function ProtectionHistoryCard() {
             <div className="ut-msg" style={{ marginTop: 12, color: report.intact ? 'var(--accent-2)' : '#ef4444' }}>
               {report.intact
                 ? <React.Fragment>
-                    <IconCheck size={13} style={{ verticalAlign: '-2px', marginRight: 5 }} />
+                    <IconCheck size={13} style={{ verticalAlign: '-2px', marginInlineEnd: 5 }} />
                     Intact — {report.entries} event{report.entries === 1 ? '' : 's'} verified back to the start.
                   </React.Fragment>
                 : <React.Fragment>
@@ -831,7 +831,7 @@ function EvalLogCard() {
                   <span style={{ color: 'var(--text-2)' }}>
                     image {(e.siglip_nsfw * 100).toFixed(0)}% · nudity {(e.nudenet_explicit * 100).toFixed(0)}%
                   </span>
-                  <span style={{ color: 'var(--muted)', marginLeft: 'auto' }}>pause was {e.dwell_secs}s</span>
+                  <span style={{ color: 'var(--muted)', marginInlineStart: 'auto' }}>pause was {e.dwell_secs}s</span>
                 </div>
               ))}
             </div>}
@@ -989,6 +989,172 @@ function VoiceCard({ s, PP }) {
   );
 }
 
+// --- Language (i18n) --------------------------------------------------------
+
+// Sits next to the voice picker because they are the same kind of setting:
+// both change how the app talks, neither is a protection, and both are
+// instant in both directions (a language is not something to make someone
+// wait 24 hours to change).
+//
+// Two things this card does deliberately:
+//
+//   * Every language is named in its own script (`nativeName`). Someone
+//     switching TO Arabic can't necessarily read "Arabic" in English, which
+//     is precisely the moment they need the label.
+//   * An unreviewed translation says so, in the list, before it's picked.
+//     Machine-drafted recovery copy is not the same product as reviewed
+//     copy, and quietly presenting it as finished would be the kind of
+//     small dishonesty this app is otherwise careful to avoid.
+//
+// Changing the locale re-derives text direction through the store's
+// syncVoice() — this card never touches `dir` itself.
+function LanguageCard({ s, PP }) {
+  const S = window.OL_STRINGS;
+  const langs = S && typeof S.locales === 'function' ? S.locales() : [];
+  if (langs.length < 2) return null; // only English shipped — nothing to pick
+  const active = s.locale || 'en';
+  return (
+    <div className="card fade-up" style={{ marginTop: 18 }}>
+      <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Language</div>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 10 }}>
+        Changes the app, the block screen and the browser popup together. Anything not
+        translated yet stays in English rather than showing you a blank.
+      </div>
+      {langs.map((l) => (
+        <div className="setting" key={l.code}>
+          <div className="ico"><IconGlobe size={20} /></div>
+          <div className="txt">
+            <b lang={l.code} dir={l.dir}>{l.nativeName}</b>
+            <span>
+              {l.name}
+              {l.reviewed ? '' : ' · unreviewed draft — machine-translated, not yet checked by a speaker'}
+            </span>
+          </div>
+          <button
+            className={'btn ' + (active === l.code ? 'btn-primary' : 'btn-ghost')}
+            onClick={() => PP.set({ locale: l.code })}>
+            {active === l.code ? 'Selected' : 'Choose'}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// --- AI mentor (optional, opt-in) -------------------------------------------
+
+// The only feature in this app that sends anything the user types off the
+// device, so this card's job is disclosure before it is configuration. Three
+// rules it follows:
+//
+//   * It states what is sent, to whom, and under whose key — in the card, not
+//     behind a "learn more". Someone deciding whether to turn this on should
+//     not have to go looking for the cost.
+//   * The key is write-only from here. Rust reports `has_key`, never the key,
+//     so nothing in the webview can read back a credential — and the field is
+//     left blank on load rather than pre-filled with a fake value that looks
+//     like the real one.
+//   * It says plainly that the key is stored in plaintext, because it is (same
+//     as the SMTP app-password). Implying a vault that doesn't exist would be
+//     a worse failure than the plaintext itself.
+function AiMentorCard() {
+  const [cfg, setCfg] = React.useState(null);
+  const [key, setKey] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  const [note, setNote] = React.useState('');
+
+  const native = !!(window.PPNative && PPNative.available);
+
+  React.useEffect(() => {
+    let alive = true;
+    if (!native) { setCfg({ enabled: false, has_key: false, model: '' }); return undefined; }
+    PPNative.getMentorConfig().then((c) => { if (alive) setCfg(c); });
+    return () => { alive = false; };
+  }, [native]);
+
+  if (!cfg) return null;
+
+  async function apply(patch) {
+    setSaving(true);
+    setNote('');
+    try {
+      const next = await PPNative.setMentorConfig({
+        enabled: patch.enabled !== undefined ? patch.enabled : cfg.enabled,
+        // `undefined` means "leave the stored key alone" — that's what lets
+        // the toggle work without the renderer ever holding the key.
+        apiKey: patch.apiKey,
+      });
+      setCfg(next);
+      if (patch.apiKey !== undefined) setKey('');
+      if (patch.apiKey === '') setNote('Key removed.');
+      else if (patch.apiKey) setNote('Key saved.');
+    } catch (e) {
+      setNote(String(e && e.message ? e.message : e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="card fade-up" style={{ marginTop: 18 }}>
+      <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>AI mentor</div>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.6 }}>
+        An optional open-ended conversation, separate from the guided exercises. It is
+        <b> off unless you turn it on</b>, and when it is on, what you type is sent to
+        Anthropic's API using your own key and billed to your own account. It cannot change
+        any setting in this app and will not help you weaken the filter — that's enforced
+        here, not just asked for in a prompt. The guided exercises are unaffected and still
+        send nothing anywhere.
+      </div>
+
+      <div className="setting">
+        <div className="ico"><IconSpark size={20} /></div>
+        <div className="txt">
+          <b>Enable the AI mentor</b>
+          <span>{cfg.has_key ? `Using ${cfg.model}.` : 'Needs an API key below before it can be turned on.'}</span>
+        </div>
+        <button
+          className={'switch ' + (cfg.enabled ? 'on' : '')}
+          disabled={saving || !cfg.has_key}
+          aria-label="Enable the AI mentor"
+          onClick={() => apply({ enabled: !cfg.enabled })}
+        />
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+          Anthropic API key {cfg.has_key && <span style={{ color: 'var(--muted)', fontWeight: 600 }}>· one is saved</span>}
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          <input
+            className="input"
+            type="password"
+            style={{ flex: 1 }}
+            placeholder={cfg.has_key ? 'Enter a new key to replace the saved one' : 'sk-ant-…'}
+            value={key}
+            autoComplete="off"
+            onChange={(e) => setKey(e.target.value)}
+          />
+          <button className="btn btn-primary btn-sm" disabled={saving || !key.trim()} onClick={() => apply({ apiKey: key.trim() })}>
+            Save
+          </button>
+          {cfg.has_key &&
+            <button className="btn btn-ghost btn-sm" disabled={saving} onClick={() => apply({ apiKey: '', enabled: false })}>
+              Remove
+            </button>}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8, lineHeight: 1.55 }}>
+          Get a key at console.anthropic.com. It is stored in plaintext in this app's settings
+          file on this machine — the same as the email password for trusted-contact
+          notifications. It is never sent to the browser extension and never leaves your
+          device except as the authorization header on your own API requests.
+        </div>
+        {note && <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginTop: 8 }}>{note}</div>}
+      </div>
+    </div>
+  );
+}
+
 function SettingsPage({ s, PP }) {
   const p = s.profile;
   const setP = (patch) => PP.set({ profile: patch });
@@ -1088,6 +1254,8 @@ function SettingsPage({ s, PP }) {
 
       {/* Voice (UX Direction §2) — the register the whole app speaks in */}
       <VoiceCard s={s} PP={PP} />
+      <LanguageCard s={s} PP={PP} />
+      <AiMentorCard />
 
       {/* trusted contact (5.2, Tier 2) — optional accountability amplifier */}
       <TrustedContactCard s={s} />

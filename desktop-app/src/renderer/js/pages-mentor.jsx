@@ -8,6 +8,17 @@
  * presented plainly as guided exercises — never as "AI", never as a chat
  * with a live listener on the other end.
  *
+ * There IS now an AI mentor, and it lives at the bottom of this file as a
+ * separate surface (AiMentorChat / AiMentorCard) with its own disclosure —
+ * not as a fifth entry in MENTOR_EXERCISES. The distinction is the whole
+ * point: the exercises promise nothing you write leaves the device, and
+ * that promise stays exactly as strong as it was. A user who never turns
+ * the AI on sees the same page they saw before, minus the sentence that
+ * claimed the app contained no AI anywhere. Anything that would blur the
+ * two — putting the chat in the exercise grid, reusing the exercise
+ * framing for it, or hiding what it sends — breaks the reason this page
+ * was rewritten in the first place.
+ *
  * The "Ride out an urge" exercise deliberately hands off to PanicPage
  * (pages-panic.jsx) rather than re-implementing breathing/grounding here —
  * that flow already covers it, verbatim, one voice everywhere.
@@ -209,7 +220,7 @@ function ExerciseFlow({ exercise, stepIdx, setStepIdx, answers, setAnswer, onExi
   return (
     <div className="page mentor-page" style={{ maxWidth: 640 }}>
       <button className="btn btn-ghost btn-sm fade-up" style={{ marginBottom: 18 }} onClick={onExit}>
-        <IconChevron size={15} style={{ transform: 'rotate(180deg)' }} /> All exercises
+        <IconChevron size={15} className="ico-back" /> All exercises
       </button>
 
       <div className="card fade-up" key={stepIdx} style={{ padding: '32px 34px' }}>
@@ -301,12 +312,205 @@ function ExerciseFlow({ exercise, stepIdx, setStepIdx, answers, setAnswer, onExi
   );
 }
 
+/* ===========================================================================
+ * AI mentor — the optional, opt-in second surface (mentor.rs).
+ *
+ * Deliberately kept OUT of the exercise list above rather than added to it.
+ * The exercises promise that nothing you write leaves the device; this one
+ * cannot make that promise, so it gets its own entry point, its own
+ * disclosure, and its own labelling. Merging them would quietly weaken a
+ * promise the user already relied on.
+ *
+ * Two things this component is careful about:
+ *
+ *   1. It never renders a local refusal as if it came from the model.
+ *      `blocked_locally` on the reply means Rust wrote the text — a
+ *      weakening request answered by the pre-filter, or a reply withheld by
+ *      the output guard. Those render as a system note, not as a chat
+ *      bubble with the mentor's name on it.
+ *   2. The transcript is component state and nothing else. It is not in the
+ *      PP store, not in localStorage, and gone when the page unmounts —
+ *      same as the exercises' reflection answers. What was sent to the API
+ *      is out of our hands; what stays on the machine afterwards is not.
+ * =========================================================================== */
+
+function AiMentorChat({ onExit }) {
+  const [turns, setTurns] = React.useState([]);
+  const [draft, setDraft] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const endRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (endRef.current && endRef.current.scrollIntoView) {
+      endRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [turns.length, busy]);
+
+  async function send() {
+    const text = draft.trim();
+    if (!text || busy) return;
+    setError('');
+    setDraft('');
+    // Optimistically show the user's turn, and build the history to send from
+    // the same array so what's on screen and what's sent can't diverge.
+    const next = [...turns, { role: 'user', text }];
+    setTurns(next);
+    setBusy(true);
+    try {
+      const reply = await PPNative.mentorSend(next.map((t) => ({ role: t.role, text: t.text })));
+      setTurns([...next, {
+        role: 'assistant',
+        text: reply.text,
+        local: !!reply.blocked_locally,
+      }]);
+    } catch (e) {
+      // A thrown error is a transport/config failure, not a reply — keep the
+      // user's message on screen so they don't lose what they typed.
+      setError(String(e && e.message ? e.message : e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="page mentor-page" style={{ maxWidth: 720 }}>
+      <button className="btn btn-ghost btn-sm fade-up" style={{ marginBottom: 18 }} onClick={onExit}>
+        <IconChevron size={15} className="ico-back" /> Back
+      </button>
+
+      <div className="card fade-up" style={{ padding: '24px 26px' }}>
+        <div className="eyebrow">AI mentor</div>
+        <h1 className="page-title" style={{ fontSize: 23, marginBottom: 8 }}>Talk it through</h1>
+        <p className="page-sub" style={{ maxWidth: 'none', fontSize: 13 }}>
+          This one is an AI, and what you type here is sent to Anthropic using your own API
+          key. It has no ability to change any setting in this app, and it will not help
+          weaken the filter. Nothing here is saved — closing this page clears it.
+        </p>
+
+        <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {turns.length === 0 && !busy &&
+            <div style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6, padding: '8px 0' }}>
+              Whatever's actually going on is a fine place to start — a rough night, a
+              trigger you noticed, or just not wanting to be alone with it right now.
+            </div>
+          }
+
+          {turns.map((t, i) => {
+            if (t.role === 'user') {
+              return (
+                <div key={i} className="card" style={{
+                  padding: '12px 14px', background: 'var(--glass-2)',
+                  marginInlineStart: 'auto', maxWidth: '85%', fontSize: 14, lineHeight: 1.55,
+                  whiteSpace: 'pre-wrap',
+                }}>{t.text}</div>
+              );
+            }
+            // A locally-generated reply is labelled as such. Presenting the
+            // pre-filter's refusal as the model's own answer would be a small
+            // lie about what just happened, on the one topic where the app's
+            // honesty matters most.
+            if (t.local) {
+              return (
+                <div key={i} style={{
+                  padding: '12px 14px', borderRadius: 12, maxWidth: '92%',
+                  border: '1px solid var(--glass-brd)', background: 'transparent',
+                  fontSize: 13.5, lineHeight: 1.6, whiteSpace: 'pre-wrap', color: 'var(--text-2)',
+                }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>
+                    <IconShield size={12} /> Oath Light · not the AI
+                  </div>
+                  {t.text}
+                </div>
+              );
+            }
+            return (
+              <div key={i} style={{
+                padding: '12px 14px', borderRadius: 12, maxWidth: '92%',
+                background: 'color-mix(in oklab, var(--accent) 9%, transparent)',
+                fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap',
+              }}>{t.text}</div>
+            );
+          })}
+
+          {busy &&
+            <div style={{ fontSize: 13, color: 'var(--muted)', padding: '6px 0' }}>Thinking…</div>
+          }
+          {error &&
+            <div style={{ fontSize: 13, color: 'var(--danger, #d9534f)', padding: '6px 0' }}>{error}</div>
+          }
+          <div ref={endRef} />
+        </div>
+
+        <div className="row" style={{ marginTop: 18, gap: 8, alignItems: 'flex-end' }}>
+          <textarea
+            className="input"
+            rows={2}
+            style={{ flex: 1, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+            placeholder="What's going on?"
+            value={draft}
+            disabled={busy}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter sends, Shift+Enter breaks the line — the usual chat
+              // contract, and the one someone typing fast expects.
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+            }}
+          />
+          <button className="btn btn-primary" disabled={busy || !draft.trim()} onClick={send}>
+            <IconSend size={16} /> Send
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The entry point on the exercises page. Three states, because "off" and
+// "on but no key" are genuinely different situations and collapsing them
+// into one produces a button that fails when pressed.
+function AiMentorCard({ cfg, onOpen, onSetup }) {
+  const ready = cfg && cfg.enabled && cfg.has_key;
+  return (
+    <div className="card fade-up" style={{ marginTop: 22, display: 'flex', gap: 14, alignItems: 'center' }}>
+      <div className="ico" style={{ width: 44, height: 44, flex: '0 0 44px', borderRadius: 12, display: 'grid', placeItems: 'center', background: 'var(--glass-2)', color: 'var(--accent-2)' }}>
+        <IconSpark size={20} />
+      </div>
+      <div style={{ flex: 1 }}>
+        <b style={{ fontSize: 14.5, fontWeight: 800 }}>AI mentor — optional, off by default</b>
+        <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 2, lineHeight: 1.5 }}>
+          {ready
+            ? 'An open-ended conversation instead of a scripted exercise. Sends what you type to Anthropic under your own API key.'
+            : 'If you want to talk instead of following a script, you can connect your own Anthropic API key in Settings. It stays off until you do, and what you type is sent to Anthropic when it is on.'}
+        </div>
+      </div>
+      {ready
+        ? <button className="btn btn-primary btn-sm" onClick={onOpen}>Open</button>
+        : <button className="btn btn-ghost btn-sm" onClick={onSetup}>Set up</button>}
+    </div>
+  );
+}
+
 function MentorPage({ s, PP, go }) {
   const [activeId, setActiveId] = React.useState(null);
   const [stepIdx, setStepIdx] = React.useState(0);
   // Ephemeral only — { [exerciseId]: { [stepOrItemKey]: value } }. Never
   // persisted to the PP store; resets when the page unmounts.
   const [answers, setAnswers] = React.useState({});
+
+  // AI mentor config, read from Rust on mount. `null` while unknown, so the
+  // card renders its "set up" state rather than flashing "Open" and failing.
+  const [aiCfg, setAiCfg] = React.useState(null);
+  const [aiOpen, setAiOpen] = React.useState(false);
+  React.useEffect(() => {
+    let alive = true;
+    if (window.PPNative && PPNative.available) {
+      PPNative.getMentorConfig().then((c) => { if (alive) setAiCfg(c); });
+    } else {
+      setAiCfg({ enabled: false, has_key: false, model: '' });
+    }
+    return () => { alive = false; };
+  }, []);
 
   const exercise = MENTOR_EXERCISES.find((e) => e.id === activeId) || null;
 
@@ -323,6 +527,8 @@ function MentorPage({ s, PP, go }) {
   }
 
   const openTarget = go || ((page) => PP.set({ page }));
+
+  if (aiOpen) return <AiMentorChat onExit={() => setAiOpen(false)} />;
 
   if (exercise) {
     return (
@@ -343,11 +549,12 @@ function MentorPage({ s, PP, go }) {
     <div className="page mentor-page" style={{ maxWidth: 1040 }}>
       <div className="page-head fade-up">
         <div className="eyebrow">Recovery Program</div>
-        <h1 className="page-title">Guided exercises, <em style={{ fontFamily: 'Manrope' }}>not a chatbot</em></h1>
+        <h1 className="page-title">Guided exercises, <em style={{ fontFamily: 'Manrope' }}>at your own pace</em></h1>
         <p className="page-sub">
           A small library of scripted CBT/ACT exercises for the hard moments — riding out an
           urge, recovering from a slip, understanding the habit, and planning ahead. Pick one
-          below and go at your own pace.
+          below. There's an optional AI mentor at the bottom if you'd rather talk than follow
+          a script; it's off until you set it up.
         </p>
       </div>
 
@@ -359,17 +566,19 @@ function MentorPage({ s, PP, go }) {
           <IconShield size={20} />
         </div>
         <div style={{ flex: 1 }}>
-          <b style={{ fontSize: 14.5, fontWeight: 800 }}>No AI. No persona. Just what works.</b>
+          <b style={{ fontSize: 14.5, fontWeight: 800 }}>These exercises are scripted. Nothing you write in them leaves this device.</b>
           <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 2, lineHeight: 1.5 }}>
-            These are scripted exercises, not a chatbot pretending to be a person on the other
-            end. Anything you write stays on this device and is never sent anywhere.
+            No AI, no persona, no chatbot pretending to be a person on the other end — every
+            word below was written in advance, and your answers stay on this machine. The AI
+            mentor further down is a separate, optional thing and says so before it sends
+            anything anywhere.
           </div>
         </div>
       </div>
 
       <div className="grid stagger" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
         {MENTOR_EXERCISES.map((ex) => (
-          <button key={ex.id} className="card hover hub-card" style={{ textAlign: 'left' }} onClick={() => openExercise(ex.id)}>
+          <button key={ex.id} className="card hover hub-card" style={{ textAlign: 'start' }} onClick={() => openExercise(ex.id)}>
             <div className="hub-card-ico" style={{ background: `color-mix(in oklab, ${ex.color} 15%, transparent)`, color: ex.color }}>
               <ex.icon size={22} />
             </div>
@@ -382,6 +591,12 @@ function MentorPage({ s, PP, go }) {
           </button>
         ))}
       </div>
+
+      <AiMentorCard
+        cfg={aiCfg}
+        onOpen={() => setAiOpen(true)}
+        onSetup={() => openTarget('settings')}
+      />
     </div>
   );
 }

@@ -50,35 +50,44 @@ Two zips from the one `extension/` tree:
 | `oathlight-extension-store.zip` | Chrome / Chromium (also Edge, Brave, Opera) | The manifest as committed |
 | `oathlight-extension-firefox.zip` | Firefox AMO | Manifest with `background.service_worker` removed (Gecko uses `background.scripts`) |
 
-### The AMO path gotcha
+### Build them with the script
 
-**AMO requires forward-slash paths inside the zip.** PowerShell's
-`Compress-Archive` writes backslashes and AMO rejects the result with an
-unhelpful error. Build with Python's `zipfile` or 7-Zip:
-
-```python
-# from the repo root
-import zipfile, pathlib, json
-src = pathlib.Path("extension")
-skip = {"tests", "_metadata", "__pycache__"}
-
-def pack(out, manifest_text):
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        for p in sorted(src.rglob("*")):
-            if p.is_dir() or any(part in skip for part in p.parts):
-                continue
-            arc = p.relative_to(src).as_posix()          # forward slashes
-            z.writestr(arc, manifest_text) if arc == "manifest.json" else z.write(p, arc)
-
-chrome = (src / "manifest.json").read_text(encoding="utf-8")
-m = json.loads(chrome)
-m["background"].pop("service_worker", None)             # Firefox build
-pack("oathlight-extension-store.zip", chrome)
-pack("oathlight-extension-firefox.zip", json.dumps(m, indent=2))
+```
+python scripts/build-extension-zips.py            # build, verify, print hashes
+python scripts/build-extension-zips.py --check    # verify only, write nothing
 ```
 
-Sanity-check before uploading: `unzip -l` (or `7z l`) and confirm every path
-uses `/`, `strings.js` and `voice-sync.js` are present, and `tests/` is not.
+Both zips are written only if both verify. There is nothing to sanity-check by
+hand afterwards — the script re-opens each zip it just wrote and asserts the
+things that have actually gone wrong before:
+
+| Checked | Why it's checked |
+| :-- | :-- |
+| Every path uses `/` | **AMO requires forward slashes.** PowerShell's `Compress-Archive` writes backslashes and AMO rejects the upload with an unhelpful error. Never use it here. |
+| `strings.js`, `voice-sync.js`, `background.js`, `manifest.json` present | The last hand-built zips predated `strings.js` and shipped without it. |
+| No `tests/`, no `_metadata/` | `_metadata` is Chrome's generated ruleset index from loading unpacked — not source. |
+| `service_worker` present in the Chrome manifest, absent in the Firefox one | The one real difference between the builds, and the easiest to put in the wrong file. |
+| Every entry decompresses | Catches a truncated or corrupt write. |
+
+### Reproducibility
+
+The zips are byte-reproducible: fixed 1980-01-01 entry timestamps, fixed
+permissions and `create_system`, sorted entry order, pinned deflate level, and
+text files normalized to LF before packing. That last one matters because this
+repo is developed on Windows with `core.autocrlf=true` — without normalizing,
+the same commit would build differently here than on a Linux checkout.
+
+Consequence: **the same commit always produces the same SHA-256, on any
+machine.** `.github/workflows/reproducible-builds.yml` enforces it — it builds
+twice on one runner and once each on Linux and Windows, and fails if any of the
+four disagree. On a release it attaches `SHA256SUMS.txt` and both zips as
+assets, so anyone can clone the tag, run the script, and confirm the zip they
+built matches the one on the store listing without trusting us.
+
+The Windows **installer** is not reproducible (NSIS embeds timestamps; the
+cargo release profile is not bit-stable across runners). No hash claim is made
+for it. The Rust toolchain is pinned in `ci.yml` regardless, so the compiler
+is at least a tracked input.
 
 ### Firefox-specific manifest notes
 
@@ -97,12 +106,15 @@ uses `/`, `strings.js` and `voice-sync.js` are present, and `tests/` is not.
 1. `cargo test --workspace` · `cargo clippy --workspace -- -D warnings`
 2. `node extension/tests/run-all.cjs`
 3. `node scripts/ci/check-design-system-sync.mjs` — every copy byte-identical
-4. `node desktop-app/scripts/check-renderer-transpile.mjs`
-5. Command audit: `#[tauri::command]` count ⇔ `generate_handler!` count
-6. **Audit README against reality** — every claim it makes must be true on this
+4. `node scripts/ci/check-locales.mjs` — locale tables valid against the
+   English base (placeholders intact, no orphan keys, both voices present)
+5. `node desktop-app/scripts/check-renderer-transpile.mjs`
+6. Command audit: `#[tauri::command]` count ⇔ `generate_handler!` count
+7. **Audit README against reality** — every claim it makes must be true on this
    build. This is the step that stops doc drift returning.
-7. Bump `manifest.json` `version`, rebuild **both** zips (§2)
-8. Update [../ROADMAP.md](../ROADMAP.md) — status changes land in the same PR
+8. Bump `manifest.json` `version`, then `python scripts/build-extension-zips.py`
+   (§2). Record the printed SHA-256s in the release notes.
+9. Update [../ROADMAP.md](../ROADMAP.md) — status changes land in the same PR
 
 **Build gotcha:** if `cargo` fails with `tauri-build … lib.rs:80
 PermissionDenied`, that line is `fs::remove_file` on a *staged sidecar* in

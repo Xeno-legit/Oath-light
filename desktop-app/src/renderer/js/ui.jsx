@@ -41,6 +41,77 @@ function Segmented({ value, options, onChange }) {
   );
 }
 
+/* InfoDot — the replacement for explanatory paragraphs.
+ *
+ * The settings pages used to carry their full rationale as body copy under
+ * every row, which made them unreadable: the important part (what the switch
+ * does) drowned in the unimportant part (why it works that way). The rule now
+ * is that a row states what it does in one line, and anything longer hides
+ * behind one of these.
+ *
+ * Hover OR keyboard focus opens it (`:focus-within` covers the focus half, so
+ * it is reachable by Tab, not mouse-only). It is a real <button> rather than a
+ * `title=` attribute so it is announced, focusable, and styleable.
+ */
+function InfoDot({ children, label = 'More information' }) {
+  return (
+    <span className="infodot">
+      <button type="button" className="infodot-btn" aria-label={label}>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" />
+          <line x1="12" y1="11.5" x2="12" y2="16.5" />
+          <circle cx="12" cy="7.7" r="1" fill="currentColor" stroke="none" />
+        </svg>
+      </button>
+      <span className="infodot-bubble" role="tooltip">{children}</span>
+    </span>
+  );
+}
+
+/* Setting — the one settings row used across every page.
+ *
+ * `title` is the label, `desc` the single short line under it, `info` the long
+ * explanation (rendered into an InfoDot, never inline). `children` is whatever
+ * control sits at the end of the row — a Switch, a button, a chip. Pages are
+ * not supposed to hand-roll `.setting` markup any more; when they all did,
+ * every page drifted into its own spacing and its own idea of how much text
+ * was acceptable.
+ */
+function Setting({ icon: I, title, desc, info, children, tone }) {
+  const toneStyle = tone === 'danger'
+    ? { background: 'color-mix(in oklab, var(--ol-danger) 14%, transparent)', color: 'var(--ol-danger)' }
+    : tone === 'ok'
+    ? { background: 'color-mix(in oklab, var(--ol-ok) 14%, transparent)', color: 'var(--ol-ok)' }
+    : undefined;
+  return (
+    <div className="setting">
+      {I && <div className="ico" style={toneStyle}><I size={20} /></div>}
+      <div className="txt">
+        <b>{title}{info && <InfoDot label={`About: ${title}`}>{info}</InfoDot>}</b>
+        {desc && <span>{desc}</span>}
+      </div>
+      {children != null && <div className="setting-ctl">{children}</div>}
+    </div>
+  );
+}
+
+/* SectionCard — a titled group of Settings. Same reasoning as Setting: one
+ * definition, so section headers can't drift in size/spacing per page. */
+function SectionCard({ title, sub, info, children, style }) {
+  return (
+    <div className="card fade-up sec" style={style}>
+      {title &&
+        <div className="sec-head">
+          <div className="sec-title">
+            {title}{info && <InfoDot label={`About: ${title}`}>{info}</InfoDot>}
+          </div>
+          {sub && <div className="sec-sub">{sub}</div>}
+        </div>}
+      {children}
+    </div>
+  );
+}
+
 /* Smooth area chart with gradient fill + animated draw */
 function AreaChart({ data, height = 132, accent = 'var(--accent)', accent2 = 'var(--accent-2)' }) {
   const ref = React.useRef(null);
@@ -236,4 +307,7 @@ function PasswordGate() {
   );
 }
 
-Object.assign(window, { Logo, Switch, Segmented, AreaChart, Ring, PasswordGate });
+Object.assign(window, {
+  Logo, Switch, Segmented, AreaChart, Ring, PasswordGate,
+  InfoDot, Setting, SectionCard,
+});

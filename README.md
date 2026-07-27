@@ -6,7 +6,6 @@ Manifest V3 browser extension for real-time request and content filtering, and a
 Tauri (Rust) desktop application for system-level filtering, on-device AI
 screen protection, and tamper resistance.
 
-![Oath Light Demonstration](Demogif.gif)
 
 ## Core philosophy
 
@@ -26,9 +25,9 @@ cool-off. That asymmetry is the product.
 | Document | What's in it |
 | :-- | :-- |
 | [ROADMAP.md](ROADMAP.md) | **What's left.** The only place work is tracked |
-| [docs/VISION.md](docs/VISION.md) | Why it exists, and the settled product decisions |
+| [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md) | What it is, the phases, and the rules we don't break |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it blocks — layers, pipeline, engine rules |
-| [SECURITY.md](SECURITY.md) | The full threat model, including known limitations |
+| [SECURITY.md](SECURITY.md) | What it does, what it touches, and what it never does |
 | [BYPASSES.md](BYPASSES.md) | Found a hole? Report it here |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, tests, and the blocklist-PR rules |
 | [docs/RELEASE.md](docs/RELEASE.md) | Store publication, zip builds, OTA releases |
@@ -49,9 +48,9 @@ score pages or transmit data for evaluation. All processing is local.
 
 ## Protection layers
 
-A request is blocked if any layer matches. Each exists because the one above it
-has a known blind spot — the full pipeline is documented in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+A request is blocked if any layer matches. They are deliberately redundant —
+each one catches what the one before it was never designed to see. The full
+pipeline is documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### 1. Curated domain blacklist
 - **385,597 curated domains** bundled with the extension, sharded across three
@@ -147,6 +146,14 @@ Blocking stops a request; it doesn't stop an urge.
 - **Compassionate streaks:** best streak never regresses, a slip dents rather
   than erases, and a 24-hour gentle mode follows one. Shame-driven design causes
   abandonment.
+- Guided CBT/ACT exercises for the hard moments — scripted, not a chatbot, and
+  nothing written in them ever leaves the device.
+- An **optional** AI mentor for when someone would rather talk than follow a
+  script. Off until you add your own Anthropic API key, kept separate from the
+  exercises so their promise still holds, and structurally unable to help
+  weaken the filter: it has no tools and no route to any protection command,
+  requests to turn protection off are answered locally without reaching the
+  API, and any reply naming a blocked site is discarded before it is shown.
 - Optional trusted contact, notified on discrete events only — never browsing
   history, never screenshots.
 
@@ -209,10 +216,13 @@ itself installed.
   and, if the user configures them, their own trusted-contact mail and their own
   AI provider under their own key.
 - **Open source** — the entire codebase is auditable under GPLv3.
-- **Documented limits** — the full threat model, including what Oath Light does
-  *not* cover, is in [SECURITY.md](SECURITY.md). It lives there rather than in
-  the app on purpose: the app shows only honest, actionable status.
-- **Bypasses handled in the open** — [BYPASSES.md](BYPASSES.md).
+- **Written down plainly** — what the app installs, what each permission is for,
+  and what it never does, all in [SECURITY.md](SECURITY.md).
+- **Interface language** is separate from the 41 languages the keyword engine
+  detects: the UI itself is English, with the locale layer and right-to-left
+  support in place and an Arabic draft awaiting review. Direction follows the
+  language automatically, so a translation can never land in a mirrored layout.
+- **Misses and false positives handled in the open** — [BYPASSES.md](BYPASSES.md).
 
 ## Contributing
 

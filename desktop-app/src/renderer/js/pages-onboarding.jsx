@@ -37,7 +37,7 @@ function StepShell({ step, total, title, sub, children, onBack, onNext, nextLabe
         {onBack && <button className="btn btn-ghost" onClick={onBack}>Back</button>}
         <button className="btn btn-primary" onClick={onNext}>{nextLabel || 'Continue'}</button>
         {onSkip &&
-          <button className="btn btn-ghost" style={{ marginLeft: 'auto', opacity: .75 }} onClick={onSkip}>
+          <button className="btn btn-ghost" style={{ marginInlineStart: 'auto', opacity: .75 }} onClick={onSkip}>
             Skip setup
           </button>}
       </div>
@@ -152,7 +152,7 @@ function OnboardingFlow({ s, PP }) {
 
   // ── 3. Strictness preset ────────────────────────────────────────────────
   if (step === 2) {
-    const current = (s.blocking && s.blocking.strictness) || 'standard';
+    const current = (s.blocking && s.blocking.strictness) || 'strict';
     return (
       <StepShell
         step={3} total={TOTAL}

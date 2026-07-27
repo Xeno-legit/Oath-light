@@ -29,6 +29,15 @@ const COPIES = {
     'desktop-app/src/renderer/strings.js',
     'extension/strings.js',
   ],
+  // Locale tables. Same copy-verbatim rule as strings.js — they load as
+  // plain sibling scripts because the MV3 service worker can only take
+  // them via importScripts (no build step, no modules). Their *contents*
+  // are checked separately by check-locales.mjs; this gate only proves
+  // no surface has drifted from design-system/.
+  'locales/ar.js': [
+    'desktop-app/src/renderer/locales/ar.js',
+    'extension/locales/ar.js',
+  ],
   // The token METADATA manifest (names/groups/control types, no values). The
   // renderer's Themes page builds its custom-color editor from it, so it must
   // describe exactly the same tokens the shipped tokens.css declares.

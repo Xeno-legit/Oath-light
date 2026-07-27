@@ -38,6 +38,12 @@
   --r-lg: var(--ol-radius-lg);
   --r-xl: var(--ol-radius-xl);
 
+  /* Foreground for anything painted on an accent fill. Noir aliases the
+     design-system token below; this literal is only the floor for styles that
+     predate the token. Never write #fff on an accent background — Noir's dark
+     accent is white, which is what made primary-button labels invisible. */
+  --accent-ink: #ffffff;
+
   --intensity: 0.7;             /* 0..1, driven from tweak (0..10)/10 */
   --ease: var(--ol-ease-spring);
   --ease-soft: var(--ol-ease-standard);
@@ -147,11 +153,13 @@
 [data-style="noir"][data-theme="dark"] {
   --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1); --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
   --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
+  --accent-ink: var(--ol-accent-ink);
   --orb-a: #3a3a3a; --orb-b: #5c5c5c; --orb-c: #262626;
 }
 [data-style="noir"][data-theme="light"] {
   --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1); --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
   --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
+  --accent-ink: var(--ol-accent-ink);
   --orb-a: #d4d4d4; --orb-b: #bcbcbc; --orb-c: #e4e4e4;
 }
 
@@ -217,7 +225,7 @@ input, textarea { font-family: inherit; }
 .tl-logo { display: grid; place-items: center; }
 .tl-logo img { display: block; }
 .tl-title { font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing:.01em; }
-.beta-badge {
+.stage-badge {
   font-size: 9.5px; font-weight: 800; letter-spacing: .1em;
   line-height: 1; padding: 3px 6px; border-radius: 5px;
   color: var(--ol-warn);
@@ -227,7 +235,7 @@ input, textarea { font-family: inherit; }
 }
 
 /* window controls (minimize / maximize / close) */
-.win-ctrls { display: flex; align-self: stretch; margin-left: auto; }
+.win-ctrls { display: flex; align-self: stretch; margin-inline-start: auto; }
 .win-btn {
   width: 46px; align-self: stretch;
   display: grid; place-items: center;
@@ -237,7 +245,7 @@ input, textarea { font-family: inherit; }
 .win-btn:hover { background: var(--glass-2); color: var(--text); }
 .win-btn.win-close:hover { background: #e81123; color: #fff; }
 .win-btn svg { width: 15px; height: 15px; stroke: currentColor; stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.tl-status { margin-left:auto; display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:600; color: var(--text-2); padding: 5px 11px; border-radius: var(--ol-radius-pill); background: var(--glass); border:1px solid var(--glass-brd); }
+.tl-status { margin-inline-start:auto; display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:600; color: var(--text-2); padding: 5px 11px; border-radius: var(--ol-radius-pill); background: var(--glass); border:1px solid var(--glass-brd); }
 .tl-status .dot { width:8px; height:8px; border-radius:50%; background: var(--accent-2); box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent-2) 70%, transparent); animation: pulse 2.6s var(--ease-soft) infinite; }
 @keyframes pulse { 0%{ box-shadow:0 0 0 0 color-mix(in oklab, var(--accent-2) 55%, transparent);} 70%{ box-shadow:0 0 0 8px transparent;} 100%{ box-shadow:0 0 0 0 transparent;} }
 
@@ -301,7 +309,7 @@ input, textarea { font-family: inherit; }
   width: var(--sidebar-w); flex: 0 0 var(--sidebar-w);
   display: flex; flex-direction: column;
   padding: 18px 14px;
-  border-right: 1px solid var(--glass-brd);
+  border-inline-end: 1px solid var(--glass-brd);
   background: var(--glass);
   -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
 }
@@ -329,19 +337,19 @@ input, textarea { font-family: inherit; }
   padding: 10px 12px; border-radius: 12px;
   font-size: 14px; font-weight: 600; color: var(--text-2);
   position: relative; transition: background .18s, color .18s, transform .12s;
-  width:100%; text-align:left;
+  width:100%; text-align:start;
 }
 .nav-item svg { width:19px; height:19px; opacity:.85; flex:0 0 19px; }
 .nav-item:hover { background: var(--glass-2); color: var(--text); }
 .nav-item.active { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--text); }
-.nav-item.active::before { content:''; position:absolute; left:-14px; top:50%; transform: translateY(-50%); width:4px; height: 20px; border-radius: 0 4px 4px 0; background: linear-gradient(var(--accent), var(--accent-2)); }
+.nav-item.active::before { content:''; position:absolute; inset-inline-start:-14px; top:50%; transform: translateY(-50%); width:4px; height: 20px; border-start-end-radius: 4px; border-end-end-radius: 4px; background: linear-gradient(var(--accent), var(--accent-2)); }
 .nav-item.active svg { opacity:1; color: var(--accent); }
-.nav-badge { margin-left:auto; font-size:11px; font-weight:700; background: var(--glass-2); padding: 2px 8px; border-radius:var(--ol-radius-pill); color: var(--text-2); }
+.nav-badge { margin-inline-start:auto; font-size:11px; font-weight:700; background: var(--glass-2); padding: 2px 8px; border-radius:var(--ol-radius-pill); color: var(--text-2); }
 
 .sidebar-foot { margin-top:auto; }
 .user-card { display:flex; align-items:center; gap:11px; padding:9px 10px; border-radius:14px; cursor:pointer; transition: background .18s; border:1px solid transparent; }
 .user-card:hover { background: var(--glass-2); border-color: var(--glass-brd); }
-.avatar { width:34px; height:34px; border-radius:50%; flex:0 0 34px; background: linear-gradient(135deg, var(--accent-3), var(--accent-2)); display:grid; place-items:center; font-weight:800; font-size:13px; color:#fff; }
+.avatar { width:34px; height:34px; border-radius:50%; flex:0 0 34px; background: linear-gradient(135deg, var(--accent-3), var(--accent-2)); display:grid; place-items:center; font-weight:800; font-size:13px; color: var(--accent-ink); }
 .user-meta { line-height:1.2; min-width:0; }
 .user-meta b { font-size:13px; font-weight:700; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .user-meta span { font-size:11.5px; color: var(--muted); }
@@ -380,7 +388,7 @@ input, textarea { font-family: inherit; }
 .btn { display:inline-flex; align-items:center; justify-content:center; gap:9px; padding: 11px 18px; border-radius: 13px; font-size:14px; font-weight:700; transition: transform .14s, box-shadow .2s, background .2s, border-color .2s; border:1px solid transparent; }
 .btn:active { transform: scale(.97); }
 .btn svg { width:18px; height:18px; }
-.btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color:#fff; box-shadow: 0 10px 26px -10px color-mix(in oklab, var(--accent) 80%, transparent); }
+.btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--accent-ink); box-shadow: 0 10px 26px -10px color-mix(in oklab, var(--accent) 80%, transparent); }
 .btn-primary:hover { box-shadow: 0 14px 32px -10px color-mix(in oklab, var(--accent) 90%, transparent); transform: translateY(-1px); }
 .btn-ghost { background: var(--glass-2); border-color: var(--glass-brd); color: var(--text); }
 .btn-ghost:hover { border-color: var(--glass-brd-strong); }
@@ -401,7 +409,7 @@ input, textarea { font-family: inherit; }
 
 /* toggle switch */
 .switch { width: 46px; height: 27px; border-radius:var(--ol-radius-pill); background: color-mix(in oklab, var(--text) 16%, transparent); position:relative; transition: background .25s var(--ease); flex:0 0 46px; }
-.switch::after { content:''; position:absolute; top:3px; left:3px; width:21px; height:21px; border-radius:50%; background:#fff; box-shadow: 0 2px 6px rgba(0,0,0,.3); transition: transform .26s var(--ease); }
+.switch::after { content:''; position:absolute; top:3px; inset-inline-start:3px; width:21px; height:21px; border-radius:50%; background:#fff; box-shadow: 0 2px 6px rgba(0,0,0,.3); transition: transform .26s var(--ease); }
 .switch.on { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
 .switch.on::after { transform: translateX(19px); }
 .switch:disabled { opacity:.45; cursor:not-allowed; pointer-events:none; }
@@ -431,7 +439,49 @@ input, textarea { font-family: inherit; }
 .setting .ico svg { width:20px; height:20px; }
 .setting .txt { flex:1; min-width:0; }
 .setting .txt b { font-size:14.5px; font-weight:700; display:block; }
-.setting .txt span { font-size:13px; color: var(--muted); line-height:1.45; }
+/* One short line, hard-capped. Anything longer belongs in an InfoDot — the
+   cap is deliberate, so a wordy description is visibly wrong while writing it
+   rather than quietly making the page unreadable again. */
+.setting .txt span { font-size:13px; color: var(--muted); line-height:1.45; display:block; max-width: 68ch; }
+/* The control at the end of the row never shrinks — a long title used to
+   squash switches and buttons into unusable slivers. */
+.setting-ctl { flex: 0 0 auto; display:flex; align-items:center; gap:10px; }
+
+/* ---------- section card (SectionCard in ui.jsx) ---------- */
+.sec + .sec { margin-top: 18px; }
+.sec-head { margin-bottom: 6px; }
+.sec-title { font-size: 16px; font-weight: 800; letter-spacing: -.01em; display:flex; align-items:center; }
+.sec-sub { font-size: 13px; color: var(--muted); line-height:1.5; max-width: 68ch; margin-top: 3px; }
+
+/* ---------- info dot (InfoDot in ui.jsx) ---------- */
+.infodot { position: relative; display: inline-flex; vertical-align: middle; margin-inline-start: 6px; }
+.infodot-btn {
+  display: grid; place-items: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  color: var(--muted); cursor: help;
+  transition: color .15s var(--ease), background .15s var(--ease);
+}
+.infodot-btn:hover { color: var(--accent); background: var(--glass-2); }
+.infodot-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; color: var(--accent); }
+.infodot-btn svg { width: 15px; height: 15px; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; }
+.infodot-bubble {
+  position: absolute; z-index: 60;
+  top: calc(100% + 8px); inset-inline-end: -6px;
+  width: max-content; max-width: 300px;
+  padding: 10px 12px; border-radius: var(--r-sm);
+  background: var(--bg-1); border: 1px solid var(--glass-brd-strong);
+  box-shadow: var(--shadow);
+  font-size: 12.5px; font-weight: 500; line-height: 1.5;
+  color: var(--text-2); text-align: start; white-space: normal;
+  opacity: 0; visibility: hidden; transform: translateY(-4px);
+  transition: opacity .16s var(--ease), transform .16s var(--ease), visibility .16s;
+  pointer-events: none;
+}
+.infodot:hover .infodot-bubble,
+.infodot:focus-within .infodot-bubble { opacity: 1; visibility: visible; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .infodot-bubble { transition: none; }
+}
 
 /* blocklist panels (blacklist / graylist) */
 .panel-card { display: flex; flex-direction: column; }
@@ -540,56 +590,122 @@ input, textarea { font-family: inherit; }
 .ext-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 7px; }
 .ext-sync { color: var(--muted); font-weight: 500; }
 
-/* redirect / blocking-screen boxes */
-.redirect-box {
-  background: var(--glass-2);
-  border: 1px solid var(--glass-brd);
-  border-radius: 14px;
-  overflow: hidden;
+/* ============================================================
+   SETTINGS-PAGE BUILDING BLOCKS
+   Shared by Blocking, Settings, Themes and Tips. The bespoke
+   `.redirect-box` family these replaced existed only so one card on
+   one page could look slightly different from every other card — which
+   is how four pages ended up with four visual languages.
+   ============================================================ */
+
+/* An indented continuation of the row above it: the input a switch just
+   revealed, a list of tags, a diagnostic readout. Aligned to the text
+   column, not the icon, so it reads as belonging to that row. */
+.sub-block { padding: 2px 4px 14px 56px; }
+.sub-block:last-child { padding-bottom: 2px; }
+
+/* Group heading INSIDE a card — one step below .sec-title. */
+.sub-label {
+  font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted); padding: 20px 4px 2px;
 }
-.redirect-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 14px 16px;
+
+/* Inline notes. Three tones, one shape — every page used to invent its own
+   inline colour/margin combination for exactly these three cases. */
+.pending-note, .err-note, .muted-note, .warn-note {
+  font-size: 12.5px; line-height: 1.5;
+  padding: 8px 4px 2px 56px;
 }
-.redirect-row .ico {
-  width: 40px; height: 40px; flex: 0 0 40px;
-  border-radius: 12px; display: grid; place-items: center;
-  background: color-mix(in oklab, var(--accent) 14%, transparent);
-  color: var(--accent);
+.pending-note { color: var(--ol-warn); }
+.pending-note a, .warn-note a { color: var(--accent); font-weight: 700; }
+.err-note { color: var(--ol-danger); }
+.muted-note { color: var(--muted); }
+.warn-note { color: var(--ol-warn); }
+
+/* Consent panel — used before enabling anything that needs informed
+   agreement rather than a switch flip. */
+.warn-panel {
+  margin: 10px 0 4px 56px;
+  padding: 16px 18px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--ol-warn) 10%, transparent);
+  border: 1px solid color-mix(in oklab, var(--ol-warn) 34%, transparent);
 }
-.redirect-row .ico svg { width: 20px; height: 20px; display: block; }
-.redirect-row .txt { flex: 1; min-width: 0; }
-.redirect-row .txt b { font-size: 14.5px; font-weight: 700; display: block; }
-.redirect-row .txt span { font-size: 13px; color: var(--muted); line-height: 1.45; display: block; margin-top: 1px; }
-.redirect-expand {
-  padding: 0 16px 14px 70px;
+.warn-panel-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; font-weight: 800; color: var(--ol-warn); margin-bottom: 10px;
 }
-.redirect-input {
-  width: 100%; box-sizing: border-box;
-  background: var(--glass);
-  border: 1px solid var(--glass-brd);
-  border-radius: 10px;
-  padding: 10px 13px;
-  font-size: 13.5px; color: var(--text);
-  outline: none; font-family: inherit;
-  transition: border-color .15s var(--ease);
+.warn-panel-list { margin: 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 6px; }
+.warn-panel-list li { font-size: 13px; line-height: 1.5; color: var(--text-2); }
+
+/* Removable chips (blocked process names, and anything else list-shaped). */
+.tag-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 6px 5px 11px; border-radius: var(--ol-radius-pill);
+  background: var(--glass-2); border: 1px solid var(--glass-brd);
+  font-size: 12.5px; font-weight: 600; color: var(--text-2);
 }
-.redirect-input:focus { border-color: var(--accent); }
-.redirect-input::placeholder { color: var(--muted); }
-.redirect-test {
-  display: grid; place-items: center;
-  padding: 0 16px;
-  background: var(--glass);
-  border: 1px solid var(--glass-brd);
-  border-radius: 10px;
-  font-size: 13px; font-weight: 700;
-  color: var(--accent);
-  text-decoration: none; white-space: nowrap;
-  transition: background .15s var(--ease);
+.tag-x {
+  display: grid; place-items: center; width: 18px; height: 18px;
+  border-radius: 50%; color: var(--muted); transition: background .15s, color .15s;
 }
-.redirect-test:hover { background: color-mix(in oklab, var(--accent) 12%, var(--glass)); }
+.tag-x:hover { background: color-mix(in oklab, var(--ol-danger) 18%, transparent); color: var(--ol-danger); }
+.tag-x svg { width: 13px; height: 13px; }
+
+/* Show/hide toggle for diagnostics that shouldn't compete with controls. */
+.disclose {
+  display: flex; align-items: center; gap: 6px;
+  margin: 12px 4px 0 56px; padding: 0;
+  font-size: 12.5px; font-weight: 700; color: var(--accent);
+}
+.disclose svg { transition: transform .18s var(--ease); }
+.disclose .disclose-open { transform: rotate(90deg); }
+
+/* Checkbox + explanation, aligned so the text block doesn't wrap under the box. */
+.check-row {
+  display: flex; align-items: flex-start; gap: 9px;
+  margin-top: 12px; font-size: 12.5px; line-height: 1.5;
+  color: var(--muted); cursor: pointer; max-width: 62ch;
+}
+.check-row input { margin-top: 3px; flex: 0 0 auto; }
+
+/* Status chips with meaning, not just colour. */
+.chip-ok { color: var(--ol-ok); border-color: color-mix(in oklab, var(--ol-ok) 40%, transparent); }
+
+/* Label available to screen readers only — for controls whose visible text
+   lives in a sibling element (see .strict-choice-hit). */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  margin: -1px; padding: 0; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* ---------- strictness chooser ---------- */
+.strict-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }
+.strict-choice {
+  position: relative; text-align: start;
+  padding: 16px 16px 14px; border-radius: var(--r-md);
+  background: var(--glass-2); border: 1px solid var(--glass-brd);
+  transition: border-color .18s var(--ease), background .18s var(--ease);
+}
+.strict-choice:hover { border-color: var(--glass-brd-strong); }
+.strict-choice.sel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+/* Card-filling pick button. Sits UNDER the info dot (z-index 1 vs 2) so the
+   dot stays independently clickable without nesting one button in another. */
+.strict-choice-hit { position: absolute; inset: 0; z-index: 1; border-radius: inherit; cursor: pointer; }
+.strict-choice-hit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.strict-choice .infodot { position: relative; z-index: 2; }
+.strict-choice-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.strict-choice-name { font-size: 15px; font-weight: 800; color: var(--text); display: inline-flex; align-items: center; }
+.strict-choice-mark {
+  display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-ink); flex: 0 0 20px;
+}
+.strict-choice-desc { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: 5px; }
 
 /* time picker fields */
 .time-field {
@@ -626,20 +742,22 @@ input, textarea { font-family: inherit; }
    HUB MENU
    ============================================================ */
 .hub { padding-top: 30px; }
-.beta-banner {
+.stage-banner {
   display: flex; align-items: center; gap: 12px;
   max-width: 720px; margin: 0 auto 8px;
   padding: 12px 16px; border-radius: 14px;
   background: color-mix(in oklab, var(--ol-warn) 12%, transparent);
   border: 1px solid color-mix(in oklab, var(--ol-warn) 34%, transparent);
 }
-.beta-banner-tag {
+.stage-banner-tag {
   flex: 0 0 auto; align-self: flex-start;
   font-size: 10px; font-weight: 800; letter-spacing: .1em;
   padding: 4px 8px; border-radius: 6px; text-transform: uppercase;
+  /* --ol-warn is a fixed amber in both themes, so its ink is fixed too —
+     this one is genuinely theme-independent, unlike the accent surfaces. */
   color: #fff; background: var(--ol-warn); white-space: nowrap;
 }
-.beta-banner-text { font-size: 13px; line-height: 1.5; color: var(--text-2); text-align: left; }
+.stage-banner-text { font-size: 13px; line-height: 1.5; color: var(--text-2); text-align: start; }
 .hub-hero { text-align: center; padding: 14px 0 6px; }
 .hub-mark {
   width: 72px; height: 72px; border-radius: 20px; margin: 0 auto;
@@ -655,7 +773,7 @@ input, textarea { font-family: inherit; }
 @keyframes float { 0%,100%{ transform: translateY(0);} 50%{ transform: translateY(-7px);} }
 .hub-title { font-size: 42px; font-weight: 800; letter-spacing:-.03em; line-height:1.05; margin: 6px 0 14px; }
 
-.hub-card { text-align: left; display:flex; flex-direction:column; align-items:flex-start; min-height: 188px; padding: 22px; }
+.hub-card { text-align: start; display:flex; flex-direction:column; align-items:flex-start; min-height: 188px; padding: 22px; }
 .hub-card-ico { width:46px; height:46px; border-radius:14px; display:grid; place-items:center; background: color-mix(in oklab, var(--accent) 15%, transparent); color: var(--accent); margin-bottom: 16px; transition: transform .25s var(--ease); }
 .hub-card:hover .hub-card-ico { transform: scale(1.08) rotate(-3deg); }
 .hub-card-title { font-size: 18px; font-weight: 800; letter-spacing:-.02em; }
@@ -670,15 +788,15 @@ input, textarea { font-family: inherit; }
    ============================================================ */
 .chat-card { flex: 1; display: flex; flex-direction: column; padding: 0; overflow: hidden; min-height: 0; }
 .chat-head { display:flex; align-items:center; gap: 11px; padding: 16px 20px; border-bottom: 1px solid var(--glass-brd); }
-.chat-head .avatar { width: 38px; height: 38px; flex:0 0 38px; color:#fff; }
+.chat-head .avatar { width: 38px; height: 38px; flex:0 0 38px; color: var(--accent-ink); }
 .chat-scroll { flex: 1; overflow-y: auto; padding: 22px 20px 8px; display:flex; flex-direction:column; gap: 16px; min-height: 0; }
 .msg { display:flex; gap: 10px; max-width: 82%; animation: msg-in .4s var(--ease) both; }
 @keyframes msg-in { from { transform: translateY(8px); } to { transform:none; } }
-.msg.user { margin-left:auto; flex-direction: row-reverse; }
-.msg-ava { width:28px; height:28px; flex:0 0 28px; border-radius:50%; display:grid; place-items:center; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color:#fff; margin-top: 2px; }
+.msg.user { margin-inline-start:auto; flex-direction: row-reverse; }
+.msg-ava { width:28px; height:28px; flex:0 0 28px; border-radius:50%; display:grid; place-items:center; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--accent-ink); margin-top: 2px; }
 .bubble { padding: 13px 16px; border-radius: 18px; font-size: 14.5px; line-height: 1.55; }
 .msg.mentor .bubble { background: var(--glass-2); border: 1px solid var(--glass-brd); border-top-left-radius: 6px; color: var(--text); }
-.msg.user .bubble { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color:#fff; border-top-right-radius: 6px; }
+.msg.user .bubble { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--accent-ink); border-top-right-radius: 6px; }
 .bubble.typing { display:flex; gap:5px; align-items:center; padding: 16px; }
 .bubble.typing span { width:7px; height:7px; border-radius:50%; background: var(--muted); animation: blink 1.3s infinite; }
 .bubble.typing span:nth-child(2){ animation-delay:.2s; } .bubble.typing span:nth-child(3){ animation-delay:.4s; }
@@ -854,10 +972,10 @@ input, textarea { font-family: inherit; }
 /* ============================================================
    THEMES PAGE
    ============================================================ */
-.style-card, .bg-card { cursor:pointer; text-align:left; align-items:flex-start; }
+.style-card, .bg-card { cursor:pointer; text-align:start; align-items:flex-start; }
 .style-card.sel, .bg-card.sel { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 35%, transparent), var(--shadow-sm); }
 .style-swatch { width:100%; height:64px; border-radius:14px; position:relative; }
-.style-check { position:absolute; top:8px; right:8px; width:26px; height:26px; border-radius:50%; background:#fff; color: var(--accent); display:grid; place-items:center; box-shadow: 0 3px 8px rgba(0,0,0,.25); }
+.style-check { position:absolute; top:8px; inset-inline-end:8px; width:26px; height:26px; border-radius:50%; background: var(--accent); color: var(--accent-ink); display:grid; place-items:center; box-shadow: 0 3px 8px rgba(0,0,0,.25); }
 .bg-card-ico { width:40px; height:40px; flex:0 0 40px; border-radius:12px; display:grid; place-items:center; background: color-mix(in oklab, var(--accent) 14%, transparent); color: var(--accent); }
 
 /* ============================================================
@@ -934,3 +1052,41 @@ input, textarea { font-family: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .panic-breath-ring { animation: none; transform: scale(.85); }
 }
+
+/* ==========================================================================
+ * RTL — what logical properties can't express
+ * --------------------------------------------------------------------------
+ * Layout mirroring is already handled: the physical margin/padding/border/
+ * text-align/inset declarations in this file were converted to their logical
+ * equivalents (`margin-inline-start`, `inset-inline-end`, `text-align: start`
+ * …), which flip automatically off <html dir>. voice-sync.js sets that
+ * attribute from the active locale — never set `dir` by hand.
+ *
+ * Three things logical properties genuinely cannot cover, so they live here:
+ *
+ *   1. `transform: translateX()`. A transform is geometry, not layout — it
+ *      has no logical form and does not know about direction. The toggle
+ *      knob would slide off the wrong end without this.
+ *   2. Direction-sensitive ICONS. An arrow that means "back" points left in
+ *      English and right in Arabic. `.ico-back` / `.ico-forward` mark the
+ *      icons whose meaning is directional; a checkmark, a clock, or a
+ *      downward arrow is NOT directional and must never get these classes —
+ *      mirroring those makes them look broken, not translated.
+ *   3. Anything that must stay LTR inside RTL text: URLs, domain names,
+ *      version numbers, hashes. `.force-ltr` pins those, because a domain
+ *      rendered right-to-left is not just ugly, it is wrong — the user
+ *      cannot read back what they blocked.
+ * ========================================================================== */
+
+[dir="rtl"] .switch.on::after { transform: translateX(-19px); }
+
+/* Directional icons. Base rotation is the LTR meaning; RTL cancels or
+ * mirrors it. Applied via className, never inline, so the stylesheet can
+ * win — an inline `transform` would beat this rule. */
+.ico-back { transform: rotate(180deg); }
+[dir="rtl"] .ico-back { transform: rotate(0deg); }
+[dir="rtl"] .ico-forward { transform: rotate(180deg); }
+
+/* Latin-script data embedded in RTL prose. `unicode-bidi: isolate` stops a
+ * trailing dot or slash from being reordered into the surrounding sentence. */
+.force-ltr { direction: ltr; unicode-bidi: isolate; text-align: start; }

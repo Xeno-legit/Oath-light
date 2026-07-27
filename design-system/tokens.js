@@ -37,6 +37,7 @@ globalThis.OL_TOKENS = [
   { name: '--ol-accent',         group: 'color', type: 'color', label: 'Accent' },
   { name: '--ol-accent-2',       group: 'color', type: 'color', label: 'Accent 2' },
   { name: '--ol-accent-3',       group: 'color', type: 'color', label: 'Accent 3' },
+  { name: '--ol-accent-ink',     group: 'color', type: 'color', label: 'Ink on accent' },
   { name: '--ol-ok',             group: 'color', type: 'color', label: 'Status — OK' },
   { name: '--ol-warn',           group: 'color', type: 'color', label: 'Status — warning' },
   { name: '--ol-danger',         group: 'color', type: 'color', label: 'Status — danger' },

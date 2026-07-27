@@ -18,7 +18,12 @@ if (typeof importScripts === 'function') {
   // strings.js first — it is dependency-free and every module below may reach
   // for `OL_STRINGS.t()` for user-facing copy (reminder notifications, the
   // block reason lines). It is DOM-free by design, so it loads in a worker.
-  importScripts('strings.js', 'bg/blocklists.js', 'bg/matching.js', 'bg/graylist.js', 'bg/native-bridge.js', 'bg/reminders.js', 'bg/noble-ed25519.js', 'bg/ota.js');
+  // Locale tables load immediately after strings.js and before anything that
+  // calls `t()` — each one registers itself onto OL_STRINGS. They are plain
+  // scripts for exactly this reason: a worker cannot lazily import a locale,
+  // so every shipped language is listed here (and in manifest.background.
+  // scripts for Firefox, in the same order).
+  importScripts('strings.js', 'locales/ar.js', 'bg/blocklists.js', 'bg/matching.js', 'bg/graylist.js', 'bg/native-bridge.js', 'bg/reminders.js', 'bg/noble-ed25519.js', 'bg/ota.js');
 }
 
 // SHARED BLOCK HANDLER — single source of truth for blocking + stats

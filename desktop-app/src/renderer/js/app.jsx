@@ -8,10 +8,12 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "intensity": 7
 }/*EDITMODE-END*/;
 
+// `monitor` is not routed any more — the AI screen monitor is a section
+// inside Blocking Settings (see MonitorSection in pages-blocking.jsx), not a
+// destination of its own.
 const PAGES = {
   home: HubMenu,
   overview: OverviewPage,
-  monitor: MonitorPage,
   blocklist: BlocklistPage,
   blocking: BlockingPage,
   mentor: MentorPage,
@@ -63,13 +65,18 @@ function App() {
     youtubeRestrict: !!b.youtubeRestrict,
     // Strictness preset (6.4) — the extension reads this to decide whether the
     // higher-false-positive layers (3.7's path/query keywords) are armed.
-    strictness: b.strictness || 'balanced',
+    strictness: b.strictness || 'strict',
     // Voice (UX Direction §2). The extension's pages and service worker speak
     // in the same register as the desktop app; `serious` is NOT sent from here
     // — the backend injects it into this same payload from its own persisted
     // settings (broadcast_blocking), because a renderer-supplied value must
     // never be able to claim Serious Mode is off.
     voice: s.voice || 'companion',
+    // UI language, same channel and same reasoning as `voice`: the block
+    // screen and the popup should not be in a different language from the
+    // app that configured them. voice-sync.js reads it and also derives the
+    // page's text direction from it, so `dir` is never sent separately.
+    locale: s.locale || 'en',
     // Habit replacement (5.6) — the user's own alternatives, rendered on the
     // extension's block screen. Sent as data, so the block page needs no
     // knowledge of what any individual entry means.

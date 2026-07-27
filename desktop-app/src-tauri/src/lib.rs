@@ -4,6 +4,7 @@ mod dns_filter;
 mod evallog;
 mod friction;
 mod lockdown;
+mod mentor;
 mod notify;
 pub mod nsfw;
 pub mod nudenet;
@@ -1841,6 +1842,19 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
 // ============================================================================
 
 fn register_native_host(app: &AppHandle) {
+    // Create every browser's policy key tree first, before the user is likely
+    // to have opened a browser this session. An empty policy key changes no
+    // behaviour, but it is what lets a RUNNING Chromium notice the
+    // force-install policy we write later WITHOUT being restarted: the browser
+    // registers a registry change-notification on its policy key at launch, and
+    // a key that does not exist yet cannot be watched. This is the fix for "the
+    // extension only appeared after I restarted the browser". Idempotent and
+    // unelevated-safe — an HKLM failure just leaves the HKCU key, which is the
+    // hive the fallback write targets anyway.
+    for def in BROWSERS {
+        browsers::ensure_policy_key(def);
+    }
+
     let app_data_dir = match app.path().app_data_dir() {
         Ok(d) => d,
         Err(e) => {
@@ -2248,7 +2262,93 @@ fn set_dns_filter_enabled(
 /// rather than the renderer's own possibly-stale localStorage copy).
 #[tauri::command]
 fn get_app_settings(settings: tauri::State<'_, Arc<settings::SettingsState>>) -> settings::SettingsV1 {
-    settings.get()
+    let mut s = settings.get();
+    // The mentor's API key is the one field on this struct that must never
+    // cross into the webview. Everything else here is already visible in the
+    // UI; a credential is not, and a renderer that never receives it cannot
+    // leak it through devtools, a crash report, or a future bug. `get_mentor_config`
+    // reports whether a key exists without ever handing over its value.
+    s.mentor.api_key = String::new();
+    s
+}
+
+// ============================================================================
+// AI mentor (optional, opt-in) — see mentor.rs for the four safety layers.
+// ============================================================================
+
+/// What the renderer is allowed to know about the mentor's configuration.
+/// Note `has_key` rather than the key itself — see `get_app_settings`.
+#[derive(serde::Serialize)]
+struct MentorConfigView {
+    enabled: bool,
+    has_key: bool,
+    model: String,
+}
+
+fn mentor_view(m: &settings::MentorV1) -> MentorConfigView {
+    MentorConfigView {
+        enabled: m.enabled,
+        has_key: !m.api_key.trim().is_empty(),
+        model: if m.model.trim().is_empty() { mentor::DEFAULT_MODEL.to_string() } else { m.model.clone() },
+    }
+}
+
+#[tauri::command]
+fn get_mentor_config(settings: tauri::State<'_, Arc<settings::SettingsState>>) -> MentorConfigView {
+    mentor_view(&settings.get().mentor)
+}
+
+/// Update the mentor's configuration. Not friction-gated in either direction:
+/// the mentor is not a protection, and making someone wait 24 hours to STOP
+/// sending their words to a third party would be the asymmetry pointed
+/// backwards (see `settings::MentorV1`).
+///
+/// `api_key` is tri-state on purpose: `None` leaves the stored key untouched
+/// (so toggling `enabled` from the UI doesn't require the renderer to hold
+/// the key), `Some("")` clears it, `Some(k)` replaces it.
+#[tauri::command]
+fn set_mentor_config(
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    enabled: bool,
+    api_key: Option<String>,
+    model: Option<String>,
+) -> MentorConfigView {
+    settings.update(|s| {
+        s.mentor.enabled = enabled;
+        if let Some(k) = api_key {
+            s.mentor.api_key = k.trim().to_string();
+        }
+        if let Some(m) = model {
+            s.mentor.model = m.trim().to_string();
+        }
+        // Enabling without a key would leave a surface that looks armed and
+        // fails on first use. Treat it as still-off until a key exists.
+        if s.mentor.api_key.trim().is_empty() {
+            s.mentor.enabled = false;
+        }
+    });
+    mentor_view(&settings.get().mentor)
+}
+
+/// Send the conversation and return the reply.
+///
+/// `async` + `spawn_blocking` because `mentor::send` is a blocking HTTPS call
+/// that can legitimately take a minute: running it on a sync command would
+/// freeze the window for the duration. Note the mentor gets no `AppHandle`
+/// and no other state — it has no route to any protection command, which is
+/// layer 1 of the four in mentor.rs and the only one that holds structurally.
+#[tauri::command]
+async fn mentor_send(
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    history: Vec<mentor::Turn>,
+) -> Result<mentor::MentorReply, String> {
+    let cfg = settings.get().mentor;
+    if !cfg.enabled {
+        return Err("The AI mentor is turned off.".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || mentor::send(&cfg.api_key, &cfg.model, &history))
+        .await
+        .map_err(|e| format!("mentor request failed to run: {e}"))?
 }
 
 /// Add a process image name to the blocked-process list. A strengthening —
@@ -3944,6 +4044,9 @@ pub fn run() {
             get_browsers_status,
             set_guard_enabled,
             get_app_settings,
+            get_mentor_config,
+            set_mentor_config,
+            mentor_send,
             add_blocked_process,
             remove_blocked_process,
             set_block_unknown_browsers,

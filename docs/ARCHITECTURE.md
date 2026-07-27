@@ -5,32 +5,31 @@
 > that keep the keyword engine from producing false positives, and how the
 > desktop app enforces what the extension can't.
 >
-> For *why* the product exists and where it's going: [VISION.md](VISION.md) and
-> [../ROADMAP.md](../ROADMAP.md). For what it deliberately does **not** cover:
+> For *why* the product exists and where it's going: [MASTER_PLAN.md](MASTER_PLAN.md)
+> and [../ROADMAP.md](../ROADMAP.md). For what it does with your machine:
 > [../SECURITY.md](../SECURITY.md).
 
 ---
 
 ## 1. The layer stack
 
-Nothing here is a single mechanism. A request is blocked if **any** layer
-matches, and each layer exists because the one above it has a known blind spot.
+A request is blocked if **any** layer matches. They are deliberately redundant —
+each one is built to catch what the one before it was never designed to see.
 
-| # | Layer | Lives in | Covers | Blind spot it accepts |
-| :-- | :-- | :-- | :-- | :-- |
-| 1 | Curated blacklist (385k domains) | extension + DNS resolver | Known NSFW domains | New/unlisted domains |
-| 2 | Keyword engine (41 languages) | `bg/matching.js` + `core/matching.rs` | Unlisted domains whose *name* gives them away | Cleanly-named domains |
-| 3 | Graylist V2 (per-item stripping) | `graylist-inject.js`, `content.js` | NSFW items inside legitimate platforms | Platforms with no per-item label |
-| 4 | SafeSearch + search-query filter | `bg/matching.js` | Search as a discovery path | Non-search discovery |
-| 5 | Bypass defense | `bg/matching.js` | Proxies, translate/archive wrappers, raw IPs | Novel wrappers |
-| 6 | System DNS filter | `dns/` crate | Every app on the machine, not just browsers | Per-item filtering; DoH (see 1.2) |
-| 7 | On-device AI monitor | `src-tauri/src/nsfw.rs` + `nudenet.rs` | What lists can't name — the visual residual | Sampling gaps, text |
-| 8 | Friction + watchdog | `friction.rs`, `uninstall.rs`, `guardian/` | The user's own weak moment | Safe Mode (documented) |
+| # | Layer | Lives in | What it catches |
+| :-- | :-- | :-- | :-- |
+| 1 | Curated blacklist (385k domains) | extension + DNS resolver | Known NSFW domains |
+| 2 | Keyword engine (41 languages) | `bg/matching.js` + `core/matching.rs` | Unlisted domains whose name gives them away |
+| 3 | Graylist V2 (per-item stripping) | `graylist-inject.js`, `content.js` | NSFW items inside legitimate platforms |
+| 4 | SafeSearch + search-query filter | `bg/matching.js` | Search as a discovery path |
+| 5 | Bypass defense | `bg/matching.js` | Proxies, translate/archive wrappers, raw IPs |
+| 6 | System DNS filter | `dns/` crate | Every app on the machine, not just browsers |
+| 7 | On-device AI monitor | `src-tauri/src/nsfw.rs` + `nudenet.rs` | What no list can name — the visual residual |
+| 8 | Friction + watchdog | `friction.rs`, `uninstall.rs`, `guardian/` | The user's own weak moment |
 
-**Scope rule that keeps the design honest:** the DNS layer (6) is a *backstop*,
-never a replacement. It can only answer "is this whole domain allowed?" — it
-cannot do per-item graylist stripping, SafeSearch enforcement, or block-page
-redirects. The extension stays the precision layer.
+**Design rule:** the DNS layer (6) is a *backstop*, never a replacement. It
+answers "is this whole domain allowed?" — per-item stripping, SafeSearch and
+block pages are extension work. The extension stays the precision layer.
 
 ---
 
@@ -119,11 +118,14 @@ destroys trust in the whole tool.
 Always add the false-positive trap words to `KEYWORD_WHITELIST_WORDS` and prove
 them with a regression case before landing.
 
-**Known residual gaps** (documented, not fixed): separator/truncation evasions
-(`p-o-r-n`, `chaturb8`, `x-h4mster`); `porn`-core collateral on Pornic and
+**Known collateral, accepted on purpose:** the `porn` stem catches Pornic and
 Pornichet (French towns) and the bird terms `agapornis`/`epornitic` — the core
-stem can't be guarded; and the archaic-dictionary long tail (`analgesidae`,
-`aporrhais`), which are not real sites and are ignored on purpose.
+stem is not guardable, and the trade is worth it. The archaic-dictionary long
+tail (`analgesidae`, `aporrhais`) is ignored: those aren't real sites.
+
+Hardening cases that are still open live in `extension/tests/` as `gap()`
+entries, not in this document — that way closing one means deleting a line from
+a test file rather than editing prose.
 
 ### 2.3 Graylist V2 — per-item stripping
 
@@ -360,6 +362,9 @@ overrides on top of it; there are no palette presets to maintain.
 
 Status yes, map no. The app shows honest, *actionable* status ("Protection
 active", "Extension missing — fix"). It never explains what a setting defends
-against or enumerates the bypass surface. The full threat model lives in
-[../SECURITY.md](../SECURITY.md), on GitHub, for developers and auditors — not
-in front of the person the app is protecting at 2am.
+against, and it never describes where protection is thinner than elsewhere.
+
+The same rule applies to this repository. [../SECURITY.md](../SECURITY.md) says
+what the app does, what it touches, and what it never does — it is not a list of
+ways around it. Nothing we publish should read as a challenge to the person the
+app exists to protect.

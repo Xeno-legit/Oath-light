@@ -21,6 +21,10 @@
        design-system/strings.js, loaded before the store so PP.t() can
        delegate to it from the first render. -->
   <script src="strings.js"></script>
+  <!-- Locale tables register themselves onto OL_STRINGS. Plain scripts, no
+       build step — see the Locales block in strings.js. One line per shipped
+       language; keep in step with extension/manifest.json's background.scripts. -->
+  <script src="locales/ar.js"></script>
   <!-- Token metadata manifest (names/groups/types, no values) — the Themes
        page builds its custom-color editor from it. Byte-identical copy of
        design-system/tokens.js. -->
@@ -33,7 +37,6 @@
   <script type="text/babel" data-presets="react" src="js/bg.jsx"></script>
   <script type="text/babel" data-presets="react" src="js/shell.jsx"></script>
   <script type="text/babel" data-presets="react" src="js/pages-overview.jsx"></script>
-  <script type="text/babel" data-presets="react" src="js/pages-monitor.jsx"></script>
   <script type="text/babel" data-presets="react" src="js/pages-blocklist.jsx"></script>
   <script type="text/babel" data-presets="react" src="js/pages-blocking.jsx"></script>
   <script type="text/babel" data-presets="react" src="js/pages-mentor.jsx"></script>
