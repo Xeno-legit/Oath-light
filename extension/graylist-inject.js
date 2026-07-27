@@ -26,7 +26,7 @@
 // WAR script (not inline) is used deliberately — it bypasses strict page CSP that
 // would block an inline <script> (reddit/x both ship such CSP).
 //
-// See BLOCKING_STRATEGY.md §2 + §3 for the full rationale and the per-site triage.
+// See docs/ARCHITECTURE.md §2.3 for the full rationale and the per-site triage.
 // ════════════════════════════════════════════════════════════════════════════
 
 (function () {

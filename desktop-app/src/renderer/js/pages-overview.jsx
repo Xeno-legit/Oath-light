@@ -752,7 +752,10 @@ function OverviewPage({ s, PP, go }) {
   React.useEffect(() => {
     const crossed = MILESTONES.filter((m) => s.streak >= m).pop();
     if (crossed && crossed > (s.lastMilestone || 0)) {
-      PP.set({ lastMilestone: crossed });
+      // Goes through PP.markMilestone (not a raw PP.set) so the guard is
+      // written to the BACKEND too (5.5) — otherwise clearing localStorage
+      // would re-celebrate every milestone the user already passed.
+      PP.markMilestone(crossed);
       setCelebrating(crossed);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

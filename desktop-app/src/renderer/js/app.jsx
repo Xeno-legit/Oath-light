@@ -25,6 +25,13 @@ function App() {
   const [s, PP] = usePP();
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
 
+  // Serious Mode (UX Direction §1) — mirror the backend's flag into the store,
+  // once, here at the root. Everything else in the app reads `s.serious`; the
+  // store's own `syncVoice` turns that into the active voice plus the
+  // `[data-serious]` attribute tokens.css hangs its visual overrides off, so
+  // copy and chrome flip together on the same render.
+  useSeriousMode();
+
   // expose a single setter so the Themes page can write display tweaks too
   useEffect(() => {
     window.__setDisplayTweak = (patch) => {
@@ -54,6 +61,19 @@ function App() {
     vulnerable: b.vulnerable || { on: false },
     alerts: b.alerts || [],
     youtubeRestrict: !!b.youtubeRestrict,
+    // Strictness preset (6.4) — the extension reads this to decide whether the
+    // higher-false-positive layers (3.7's path/query keywords) are armed.
+    strictness: b.strictness || 'balanced',
+    // Voice (UX Direction §2). The extension's pages and service worker speak
+    // in the same register as the desktop app; `serious` is NOT sent from here
+    // — the backend injects it into this same payload from its own persisted
+    // settings (broadcast_blocking), because a renderer-supplied value must
+    // never be able to claim Serious Mode is off.
+    voice: s.voice || 'companion',
+    // Habit replacement (5.6) — the user's own alternatives, rendered on the
+    // extension's block screen. Sent as data, so the block page needs no
+    // knowledge of what any individual entry means.
+    alternatives: (b.alternatives || []).slice(0, 6),
   };
   useEffect(() => {
     if (window.PPNative && PPNative.available) PPNative.setBlocking(blockingPayload);
@@ -107,11 +127,36 @@ function App() {
     el.style.setProperty('--intensity', String((t.intensity || 0) / 10));
   }, [t.theme, t.style, t.intensity]);
 
+  // User-custom colors (UX Direction §7): apply the active theme side's
+  // `--ol-*` overrides as inline custom properties on the root element, so
+  // they win over tokens.css's defaults and cascade through styles.css's own
+  // variables (which alias the --ol-* tokens under [data-style="noir"]).
+  //
+  // Every managed token is written on each pass — cleared ones are explicitly
+  // REMOVED rather than left behind, otherwise resetting a color in the
+  // Themes page would appear to do nothing until a reload.
+  const customTokens = s.customTokens || {};
+  const activeSide = t.theme === 'light' ? 'light' : 'dark';
+  const sideOverrides = customTokens[activeSide] || {};
+  useEffect(() => {
+    const el = document.documentElement;
+    const managed = ((window.OL_TOKENS || []).filter((tok) => tok.group === 'color'));
+    managed.forEach((tok) => {
+      const v = sideOverrides[tok.name];
+      if (v) el.style.setProperty(tok.name, v);
+      else el.style.removeProperty(tok.name);
+    });
+  }, [activeSide, JSON.stringify(sideOverrides)]);
+
   const go = (page) => PP.set({ page });
   const Page = PAGES[s.page] || HubMenu;
   const isHome = s.page === 'home';
   // The panic flow is full-screen: no sidebar, nothing competing for focus.
   const isPanic = s.page === 'panic';
+  // First run (6.4): the wizard replaces the whole app surface until it's
+  // completed OR skipped — either outcome sets `onboarded`, so it appears
+  // exactly once and can never trap someone who wants past it.
+  const needsOnboarding = !s.onboarded;
 
   return (
     <div className="window">
@@ -119,9 +164,11 @@ function App() {
       <TitleBar s={s} />
       <div className="body">
         <AnimatedBG bg={t.bg} intensity={t.intensity} />
-        {!isHome && !isPanic && <Sidebar s={s} go={go} />}
-        <main className="content scroll" key={s.page}>
-          <Page s={s} PP={PP} go={go} />
+        {!isHome && !isPanic && !needsOnboarding && <Sidebar s={s} go={go} />}
+        <main className="content scroll" key={needsOnboarding ? 'onboarding' : s.page}>
+          {needsOnboarding ?
+            <OnboardingFlow s={s} PP={PP} /> :
+            <Page s={s} PP={PP} go={go} />}
         </main>
       </div>
 
@@ -129,9 +176,8 @@ function App() {
         <TweakSection label="Appearance" />
         <TweakRadio label="Theme" value={t.theme} options={['light', 'dark']}
                     onChange={(v) => setTweak('theme', v)} />
-        <TweakSelect label="Palette" value={t.style}
-                     options={['aurora', 'lagoon', 'dawn', 'midnight', 'forest', 'ember', 'noir']}
-                     onChange={(v) => setTweak('style', v)} />
+        {/* Palette picker removed (UX Direction §7): Noir is the only built-in
+            theme. Custom colors live on the Themes page as token overrides. */}
         <TweakSection label="Atmosphere" />
         <TweakSelect label="Background" value={t.bg}
                      options={['both', 'orbs', 'waves', 'stars', 'ripple', 'smoke', 'off']}

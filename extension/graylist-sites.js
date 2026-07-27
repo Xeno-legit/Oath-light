@@ -52,6 +52,14 @@ const GRAYLIST_SITES = [
   // Previously whitelisted (total bypass) — now filtered (adversarial report §1.4/§3.1).
   { url: 'youtube.com',         kind: 'enforce', desc: 'Restricted Mode forced (PREF cookie); explicit/suggestive searches blocked' },
   { url: 'spotify.com',         kind: 'enforce', desc: 'Explicit erotica/adult audio searches blocked' },
+  // ── Mainstream AI platforms with NSFW corners (plan 3.3) ──────────────────
+  // The dedicated AI-erotica sites are blocked outright (blocklists/
+  // domains_ai.json + the civitai/undressai/nudify stems). These four are
+  // mainstream tools people have real reasons to use, so they're filtered in
+  // place instead: the platform works, the adult search doesn't.
+  { url: 'character.ai',        kind: 'enforce', desc: 'NSFW character searches blocked; the platform stays usable' },
+  { url: 'poe.com',             kind: 'enforce', desc: 'NSFW bot searches blocked; the platform stays usable' },
+  { url: 'huggingface.co',      kind: 'enforce', desc: 'NSFW model & dataset searches blocked; ordinary model browsing untouched' },
   // ── Discord (NSFW channels/servers blocked, platform kept) ────────────────
   { url: 'discord.com',         kind: 'discord', desc: 'Age-restricted channels & servers blocked' }
 ];

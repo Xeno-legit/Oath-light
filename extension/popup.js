@@ -40,21 +40,28 @@ function setMsg(text, ok) {
   el.style.color = ok ? 'var(--accent-2)' : '#e0564f';
 }
 
+/* Voice layer (UX Direction §2) — static popup copy is bound declaratively in
+ * popup.html via `data-ol-str`; this is the lookup for the messages built here
+ * in JS. Guarded so the popup still works if strings.js fails to load. */
+function t(key, params) {
+  return window.OLVoice ? window.OLVoice.t(key, params) : key;
+}
+
 function addDomain() {
   const url = cleanUrl($('blockInput').value);
   if (!url) return;
-  if (!url.includes('.') || url.includes(' ')) { setMsg('Enter a valid domain (e.g. example.com)', false); return; }
+  if (!url.includes('.') || url.includes(' ')) { setMsg(t('popup.block_error_invalid'), false); return; }
 
   chrome.runtime.sendMessage({ action: 'addCustomDomain', domain: url }, (res) => {
-    if (chrome.runtime.lastError || !res) { setMsg('Could not save. Try again.', false); return; }
+    if (chrome.runtime.lastError || !res) { setMsg(t('popup.block_error_generic'), false); return; }
     if (!res.success) {
-      setMsg(res.reason === 'default' ? 'Already blocked by default.'
-        : res.reason === 'exists' ? 'Already in your blocklist.'
-        : 'Could not save. Try again.', false);
+      setMsg(res.reason === 'default' ? t('popup.block_error_default')
+        : res.reason === 'exists' ? t('popup.block_error_duplicate')
+        : t('popup.block_error_generic'), false);
       return;
     }
     $('blockInput').value = '';
-    setMsg('Blocked “' + url + '”.', true);
+    setMsg(t('popup.block_success', { domain: url }), true);
     setTimeout(() => setMsg('', true), 2200);
   });
 }

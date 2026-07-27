@@ -47,8 +47,11 @@ function AppBlockingSection() {
     const push = (text) => setRecent((r) => [{ id: Date.now() + Math.random(), ts: Date.now(), text }, ...r].slice(0, 6));
     window.PPNative.onProcessEnforcement((p) => push(`${p.name} — blocked list — killed`))
       .then((fn) => { if (cancelled) fn(); else unProc = fn; });
+    // UX Direction §3: report WHAT happened, not which category of evasion it
+    // was — the reason codes are still logged in full to the protection
+    // history and the app log, they just aren't a taxonomy on screen.
     window.PPNative.onEvasionDetected((p) => push(
-      `${p.name} — ${p.reason === 'tor_browser' ? 'Tor Browser' : p.reason === 'portable_browser' ? 'portable copy' : 'evasion browser'} — ${p.killed ? 'blocked' : 'detected (not blocked)'}`
+      `${p.name} — unrecognised browser — ${p.killed ? 'blocked' : 'detected (not blocked)'}`
     )).then((fn) => { if (cancelled) fn(); else unEvasion = fn; });
     return () => { cancelled = true; if (unProc) unProc(); if (unEvasion) unEvasion(); };
   }, [available]);
@@ -161,8 +164,12 @@ function AppBlockingSection() {
       <div className="setting">
         <div className="ico"><IconShieldOff size={20} /></div>
         <div className="txt">
+          {/* UX Direction §3 — "status yes, map no": this used to name the
+              specific browsers it defends against, which is a list of things
+              to go try. What the user needs here is what the switch DOES; the
+              full threat model lives in SECURITY.md, outside the app. */}
           <b>Block unknown &amp; evasion browsers</b>
-          <span>Kill Tor Browser, LibreWolf and other extension-proof browsers — and portable copies of known ones — on sight instead of just logging them. Off by default: detections are always logged as warnings either way, this only decides whether they're also force-closed.</span>
+          <span>Close unrecognised browsers on sight instead of only recording them. Off by default — either way, anything unrecognised is written to your protection history.</span>
         </div>
         <Switch on={killUnknown} onClick={() => toggleEvasionKill(!killUnknown)} disabled={busy || !available} />
       </div>
@@ -265,11 +272,13 @@ function DnsFilterSection() {
       <div className="setting" style={{ alignItems: 'flex-start' }}>
         <div className="ico"><IconShield size={20} /></div>
         <div className="txt" style={{ flex: 1 }}>
+          {/* UX Direction §3 — the old copy enumerated exactly which apps the
+              extension can't reach, i.e. a shopping list. Kept: what it does,
+              what it costs (admin rights), and that it's opt-in. */}
           <b>System DNS filter</b>
           <span>
-            Blocks explicit domains at the network level — for apps the browser extension can't reach, like Tor,
-            portable browsers and Electron apps. Requires administrator rights to take over your DNS, and disables
-            browser DNS-over-HTTPS by policy while active (otherwise a browser could resolve around it). Opt-in.
+            Extends blocking beyond the browser to everything else on this computer. Needs administrator
+            rights once, to take over DNS. Opt-in.
           </span>
           <div style={{ fontSize: 12.5, color: statusColor, marginTop: 8 }}>{statusText}</div>
           {err && <div style={{ fontSize: 12, color: '#d9534f', marginTop: 6 }}>{err}</div>}
@@ -519,6 +528,103 @@ function SettingRow({ icon: I, title, desc, on, onToggle, accent }) {
 
 }
 
+// --- Environment tools (plan item 5.6) --------------------------------------
+
+// Two things that aren't blocking and shouldn't pretend to be: desaturating
+// the screen during the risk window, and offering the user's own alternatives
+// on the block page instead of only a wall.
+//
+// Note the friction asymmetry deliberately does NOT apply to the grayscale
+// toggle — see `settings.rs`'s `grayscale_vulnerable_hours` and grayscale.rs.
+// Turning it off unblocks nothing, and holding someone's display hostage for
+// 24 hours over a wellbeing nudge would be applying a good rule in the wrong
+// place.
+function EnvironmentToolsCard({ s, PP }) {
+  const available = !!(window.PPNative && window.PPNative.available);
+  const b = s.blocking || {};
+  const alts = b.alternatives || [];
+  const [draft, setDraft] = React.useState('');
+  const [draftUrl, setDraftUrl] = React.useState('');
+  const [err, setErr] = React.useState('');
+
+  const toggleGray = () => {
+    const next = !b.grayscaleVulnerable;
+    setErr('');
+    // Mirror locally straight away; the backend owns the persisted value.
+    PP.set({ blocking: { grayscaleVulnerable: next } });
+    if (available) {
+      window.PPNative.setGrayscaleVulnerableHours(next)
+        .catch((e) => {
+          setErr(e && e.message ? e.message : String(e));
+          PP.set({ blocking: { grayscaleVulnerable: !next } });
+        });
+    }
+  };
+
+  const addAlt = () => {
+    const text = draft.trim();
+    if (!text) return;
+    const url = draftUrl.trim();
+    // Arrays are replaced wholesale by PP.set, so build the new one here.
+    PP.set({ blocking: { alternatives: alts.concat([{ id: String(Date.now()), text, url }]) } });
+    setDraft(''); setDraftUrl('');
+  };
+  const removeAlt = (id) => {
+    PP.set({ blocking: { alternatives: alts.filter((a) => a.id !== id) } });
+  };
+
+  return (
+    <div className="card fade-up" style={{ marginBottom: 18 }}>
+      <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Your environment</div>
+      <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12, maxWidth: '60ch', lineHeight: 1.5 }}>
+        Not blocking — these change what the hard hour feels like, and what you're offered
+        instead of just a closed door.
+      </div>
+
+      <div className="setting">
+        <div className="ico"><IconMoon size={20} /></div>
+        <div className="txt">
+          <b>Grayscale during vulnerable hours</b>
+          <span>
+            Drains the colour out of your whole screen while your risk window is running, then
+            gives it back. On some Windows builds this takes effect at the next sign-in rather
+            than instantly. You can switch it off any time — it isn't a protection.
+          </span>
+        </div>
+        <Switch on={!!b.grayscaleVulnerable} onClick={toggleGray} disabled={!available} />
+      </div>
+      {err && <div style={{ fontSize: 12, color: '#d9534f', margin: '-6px 0 10px 54px' }}>{err}</div>}
+
+      <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', margin: '18px 0 4px' }}>
+        Instead, I'd rather…
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 10, maxWidth: '60ch' }}>
+        What you write here shows up on the block screen. Write it now, while you're thinking
+        clearly — that's the whole trick. Leave it empty and the block screen won't invent
+        advice of its own.
+      </div>
+
+      {alts.map((a) => (
+        <div className="setting" key={a.id}>
+          <div className="ico"><IconSpark size={20} /></div>
+          <div className="txt"><b>{a.text}</b>{a.url && <span>{a.url}</span>}</div>
+          <button className="btn btn-ghost" style={{ padding: '4px 12px', fontSize: 12.5 }}
+                  onClick={() => removeAlt(a.id)}>Remove</button>
+        </div>
+      ))}
+
+      {alts.length < 6 &&
+        <div className="row" style={{ gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+          <input className="input" placeholder="Go do 20 push-ups" value={draft}
+                 onChange={(e) => setDraft(e.target.value)} style={{ flex: '1 1 220px' }} />
+          <input className="input" placeholder="Optional link" value={draftUrl}
+                 onChange={(e) => setDraftUrl(e.target.value)} style={{ flex: '1 1 180px' }} />
+          <button className="btn btn-ghost" onClick={addAlt} disabled={!draft.trim()}>Add</button>
+        </div>}
+    </div>
+  );
+}
+
 function BlockingPage({ s, PP }) {
   const b = s.blocking;
   const set = (patch) => PP.set({ blocking: patch });
@@ -578,6 +684,35 @@ function BlockingPage({ s, PP }) {
         <h1 className="page-title">How firmly to <em style={{ fontFamily: "Manrope" }}>hold the line</em></h1>
         <p className="page-sub">Have custom Blocking settings, Like redirects, videos and more.</p>
       </div>
+
+      {/* Strictness presets (6.4) — the same three the first-run wizard offers,
+          reachable again here. `PP.applyPreset` can only ever strengthen, so
+          switching down a level never turns a backend protection off; those
+          keep their own friction-gated paths further down this page. */}
+      <div className="card fade-up" style={{ marginBottom: 18 }}>
+        <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Strictness</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 10, maxWidth: '60ch', lineHeight: 1.5 }}>
+          A starting point, not a cage — every individual setting below stays yours to tune afterwards.
+        </div>
+        {(PP.PRESETS || []).map((p) => {
+          const active = (b.strictness || 'standard') === p.id;
+          return (
+            <div className="setting" key={p.id}>
+              <div className="ico"><IconSliders size={20} /></div>
+              <div className="txt"><b>{p.name}</b><span>{p.desc}</span></div>
+              <button className={'btn ' + (active ? 'btn-primary' : 'btn-ghost')}
+                      onClick={() => PP.applyPreset(p.id)}>
+                {active ? 'Selected' : 'Choose'}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Environment tools (5.6) — grayscale hours + habit replacement.
+          Neither of these blocks anything; they change what the hard hour
+          feels like, and what the block screen offers instead of a wall. */}
+      <EnvironmentToolsCard s={s} PP={PP} />
 
       {/* redirect & blocking screen */}
       <div className="card fade-up">

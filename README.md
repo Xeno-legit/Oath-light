@@ -1,18 +1,37 @@
 # Oath Light
 
-Oath Light is a free, open-source content-filtering system that blocks pornographic and
-other NSFW material at the network, page, and platform level. It comprises a Manifest V3
-browser extension for real-time request and content filtering and a Tauri (Rust) desktop
-application for system-level persistence and tamper resistance.
+Oath Light is a free, open-source anti-addiction system that blocks pornographic
+and other NSFW material at the network, page, and platform level. It comprises a
+Manifest V3 browser extension for real-time request and content filtering, and a
+Tauri (Rust) desktop application for system-level filtering, on-device AI
+screen protection, and tamper resistance.
 
 ![Oath Light Demonstration](Demogif.gif)
 
-## Core Philosophy
+## Core philosophy
 
-Oath Light is built on the principle of accessible protection. The application is free and
-licensed under the GNU General Public License v3.0. It contains no paid subscriptions, no
-premium tiers, no locked features, and no advertising. The objective is a robust, auditable
-tool available to anyone, without financial or data-collection barriers.
+Oath Light is built on the principle of accessible protection. It is licensed
+under the GNU General Public License v3.0, with no paid subscriptions, no
+premium tiers, no locked features, and no advertising. The objective is a
+robust, auditable tool available to anyone, without financial or data-collection
+barriers.
+
+It is built for one user in particular: the person who seriously wants this
+over. Commitments made in the strong moment are made binding in the weak
+moment — protections turn **on** instantly and turn **off** only after a
+cool-off. That asymmetry is the product.
+
+## Documentation
+
+| Document | What's in it |
+| :-- | :-- |
+| [ROADMAP.md](ROADMAP.md) | **What's left.** The only place work is tracked |
+| [docs/VISION.md](docs/VISION.md) | Why it exists, and the settled product decisions |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it blocks — layers, pipeline, engine rules |
+| [SECURITY.md](SECURITY.md) | The full threat model, including known limitations |
+| [BYPASSES.md](BYPASSES.md) | Found a hole? Report it here |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, tests, and the blocklist-PR rules |
+| [docs/RELEASE.md](docs/RELEASE.md) | Store publication, zip builds, OTA releases |
 
 ## Architecture
 
@@ -20,177 +39,192 @@ tool available to anyone, without financial or data-collection barriers.
 | :--- | :--- | :--- |
 | Browser extension | Manifest V3 service worker, plain JavaScript (no build step) | URL filtering, keyword detection, SafeSearch enforcement, graylist interception |
 | MAIN-world interceptor | Injected web-accessible script (`graylist-inject.js`) | Strips NSFW items from in-page `fetch`/XHR JSON before render |
-| Desktop application | Tauri 2 (Rust core, web UI) | Persistence, native-messaging bridge, watchdog, uninstall friction |
-| Native messaging host | Rust | Secure channel between the extension and the desktop service |
+| Desktop application | Tauri 2 (Rust core, web UI) | System DNS filtering, AI screen monitor, friction, watchdog, native bridge |
+| Filtering DNS resolver | Rust (`oathlight-dns`) | System-wide domain filtering for apps the extension can't reach |
+| Native messaging host | Rust | Authenticated channel between the extension and the desktop service |
+| Guardian process | Rust | Mutual watchdog — keeps the service alive, and is kept alive by it |
 
-The extension's blocking logic is deterministic and hostname-based; it does not score pages
-or transmit data for evaluation. All processing is local.
+The extension's blocking logic is deterministic and hostname-based; it does not
+score pages or transmit data for evaluation. All processing is local.
 
-## Protection Layers
+## Protection layers
 
-Oath Light applies independent, complementary layers. A request is blocked if any layer matches.
+A request is blocked if any layer matches. Each exists because the one above it
+has a known blind spot — the full pipeline is documented in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### 1. Curated domain blacklist
-- **385,588 curated domains** bundled with the extension, sharded across three JSON files and
-  loaded into the service worker at startup.
-- This list was reduced from an original **545,762 entries** (a 29.3% reduction) by removing
-  every domain the keyword engine already catches; the remainder are domains with no
-  machine-detectable stem (the "solid wall"). See [DOMAINS_HANDOFF.md](DOMAINS_HANDOFF.md).
+- **385,597 curated domains** bundled with the extension, sharded across three
+  JSON files and loaded into the service worker at startup.
+- Reduced from an original **545,762 entries** (−29.3%) by removing every domain
+  the keyword engine already catches; the remainder are domains with no
+  machine-detectable stem — the "solid wall".
 - Matching is exact-and-parent: a blocked domain also blocks its subdomains.
+- Updated over the air between releases via a **signed** manifest (Ed25519),
+  verified before use. A bad list can never brick browsing.
 
 ### 2. Multilingual keyword engine
-A pattern layer that runs on the lowercased hostname even when the blacklist does not match:
-- **41 languages** plus anime/3D, fetish and leak slang, and adult-gaming terminology.
-- Approximately 600 unambiguous "strong" stems (substring match), explicit compounds, and
-  ambiguous roots guarded by a whitelist of trap words (for example, `sex` is excused inside
-  "essex", `anal` inside "analytics").
-- **Leetspeak normalization** (for example, `p0rn` to `porn`) before matching.
-- **Native-script detection** via vendored RFC-3492 punycode decoding, covering Arabic,
-  Chinese, Cyrillic, Japanese, Korean, Greek, Hebrew, and Bengali terms.
-- **Homoglyph folding** maps Cyrillic, Greek, Coptic, and full-width look-alikes to Latin so
-  that, for example, `pоrn.com` (Cyrillic "о") folds to `porn`.
-- Adult top-level domains (`.xxx`, `.porn`, `.adult`, `.sex`, `.sexy`) are blocked outright.
+Runs on the lowercased hostname even when the blacklist doesn't match:
+- **41 languages** plus anime/3D, fetish and leak slang, and adult-gaming terms.
+- ~600 unambiguous "strong" stems, explicit compounds, and ambiguous roots
+  guarded by a whitelist of trap words (`sex` excused inside "essex", `anal`
+  inside "analytics").
+- **Leetspeak normalization** (`p0rn` → `porn`) before matching.
+- **Native-script detection** via vendored RFC-3492 punycode decoding, covering
+  Arabic, Chinese, Cyrillic, Japanese, Korean, Greek, Hebrew and Bengali terms.
+- **Homoglyph folding** maps Cyrillic, Greek, Coptic and full-width look-alikes
+  to Latin, so `pоrn.com` (Cyrillic "о") folds to `porn`.
+- Adult TLDs (`.xxx`, `.porn`, `.adult`, `.sex`, `.sexy`) are blocked outright.
 
 ### 3. Graylist V2 — platform-level interception
-Mixed-content platforms (Reddit, X, Pixiv, and similar) cannot be whole-site blocked without
-removing legitimate use, and cannot be left untouched. Oath Light reads each platform's **own
-per-item NSFW label** and removes the flagged items before they render. This is ground-truth
-filtering rather than heuristics, and it survives site redesigns because the underlying API
-fields are stable.
+Mixed-content platforms can't be whole-site blocked without removing legitimate
+use, and can't be left untouched. Oath Light reads each platform's **own
+per-item NSFW label** and removes flagged items before they render — ground
+truth rather than heuristics, and it survives redesigns because the underlying
+API fields stay stable.
 
-- **35 platforms covered**: 24 via JSON/API interception, 10 via server-rendered DOM filtering
-  with whole-page blocking of adult content pages, and Discord via age-restricted channel and
-  server blocking.
-- Examples of the labels used: Reddit `over_18`, X `possibly_sensitive`, Pixiv `xRestrict`,
-  Mastodon `sensitive`, Mangadex `contentRating`, NexusMods `contains_adult_content`,
-  Writing.Com content rating (`crating` 18+/GC/XGC).
+- **35 platforms**: 24 via JSON/API interception, 10 via server-rendered DOM
+  filtering with whole-page blocking of adult content pages, and Discord via
+  age-restricted channel and server blocking.
+- Labels used include Reddit `over_18`, X `possibly_sensitive`, Pixiv
+  `xRestrict`, Mastodon `sensitive`, Mangadex `contentRating`, NexusMods
+  `contains_adult_content`, Writing.com `crating`.
 
 ### 4. SafeSearch and search enforcement
-- SafeSearch is forced on **Google, Bing, DuckDuckGo, and Yahoo** by URL parameter, and the
-  toggle UI is hidden to prevent disabling it.
-- Explicit search queries are blocked, including a keyword filter on Reddit and Patreon search
-  paths.
+SafeSearch is forced on Google, Bing, DuckDuckGo and Yahoo by URL parameter and
+the toggle UI is hidden; YouTube Restricted Mode is available as a strictness
+level. Explicit search queries are blocked, including a keyword filter on Reddit
+and Patreon search paths.
 
 ### 5. Bypass and evasion defense
-- Translation and archive wrappers (`translate.google`, `web.archive.org`) are unwrapped and
-  the real target is re-checked recursively.
-- Known bypass proxies (for example, croxyproxy, 12ft.io, archive.today) are blocked.
+- Translation and archive wrappers are unwrapped and the real target re-checked.
+- Known bypass proxies (croxyproxy, 12ft.io, archive.today…) are blocked.
 - Raw public-IP navigation is blocked; loopback and private ranges are exempt.
-- An allowlist of approximately 110 mainstream domains is never blocked.
+- An allowlist of ~110 mainstream domains is never blocked.
 
-## Desktop Integration
+### 6. System DNS filtering
+A local filtering resolver takes over the system DNS, so the same blacklist and
+keyword engine apply to **every application**, not just browsers with the
+extension. DNS-over-HTTPS is closed off by policy where browsers expose it and
+by blocking well-known DoH endpoints in the resolver. Opt-in, needs admin, and
+disabling it is a friction-gated weakening like everything else.
 
-- **System-level persistence** via a lightweight Tauri (Rust) companion application.
-- **Dual-process watchdog**: a secondary process monitors the main service and restarts it,
-  resisting unauthorized termination.
-- **Native messaging**: an authenticated bridge between the extension and the desktop service.
-- **High-friction uninstall**: a configurable waiting period (for example, 48 hours) before
-  removal, with options to reset, cancel, or proceed.
+### 7. On-device AI screen protection
+An ONNX ensemble (SigLIP Image-Guard + NudeNet) runs **entirely locally** —
+no frame ever leaves the device. It escalates only on persistence across frames,
+never single-frame confidence, and its only actions are a dwell-gated overlay
+and opening the user's own redirect. Reporting a false positive shortens the
+pause without ever making the filter catch less.
 
-## Comparison with Existing Tools
+## Tamper resistance
 
-The following table compares Oath Light against widely used alternatives on attributes that are
-publicly documented and structurally stable. Vendor pricing and feature sets change over time;
-verify current details independently before relying on them.
+- **Delayed weakening.** Turning any protection *on* is instant. Turning one
+  *off* — the AI monitor, DNS filtering, lockdown, Serious Mode, a custom
+  block — files a request with a 24-hour cool-off. Uninstall additionally
+  requires typing a random 12-word phrase minted when the request was filed.
+- **Clock-tamper immunity.** Timers use a monotonic anchor; rolling the system
+  clock forward freezes the timer and logs the event instead of skipping it.
+- **Lockdown Mode.** Allowlist-only browsing during vulnerable hours or on
+  demand, with a "frozen" variant that can only be waited out.
+- **Master password / second keyholder.** Argon2-hashed, optional, and settable
+  by a trusted person so the user cannot self-unlock.
+- **Tamper-evident event log.** Hash-chained locally: uninstall requests,
+  extension removals, monitor stops, clock anomalies. Nothing can be quietly
+  deleted from history — accountability integrity with no server.
+- **Dual-process watchdog** and double autostart registration (Run key **plus**
+  a logon scheduled task), each self-healing the other.
+- **All-browser enforcement.** Force-install via browser policy on Chromium and
+  Firefox, plus incognito/guest blocking and evasion-browser detection.
 
-| Attribute | Oath Light | Covenant Eyes | BlockerX | Cold Turkey Blocker | Net Nanny |
+## Recovery layer
+
+Blocking stops a request; it doesn't stop an urge.
+
+- Panic/SOS flow — breathing, the 20-minute wave, grounding, then the user's own
+  redirect — from the block screen, the tray, and a global hotkey.
+- Urge and slip logging with trigger tags, and local analytics that turn the
+  user's own risk window into one-click vulnerable hours.
+- **Compassionate streaks:** best streak never regresses, a slip dents rather
+  than erases, and a 24-hour gentle mode follows one. Shame-driven design causes
+  abandonment.
+- Optional trusted contact, notified on discrete events only — never browsing
+  history, never screenshots.
+
+## Comparison with existing tools
+
+Attributes below are publicly documented and structurally stable. Vendor pricing
+and features change; verify independently before relying on them.
+
+| Attribute | Oath Light | Covenant Eyes | BlockerX | Cold Turkey | Net Nanny |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | License | GPLv3 (open source) | Proprietary | Proprietary | Proprietary | Proprietary |
-| Cost model | Free | Subscription | Freemium (paid premium) | Freemium (paid Pro) | Subscription |
-| Primary purpose | NSFW content filter | Accountability and filtering | NSFW blocker and accountability | General website/app blocker | Parental-control suite |
-| Per-item filtering on mixed platforms (Reddit, X, Pixiv) | Yes | No | No | No | No |
-| Multilingual, native-script keyword engine | Yes (41 languages) | Limited | Limited | User-defined lists | Cloud content analysis |
-| Local-only processing, no activity reporting | Yes | No (reports to a partner) | Optional accountability | Yes | No (cloud-based) |
-| Tamper resistance / high-friction uninstall | Yes | Yes | Yes | Yes (Pro) | Yes |
+| Cost | Free | Subscription | Freemium | Freemium | Subscription |
+| Per-item filtering on mixed platforms | Yes | No | No | No | No |
+| Multilingual native-script keyword engine | Yes (41 languages) | Limited | Limited | User lists | Cloud analysis |
+| On-device AI screen protection | Yes | No | No | No | No |
+| Local-only processing, no reporting | Yes | No | Optional | Yes | No |
+| Tamper resistance / delayed uninstall | Yes | Yes | Yes | Yes (Pro) | Yes |
 | Open codebase for audit | Yes | No | No | No | No |
 
-Oath Light's principal differentiators are its open-source GPLv3 licensing at no cost, its
-platform-level per-item NSFW stripping (the graylist), and a multilingual keyword engine with
-native-script and homoglyph handling, all executed locally with no telemetry.
+## Covered graylist platforms
 
-## Covered Graylist Platforms
+Filtered in place rather than blocked outright.
 
-Each platform below is filtered in place rather than blocked outright.
+**API / network interception (24):** reddit, x/twitter, tumblr, pixiv, mastodon
+(all instances), imgur, nexusmods, vimeo, dailymotion, odysee, patreon, gumroad,
+minds, itaku, peertube (all instances), lemmy (all instances), mangadex,
+artstation, flickr, sketchfab, 500px, gamebanana, wattpad, fanbox.
 
-### API / network-layer interception (24)
-reddit, x / twitter, tumblr, pixiv, mastodon (all instances), imgur, nexusmods, vimeo,
-dailymotion, odysee, patreon, gumroad, minds, itaku, peertube (all instances), lemmy (all
-instances), mangadex, artstation, flickr, sketchfab, 500px, gamebanana, wattpad, fanbox.
+**Server-rendered DOM filtering (10):** newgrounds, archiveofourown,
+fanfiction.net, scribblehub, itch.io, steam, webtoons, tapas, ko-fi,
+writing.com.
 
-### Server-rendered DOM filtering and page blocking (10)
-newgrounds, archiveofourown, fanfiction.net, scribblehub, itch.io, steam, webtoons, tapas,
-ko-fi, writing.com.
+**Sub-unit blocking (1):** discord (age-restricted channels and servers).
 
-### Sub-unit blocking (1)
-discord (age-restricted channels and servers).
-
-Entirely or predominantly adult platforms (for example, image boards) are not graylisted; they
-are blocked outright by the curated blacklist.
-
-## How Blocking Is Applied
-
-| Method | Description | Target |
-| :--- | :--- | :--- |
-| Blacklist | Exact and parent-domain matching against 385,588 curated entries. | Known NSFW domains |
-| Keyword engine | Multilingual stem, compound, leetspeak, native-script, and homoglyph matching on the hostname. | Unlisted NSFW domains |
-| Graylist | Per-item NSFW stripping from JSON and server-rendered pages on mixed platforms. | NSFW items on legitimate sites |
-| Search filter | Forced SafeSearch parameters and explicit-query blocking. | Search engines |
-| Bypass defense | Unwrapping of translation/archive wrappers and blocking of proxies and raw IPs. | Evasion attempts |
-| Host blocking | (Planned) System-level blocks managed by the desktop application. | System-wide |
-
-## Development Status
-
-### Phase 1: Browser extension (Completed)
-- Core deterministic blocking logic and Manifest V3 compliance.
-- Password protection for extension settings.
-- Statistics tracking.
-
-### Phase 2: Domain and keyword engine (Completed)
-- 385,588-domain curated blacklist with a deduplicating pruner.
-- Multilingual keyword engine across 41 languages with native-script and homoglyph handling.
-
-### Phase 3: Desktop integration and Graylist V2 (Near completion)
-- Tauri desktop application, native-messaging bridge, and dual-process watchdog.
-- High-friction uninstall system.
-- Graylist V2 covering 35 mixed-content platforms.
-- Redesigned desktop interface.
-
-### Phase 4: Friction and watchdog systems (In progress)
-- 48-hour uninstall-request workflow.
-- Extension monitoring and optional AI-assisted monitoring.
+Mainstream AI platforms (character.ai, poe.com, huggingface.co) keep working
+while their NSFW search dies. Entirely or predominantly adult platforms are not
+graylisted — they are blocked outright.
 
 ## Installation
 
-The project is in beta and is currently installed from source.
+The project is in pre-Alpha. The extension is published; the desktop app is
+built from source.
 
-| Step | Action | Details |
-| :--- | :--- | :--- |
-| 1 | Clone the repository | `git clone https://github.com/Xeno-legit/Oath-light.git` |
-| 2 | Load the extension | Load the `extension` folder as an unpacked extension in your browser's developer mode. |
-| 3 | Build the desktop app | In `desktop-app`, follow the build instructions in that directory's README. |
-| 4 | Configure | Complete the setup wizard to set a master password and goals. |
+| Step | Action |
+| :--- | :--- |
+| 1 | Install the extension — [Chrome Web Store](https://chromewebstore.google.com/detail/oigdpcdgmldgjalfnlgekcbkmniplnad) (also covers Edge, Brave and other Chromium browsers) or [Firefox Add-ons](https://addons.mozilla.org/en-GB/firefox/addon/oath-light-content-filter/) |
+| 2 | `git clone https://github.com/Xeno-legit/Oath-light.git` |
+| 3 | Build the desktop app — see [CONTRIBUTING.md](CONTRIBUTING.md) |
+| 4 | Run it. The first-run wizard covers voice, strictness preset, vulnerable hours, and the optional master password and trusted contact — then shows you a live block so you can see it working |
 
-## Security and Privacy
+The desktop app is optional but strongly recommended: the extension alone cannot
+enforce cool-off delays, run the AI monitor, filter outside the browser, or keep
+itself installed.
 
-- **Local processing**: all blocking logic and content analysis run on the local machine.
-- **Zero telemetry**: no browsing data, statistics, or personal information is transmitted to
-  any external server.
-- **Open source**: the entire codebase is available for audit under GPLv3.
+## Security and privacy
+
+- **Local processing** — all blocking logic and content analysis run on device.
+- **Zero telemetry** — no browsing data, statistics or personal information is
+  transmitted anywhere. The only network calls are the signed blocklist fetch
+  and, if the user configures them, their own trusted-contact mail and their own
+  AI provider under their own key.
+- **Open source** — the entire codebase is auditable under GPLv3.
+- **Documented limits** — the full threat model, including what Oath Light does
+  *not* cover, is in [SECURITY.md](SECURITY.md). It lives there rather than in
+  the app on purpose: the app shows only honest, actionable status.
+- **Bypasses handled in the open** — [BYPASSES.md](BYPASSES.md).
 
 ## Contributing
 
-| Area | Process |
-| :--- | :--- |
-| Bug reports | Open a GitHub issue with reproduction steps and environment details. |
-| Feature requests | Open an issue describing the feature and its alignment with the project's goals. |
-| Code changes | Fork the repository, create a feature branch, and open a pull request. |
-| Blocklist updates | Edit the relevant blocklist or keyword file and open a pull request. |
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the test suites, and the rules
+for blocklist PRs (which are CI-checked against the allowlist floor and the
+adversarial suite). The one rule that governs everything: **no false positives**
+— a blocked legitimate site is worse than a missed porn site.
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0. See the [LICENSE](LICENSE)
-file for details.
+GNU General Public License v3.0 — see [LICENSE](LICENSE).
 
 ---
 
-Oath Light Blocker is founded and maintained by [Xeno-legit](https://github.com/Xeno-legit).
+Oath Light is founded and maintained by [Xeno-legit](https://github.com/Xeno-legit).

@@ -64,21 +64,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 // ============================================================================
 
 /// Cool-off before a *weakening* action (anything other than `"uninstall"`,
-/// which keeps its own longer-standing constant in `uninstall.rs`) is allowed
-/// to apply.
+/// which keeps its own separately-tunable constant in `uninstall.rs`) is
+/// allowed to apply.
 ///
-/// TESTING: currently **10 seconds** — same rationale, and the same
-/// owner-decision guard, as `uninstall::DEFAULT_DELAY_SECS`: this is
-/// intentionally tiny so the whole request -> wait -> apply flow can be
-/// exercised in one sitting. Product-owner decision; do not "fix" it without
-/// checking with them first. Safe at this size because elapsing only ever
-/// hands the pending payload to the applier thread — nothing about *this*
-/// timer being short makes any single weakening more dangerous than it
-/// already is once applied. For production set this back to 24 hours
-/// (`24 * 60 * 60`).
-/// Overridable at runtime with `OATHLIGHT_FRICTION_SECS` (seconds) — **debug
-/// builds only**, see `weakening_delay_secs` below.
-const DEFAULT_WEAKENING_DELAY_SECS: u64 = 10; // ← production: 24 * 60 * 60
+/// **Now at its real production value: 24 hours**, raised alongside the
+/// uninstall timer (plan item 4.6). The two are still separate constants on
+/// purpose so they can be dialled independently, but shipping one at 24h and
+/// the other at 10s would have made the whole asymmetry theatre — every
+/// protection would have been one click and ten seconds from off.
+///
+/// Local testing still works: debug builds honor `OATHLIGHT_FRICTION_SECS`
+/// (see `weakening_delay_secs` below); release builds ignore it entirely.
+const DEFAULT_WEAKENING_DELAY_SECS: u64 = 24 * 60 * 60;
 
 /// Debug builds: honor `OATHLIGHT_FRICTION_SECS` so the cool-off can be dialed
 /// down for manual testing. Release builds ignore the env var entirely and
@@ -109,19 +106,31 @@ fn weakening_delay_secs() -> u64 {
 /// override to speak of.
 const LOCKDOWN_ALLOW_DELAY_SECS: u64 = 60;
 
+/// Serious Mode's disable cool-off (UX Direction §1 asks for 24–48h against
+/// the ordinary weakening's 24h). Expressed as a MULTIPLE of the standard
+/// weakening delay rather than its own literal, so it stays correct
+/// automatically whichever value the base delay carries — 2× the test value
+/// while testing, 48h once the base is at its production 24h. Serious Mode is
+/// the strongest commitment the app offers, so it gets the longest wait of
+/// any reversible setting.
+const SERIOUS_DISABLE_DELAY_MULTIPLE: u64 = 2;
+
 /// Resolve the cool-off length for a given action id. `"uninstall"` defers to
 /// `uninstall::delay_secs()` — its own, separately-tunable constant, kept
 /// distinct on purpose so the two systems can still be dialed independently
 /// even though they now share one persistence engine. Any
 /// `"lockdown.allow:<domain>"` id gets the fixed short anti-brick delay
-/// (4.4). Every other action id gets the shared weakening default above —
-/// including `"lockdown.cancel"` and `"trusted_contact.remove"`, which are
-/// ordinary weakenings with no special-cased delay of their own.
+/// (4.4), and `"serious.disable"` gets the doubled Serious Mode cool-off (UX
+/// Direction §1). Every other action id gets the shared weakening default
+/// above — including `"lockdown.cancel"` and `"trusted_contact.remove"`, which
+/// are ordinary weakenings with no special-cased delay of their own.
 pub(crate) fn delay_for(action_id: &str) -> u64 {
     if action_id == "uninstall" {
         crate::uninstall::delay_secs()
     } else if action_id.starts_with("lockdown.allow:") {
         LOCKDOWN_ALLOW_DELAY_SECS
+    } else if action_id == "serious.disable" {
+        weakening_delay_secs().saturating_mul(SERIOUS_DISABLE_DELAY_MULTIPLE)
     } else {
         weakening_delay_secs()
     }
@@ -454,6 +463,19 @@ impl FrictionStore {
         map.get(action_id).map(|p| view_of(action_id, p))
     }
 
+    /// The stored payload of one pending change, if it exists.
+    ///
+    /// `PendingView` deliberately doesn't carry the payload — it's the
+    /// applier thread's data, not the renderer's, and most of it would be
+    /// noise in a countdown UI. The uninstall confirmation phrase (4.6) is the
+    /// exception: it's generated once at request time, persisted with the
+    /// request so it survives restarts, and has to be readable to be shown.
+    /// Hence this narrow accessor rather than widening the view for everyone.
+    pub fn payload_of(&self, action_id: &str) -> Option<serde_json::Value> {
+        let map = self.inner.lock().unwrap();
+        map.get(action_id).map(|p| p.payload.clone())
+    }
+
     /// Every pending change, sorted by request time (oldest first).
     pub fn list(&self) -> Vec<PendingView> {
         let mut map = self.inner.lock().unwrap();
@@ -527,6 +549,19 @@ mod tests {
         assert_eq!(delay_for("lockdown.cancel"), weakening_delay_secs());
         assert_eq!(delay_for("trusted_contact.remove"), weakening_delay_secs());
         assert_eq!(delay_for("guard.disable"), weakening_delay_secs());
+    }
+
+    /// Serious Mode's disable wait is deliberately the longest of any
+    /// reversible setting (UX Direction §1: 24–48h against the ordinary 24h).
+    /// Asserted as a multiple rather than a literal so it tracks whatever the
+    /// base weakening delay is set to, in either build profile.
+    #[test]
+    fn delay_for_serious_disable_is_double_the_ordinary_weakening() {
+        assert_eq!(
+            delay_for("serious.disable"),
+            weakening_delay_secs() * SERIOUS_DISABLE_DELAY_MULTIPLE
+        );
+        assert!(delay_for("serious.disable") > delay_for("guard.disable"));
     }
 
     #[test]

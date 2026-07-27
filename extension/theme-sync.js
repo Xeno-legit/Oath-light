@@ -10,8 +10,13 @@
  */
 (function () {
   const THEMES = ['light', 'dark'];
+  // Noir is the only theme the app still offers (UX Direction §7). The older
+  // names stay in this list purely as tolerant input validation — a profile
+  // that still has `style: 'aurora'` in storage from a previous build must not
+  // fall through to an unstyled page — but nothing writes them anymore and
+  // noir is the default for anything unrecognised.
   const STYLES = ['aurora', 'lagoon', 'dawn', 'midnight', 'forest', 'ember', 'noir'];
-  const DEFAULTS = { theme: 'dark', style: 'aurora' };
+  const DEFAULTS = { theme: 'dark', style: 'noir' };
 
   const pick = (v, allowed, fb) => (allowed.includes(v) ? v : fb);
 

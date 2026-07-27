@@ -5,7 +5,10 @@
   "main": "dist/main.js",
   "scripts": {
     "tauri": "tauri",
+    "free-sidecars": "taskkill /f /im oath-light-host.exe >nul 2>&1 & taskkill /f /im oathlightguard.exe >nul 2>&1 & exit 0",
+    "predev": "npm run free-sidecars",
     "dev": "tauri dev",
+    "prebuild": "npm run free-sidecars",
     "build": "tauri build",
     "electron:dev": "concurrently \"tsc -w\" \"electron .\"",
     "electron:start": "electron .",

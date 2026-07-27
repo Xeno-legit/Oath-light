@@ -1,5 +1,8 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-style="aurora">
+<!-- Noir is the only built-in theme and the default (UX Direction §7) — the
+     old palette variants are gone; user-custom colors are runtime token
+     overrides applied on top of Noir by the Themes page. -->
+<html lang="en" data-theme="dark" data-style="noir">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -14,6 +17,14 @@
   <script src="lib/react-dom.production.min.js"></script>
   <script src="lib/babel.min.js"></script>
 
+  <!-- Voice layer (UX Direction §2) — byte-identical copy of
+       design-system/strings.js, loaded before the store so PP.t() can
+       delegate to it from the first render. -->
+  <script src="strings.js"></script>
+  <!-- Token metadata manifest (names/groups/types, no values) — the Themes
+       page builds its custom-color editor from it. Byte-identical copy of
+       design-system/tokens.js. -->
+  <script src="tokens.js"></script>
   <script src="js/store.js"></script>
   <script type="text/babel" data-presets="react" src="js/tauri-bridge.jsx"></script>
   <script type="text/babel" data-presets="react" src="js/tweaks-panel.jsx"></script>
@@ -30,6 +41,7 @@
   <script type="text/babel" data-presets="react" src="js/pages-themes.jsx"></script>
   <script type="text/babel" data-presets="react" src="js/pages-settings.jsx"></script>
   <script type="text/babel" data-presets="react" src="js/pages-panic.jsx"></script>
+  <script type="text/babel" data-presets="react" src="js/pages-onboarding.jsx"></script>
   <script type="text/babel" data-presets="react" src="js/app.jsx"></script>
 </body>
 </html>

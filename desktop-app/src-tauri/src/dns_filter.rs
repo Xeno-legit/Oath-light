@@ -13,11 +13,13 @@
 //! all the shared state (blocklists, custom domains, settings) in one place.
 //! The two safety nets that make that safe against "the app died and left DNS
 //! pointing at a dead resolver" are:
-//!   1. the health check on the existing 3s `start_monitor` tick (see
-//!      `tick_health_and_revert`), which restores real DNS if the resolver
-//!      stops answering; and
-//!   2. the guardian's sanctioned-shutdown restore (guardian/src/main.rs),
-//!      the last-act restore for a legitimate uninstall.
+//!
+//! 1. the health check on the existing 3s `start_monitor` tick (see
+//!    `tick_health_and_revert`), which restores real DNS if the resolver
+//!    stops answering; and
+//! 2. the guardian's sanctioned-shutdown restore (guardian/src/main.rs),
+//!    the last-act restore for a legitimate uninstall.
+//!
 //! Fail open on infrastructure: any doubt, put the real upstreams back.
 
 use oathlight_dns::{takeover, CapturedDns};

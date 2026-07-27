@@ -43,6 +43,7 @@
   "background": {
     "service_worker": "background.js",
     "scripts": [
+      "strings.js",
       "bg/blocklists.js",
       "bg/matching.js",
       "bg/graylist.js",

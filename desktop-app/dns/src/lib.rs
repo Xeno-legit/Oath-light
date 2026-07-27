@@ -16,15 +16,15 @@
 //! apply elsewhere in this codebase.
 //!
 //! Module map:
-//!   - `packet`   — wire-format parsing (query -> `ParsedQuery`) and
-//!                  NXDOMAIN/health-check query synthesis. Pure, well-tested.
-//!   - `decide`   — the block/allow policy: whitelist floor, DoH endpoints,
-//!                  built-in blocklist, keyword layer, custom user domains.
-//!   - `server`   — the UDP+TCP listener + upstream forwarding + the
-//!                  loopback health-check probe.
-//!   - `upstream` — captured pre-takeover DNS state (`dns.json`) + fallback
-//!                  public resolvers.
-//!   - `takeover` — Windows adapter enumeration/takeover/restore (admin-only).
+//! - `packet` — wire-format parsing (query -> `ParsedQuery`) and
+//!   NXDOMAIN/health-check query synthesis. Pure, well-tested.
+//! - `decide` — the block/allow policy: whitelist floor, DoH endpoints,
+//!   built-in blocklist, keyword layer, custom user domains.
+//! - `server` — the UDP+TCP listener + upstream forwarding + the
+//!   loopback health-check probe.
+//! - `upstream` — captured pre-takeover DNS state (`dns.json`) + fallback
+//!   public resolvers.
+//! - `takeover` — Windows adapter enumeration/takeover/restore (admin-only).
 //!
 //! **Where this runs:** started and stopped directly from the Tauri app
 //! (`src-tauri`'s `dns_filter` module) rather than a separate always-on

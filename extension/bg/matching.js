@@ -403,7 +403,25 @@ const GRAYLIST_SEARCH_ROUTES = new Map([
   ['gamebanana.com',  (u) => u.searchParams.get('_sSearchString') || u.searchParams.get('q')],
   // "Trusted" hosts whose on-site search can surface explicit galleries (§1.3).
   ['wikimedia.org',   (u) => u.searchParams.get('search')],
-  ['archive.org',     (u) => u.searchParams.get('query') || u.searchParams.get('q')]
+  ['archive.org',     (u) => u.searchParams.get('query') || u.searchParams.get('q')],
+
+  // ── Mainstream AI platforms with NSFW corners (plan item 3.3) ────────────
+  // These are NOT the AI-erotica blacklist (domains_ai.json) and NOT the
+  // stem-blocked ones (civitai, undressai, … are STRONG stems, blocked
+  // outright). These four are genuinely mainstream, genuinely useful, and get
+  // the graylist treatment instead: the platform stays fully usable and only
+  // the adult SEARCH dies. That distinction is the whole reason graylisting
+  // exists — blocking huggingface.co outright would be absurd, and leaving its
+  // NSFW model search untouched would be a hole.
+  //
+  // Character platforms are the highest-value entry here: their filters are
+  // routinely worked around, and the search box is where that starts.
+  ['character.ai',    (u) => pathStartsWith(u, '/search') ? u.searchParams.get('q') : null],
+  ['c.ai',            (u) => pathStartsWith(u, '/search') ? u.searchParams.get('q') : null],
+  ['poe.com',         (u) => pathStartsWith(u, '/search') ? u.searchParams.get('q') : null],
+  // Model hubs: the search endpoint carries the term in `search` (HF) — an
+  // NSFW-keyword model/dataset hunt is blocked, ordinary model browsing is not.
+  ['huggingface.co',  (u) => u.searchParams.get('search') || (pathStartsWith(u, '/search') ? u.searchParams.get('q') : null)]
 ]);
 
 const GRAYLIST_SEARCH_DOMAINS = new Set(GRAYLIST_SEARCH_ROUTES.keys());
@@ -693,7 +711,7 @@ const KEYWORD_STEMS_STRONG = [
   'titties', 'boobies', 'sexcam', 'sexvideo', 'sextape', 'escortservice',
 
   // ═══ Multi-language — Batch 1 (ES FR DE PT AR RU ZH TR JA HI) ═══
-  // Source: nsfw_multilingual_keywords.md. Only unique/long terms that survived
+  // Source: docs/reference/nsfw-keywords-multilingual.md. Only unique/long terms that survived
   // each language's WARNING block. Short/common terms (am, cu, se, gan, cao, av,
   // kos, tiz, geil, arsch, dul, lund, chod, boquete, gostosa, family-relation
   // words…) are EXCLUDED — deferred to the curated list + native-script (IDN).
@@ -1555,6 +1573,97 @@ function lockdownState() {
   return (typeof blockingSettings === 'object' && blockingSettings && blockingSettings.lockdown) || null;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// URL PATH / QUERY KEYWORD LAYER (plan item 3.7)
+// ════════════════════════════════════════════════════════════════════════════
+// The keyword engine has always run on HOSTNAMES only, which leaves the NSFW
+// *sections* of otherwise-unlisted mixed sites uncovered (`example.com/porn/`,
+// `?tag=nsfw`). This layer closes that — but it is the highest-false-positive
+// thing in the whole matcher, so it is deliberately hedged four ways:
+//
+//   1. **Opt-in.** It only runs under the Strict or Lockdown preset (6.4), or
+//      while Serious Mode is on. The default Standard preset never sees it.
+//   2. **Last.** It is the final check in `shouldBlockUrl`, reached only by a
+//      host that is not whitelisted, not blacklisted, not graylisted, and not
+//      caught by the hostname keyword layer — i.e. genuinely unknown.
+//   3. **Whole tokens only.** The path/query is split on non-alphanumerics and
+//      each segment must EQUAL a keyword. No substring matching, ever. This is
+//      what makes the existing trap-word discipline unnecessary here: "rape"
+//      cannot match inside "therapeutic" when only whole segments are compared.
+//   4. **Hard keywords single, soft keywords in pairs.** One unambiguous term
+//      ("hentai") blocks; ambiguous ones ("sex", "nude") need two DISTINCT
+//      soft terms before they mean anything, so `/health/sex-education` stays
+//      reachable while `/nude/sexy/gallery` does not.
+//
+// Multi-word keywords ("sex video") are skipped: URL segments are single
+// tokens by construction, so those entries could never match anyway.
+
+// Segments that flip a page from "adult" to "about adult things" — an entire
+// category of legitimate content this layer must not touch. One of these
+// anywhere in the path disarms the layer for that URL.
+const PATH_KEYWORD_EXEMPT_SEGMENTS = new Set([
+  'education', 'educational', 'health', 'healthcare', 'medical', 'medicine',
+  'anatomy', 'biology', 'science', 'research', 'study', 'therapy', 'therapist',
+  'counselling', 'counseling', 'recovery', 'addiction', 'support', 'help',
+  'abuse', 'assault', 'consent', 'safeguarding', 'policy', 'policies', 'legal',
+  'law', 'news', 'article', 'report', 'wiki', 'definition', 'dictionary',
+  'documentation', 'docs', 'api', 'faq', 'about', 'privacy', 'terms',
+]);
+
+// Split a path + query into lowercase alphanumeric tokens. Query VALUES are
+// included (`?tag=nsfw`) alongside keys; percent-encoding is decoded first so
+// `%68entai` tokenizes the same as `hentai`.
+function urlKeywordTokens(urlObj) {
+  let raw = urlObj.pathname + ' ' + urlObj.search;
+  try { raw = decodeURIComponent(raw); } catch (e) { /* malformed escape — use as-is */ }
+  return raw.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+// Is the Strict-or-above tier armed? Reads the same pushed blocking settings
+// every other desktop-driven toggle here reads. Serious Mode (UX Direction §1)
+// forces it on regardless of the preset — it covers everything, by definition.
+function pathKeywordLayerArmed() {
+  const s = (typeof blockingSettings === 'object' && blockingSettings) || null;
+  if (!s) return false;
+  if (s.serious === true) return true;
+  return s.strictness === 'strict' || s.strictness === 'lockdown';
+}
+
+// Returns `{ reason, match }` when the URL's path/query should block, else null.
+// Exposed for the test suite as well as `shouldBlockUrl`.
+function checkUrlPathKeywords(urlObj) {
+  if (!pathKeywordLayerArmed()) return null;
+
+  const tokens = urlKeywordTokens(urlObj);
+  if (tokens.length === 0) return null;
+
+  for (const tok of tokens) {
+    if (PATH_KEYWORD_EXEMPT_SEGMENTS.has(tok)) return null;
+  }
+  const tokenSet = new Set(tokens);
+
+  // Tier 1 — one unambiguous term is enough.
+  for (const kw of HARD_PORN_KEYWORDS) {
+    if (kw.includes(' ')) continue; // multi-word: can't be a single URL segment
+    if (tokenSet.has(kw)) return { reason: 'keyword_path', match: kw };
+  }
+
+  // Tier 2 — two DISTINCT ambiguous terms. One is noise; two in the same URL
+  // is a pattern.
+  const softHits = [];
+  for (const kw of SOFT_PORN_KEYWORDS) {
+    if (kw.includes(' ')) continue;
+    if (tokenSet.has(kw)) {
+      softHits.push(kw);
+      if (softHits.length >= 2) {
+        return { reason: 'keyword_context', match: softHits.join('+') };
+      }
+    }
+  }
+
+  return null;
+}
+
 function isLockdownActive() {
   const ld = lockdownState();
   if (!ld || !ld.active) return false;
@@ -1789,6 +1898,16 @@ function shouldBlockUrl(url, depth = 0) {
 
     // (Trusted-host adult-path check moved to STEP 1.5 — see above — so it
     // applies to whitelisted hosts too.)
+
+    // STEP 7: URL PATH / QUERY KEYWORD LAYER (3.7) — Strict-and-above only.
+    // Deliberately LAST: by here the host is genuinely unknown (not
+    // whitelisted, blacklisted, graylisted, or hostname-keyword matched), so
+    // this can only ever ADD a block, never suppress an allow decision made
+    // above it. See `checkUrlPathKeywords` for why it's this conservative.
+    const pathKw = checkUrlPathKeywords(urlObj);
+    if (pathKw) {
+      return { blocked: true, reason: pathKw.reason, match: pathKw.match, tier: 'keyword', hostname };
+    }
 
     return { blocked: false, tier: 'unknown', hostname };
 

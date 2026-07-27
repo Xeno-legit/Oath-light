@@ -164,7 +164,10 @@
     resetUninstallTimer() { return invoke('reset_uninstall_timer'); },
     cancelUninstall() { return invoke('cancel_uninstall'); },
     // Resolves to "launched" (uninstaller started, app will close) or "manual".
-    completeUninstall() { return invoke('complete_uninstall'); },
+    // `confirm` is the typed confirmation phrase (4.6) — the backend compares
+    // it against the one it minted when the request was filed and rejects a
+    // mismatch, so this is not a renderer-side check that can be skipped.
+    completeUninstall(confirm) { return invoke('complete_uninstall', { confirm: confirm || null }); },
 
     // OTA blocklist updates (3.5). Status shape:
     //   { installed_version, loaded_version, last_check, last_result, checking }
@@ -268,6 +271,70 @@
     // already-active lockdown either way.
     setLockdownEscalation(enabled, auth) {
       return invoke('set_lockdown_escalation', { enabled: !!enabled, auth: auth || null });
+    },
+
+    // Grayscale during vulnerable hours (5.6). Instant in BOTH directions —
+    // unlike every protection toggle here, this is an environment nudge and
+    // deliberately isn't friction-gated (see grayscale.rs). Turning it off
+    // also lifts the filter immediately if a window is running. Rejects with
+    // a message on a platform/registry failure, so the caller can show it.
+    setGrayscaleVulnerableHours(enabled) {
+      return invoke('set_grayscale_vulnerable_hours', { enabled: !!enabled });
+    },
+
+    // Recovery data — urge log, slip log, streak (5.4/5.5). The BACKEND owns
+    // this now (recovery.rs); the renderer's localStorage copy is only an
+    // offline mirror for the standalone preview. Every one of these resolves
+    // the full `RecoveryView` — `{ streak, best_streak, last_milestone, urges,
+    // slips, gentle, clean_days_this_month, milestones }` — with everything
+    // derived server-side, so the caller just replaces its state wholesale
+    // rather than recomputing anything.
+    getRecoveryLog() {
+      return invoke('get_recovery_log').catch((e) => { console.warn('[OathLight] getRecoveryLog failed:', e); return null; });
+    },
+    logUrge(trigger, source) {
+      return invoke('log_urge', { trigger: trigger || null, source: source || 'manual' })
+        .catch((e) => { console.warn('[OathLight] logUrge failed:', e); return null; });
+    },
+    // Deliberately NOT friction-gated in the backend — see `log_slip`'s doc
+    // comment. Logging a slip honestly is recovery, not a weakening.
+    logSlip(trigger) {
+      return invoke('log_slip', { trigger: trigger || null })
+        .catch((e) => { console.warn('[OathLight] logSlip failed:', e); return null; });
+    },
+    markMilestone(days) {
+      return invoke('mark_milestone', { days: days | 0 })
+        .catch((e) => { console.warn('[OathLight] markMilestone failed:', e); return null; });
+    },
+    // One-time carry-over of a streak that predates the backend store. The
+    // backend refuses anything that would shorten a streak or that arrives
+    // after it has history of its own, so this is safe to call unconditionally.
+    migrateRecoveryStreak(streakStart, bestStreak) {
+      return invoke('migrate_recovery_streak', { streakStart: streakStart | 0, bestStreak: bestStreak | 0 })
+        .catch(() => null);
+    },
+
+    // False-positive eval log (2.4). The user's own record of every time they
+    // told the AI monitor it was wrong: `{ ts, monitor_id, siglip_nsfw,
+    // nudenet_explicit, screen_hash, dwell_secs }`, newest first. Local only —
+    // there is no upload path anywhere in the app, deliberately.
+    getEvalLog(limit) {
+      return invoke('get_eval_log', { limit: limit == null ? null : limit })
+        .catch((e) => { console.warn('[OathLight] getEvalLog failed:', e); return []; });
+    },
+
+    // Serious Mode (UX Direction §1) — the single toggle that flips the whole
+    // app to its strictest configuration and its hard voice, no per-feature
+    // exceptions. Turning it ON is instant (a strengthening) and never needs
+    // auth. Turning it OFF is the strongest-guarded weakening in the app:
+    // friction-gated under `"serious.disable"` at DOUBLE the ordinary delay,
+    // master-password gated if one is set, and the trusted contact is told at
+    // request time. Same `{ applied, pending }` WeakeningOutcome shape as
+    // `setGuard` — when `applied` is false the mode is still FULLY on and
+    // stays that way until the delay elapses; callers must not pre-emptively
+    // render it as off.
+    setSeriousMode(enabled, auth) {
+      return invoke('set_serious_mode', { enabled: !!enabled, auth: auth || null });
     },
 
     // Panic / SOS flow (5.1). `onOpenPanic` subscribes to the backend's
@@ -404,6 +471,32 @@
       return () => { cancelled = true; clearInterval(id); };
     }, []);
     return pending;
+  };
+
+  // React hook — mirrors the BACKEND's Serious Mode flag into the store
+  // (UX Direction §1). The backend is the source of truth; this only copies
+  // it down so the UI has something synchronous to render voice and visuals
+  // from. Polled rather than pushed because the flag can change without any
+  // renderer involvement at all — the friction applier thread flips it off
+  // when the cool-off elapses, possibly while this window is closed.
+  //
+  // Mount once, high in the tree (App) — every other component reads
+  // `s.serious` off the store rather than calling this again.
+  window.useSeriousMode = function useSeriousMode() {
+    React.useEffect(() => {
+      if (!available) return;
+      let cancelled = false;
+      const refresh = () => invoke('get_app_settings').then((cfg) => {
+        if (cancelled || !cfg) return;
+        const on = !!cfg.serious_mode;
+        // Only write on an actual change — PP.set notifies every subscriber,
+        // and this runs on a timer.
+        if (window.PP && window.PP.get().serious !== on) window.PP.set({ serious: on });
+      }).catch(() => {});
+      refresh();
+      const id = setInterval(refresh, 4000);
+      return () => { cancelled = true; clearInterval(id); };
+    }, []);
   };
 
   // React hook — subscribes to the monitor's per-browser status stream.

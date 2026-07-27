@@ -1,5 +1,5 @@
 // extension/tests/test-domains-corpus.cjs
-// Ported (near-verbatim) from "MD files/cjs files/test-domains.cjs" — the
+// The adversarial regression corpus for shouldBlockUrl() — the
 // adversarial regression corpus for shouldBlockUrl()'s keyword / TLD / leet /
 // native-IDN / bypass / SafeSearch layers. A FAIL on an allow() case is a
 // FALSE POSITIVE (a legit site getting blocked) — the worst failure mode for
@@ -36,7 +36,7 @@ function run() {
   // these are reported separately so they can't fail the FP-safety-focused suite.
   function gap(_url, _note) {}
 
-  // ---- BEGIN ported body (verbatim from MD files/cjs files/test-domains.cjs) ----
+  // ---- BEGIN corpus body ----
 /* ===========================================================================
  * 1. ADULT TLDs — adult by definition
  * ========================================================================= */

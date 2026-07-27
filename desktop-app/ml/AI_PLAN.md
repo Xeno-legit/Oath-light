@@ -472,6 +472,11 @@ an add-on, and the desktop build is its proving ground.
 
 ## 11. Roadmap / next steps
 
+> **Status of these items is tracked in [../../ROADMAP.md](../../ROADMAP.md), not
+> here.** Shipped: 2, 6, 7, 8, 10. Still open: 1 (→ ROADMAP 2.2), 3 (→ 2.1),
+> 4 (→ 2.5), 5 (→ 2.3), 9 and 11 (→ 2.6). The design notes below stay because
+> they're the *how*; the roadmap owns the *whether*.
+
 1. Build a larger labelled eval set (~200–400 imgs, same capture discipline) and re-bench.
 2. Integrate NudeNet's ONNX detector into the Rust `ort` pipeline (YOLO letterbox preprocess + NMS
    postprocess) so the AI layer is a single native ensemble — no Python at runtime.

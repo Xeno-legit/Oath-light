@@ -100,6 +100,12 @@ pub struct NotifyEventsV1 {
     pub ext_removed: bool,
     #[serde(default = "default_true")]
     pub block_burst: bool,
+    /// Serious Mode disable requested (UX Direction §1). Same shape as every
+    /// other event here: the contact learns only that the request happened,
+    /// and it fires at REQUEST time — before the waiting period starts, so a
+    /// weak-moment request can't be quietly filed and forgotten.
+    #[serde(default = "default_true")]
+    pub serious_disable_requested: bool,
 }
 
 impl Default for NotifyEventsV1 {
@@ -110,6 +116,7 @@ impl Default for NotifyEventsV1 {
             password_removal_requested: true,
             ext_removed: true,
             block_burst: true,
+            serious_disable_requested: true,
         }
     }
 }
@@ -174,6 +181,27 @@ pub struct SettingsV1 {
     /// 2) — `None` by default and never nagged; see `TrustedContactV1`.
     #[serde(default)]
     pub trusted_contact: Option<TrustedContactV1>,
+    /// Serious Mode (UX Direction §1) — the single toggle that flips the whole
+    /// app to its strictest configuration and its hard voice, with **no
+    /// per-feature exceptions** (that's the point: an all-or-nothing switch
+    /// can't be negotiated with piecemeal at 2am).
+    ///
+    /// Backend-owned rather than a renderer preference for exactly one reason:
+    /// turning it OFF is a weakening, and weakenings live in Rust behind
+    /// `friction.rs` (action id `"serious.disable"`, double the ordinary
+    /// cool-off — see `friction::delay_for`). ON is instant. The renderer
+    /// only ever *mirrors* this value; it can never set it false directly.
+    #[serde(default = "default_false")]
+    pub serious_mode: bool,
+    /// Grayscale the whole display during the configured vulnerable-hours
+    /// window (plan item 5.6). Opt-in, default off.
+    ///
+    /// Unlike every protection flag above, this one is instant in BOTH
+    /// directions — it is an environment nudge, not a protection, and locking
+    /// someone out of their own display colour for 24 hours would be applying
+    /// the friction rule where it does no good. See grayscale.rs.
+    #[serde(default = "default_false")]
+    pub grayscale_vulnerable_hours: bool,
 }
 
 impl Default for SettingsV1 {
@@ -187,6 +215,8 @@ impl Default for SettingsV1 {
             dns_filter_enabled: false,
             lockdown: LockdownV1::default(),
             trusted_contact: None,
+            serious_mode: false,
+            grayscale_vulnerable_hours: false,
         }
     }
 }

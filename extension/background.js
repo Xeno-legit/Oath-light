@@ -15,7 +15,10 @@
 // sequentially into one shared global scope instead — the guard below simply
 // no-ops on Firefox.
 if (typeof importScripts === 'function') {
-  importScripts('bg/blocklists.js', 'bg/matching.js', 'bg/graylist.js', 'bg/native-bridge.js', 'bg/reminders.js', 'bg/noble-ed25519.js', 'bg/ota.js');
+  // strings.js first — it is dependency-free and every module below may reach
+  // for `OL_STRINGS.t()` for user-facing copy (reminder notifications, the
+  // block reason lines). It is DOM-free by design, so it loads in a worker.
+  importScripts('strings.js', 'bg/blocklists.js', 'bg/matching.js', 'bg/graylist.js', 'bg/native-bridge.js', 'bg/reminders.js', 'bg/noble-ed25519.js', 'bg/ota.js');
 }
 
 // SHARED BLOCK HANDLER — single source of truth for blocking + stats

@@ -124,6 +124,24 @@
 
     .message { color: var(--muted); line-height: 1.6; font-size: 15px; font-weight: 500; margin-bottom: 34px; }
 
+    /* Habit replacement (plan 5.6) — the user's own alternatives. Styled as a
+       quiet list rather than a row of buttons: it's an offer, not a demand,
+       and it must never compete with the panic button for attention. */
+    /* Block-level with an auto inline margin, NOT inline-block: the card
+       centres its children inline, so an inline-block here let the following
+       "Return to Safety" button flow onto the same line and overlap it. */
+    .alts { display: block; width: fit-content; margin: -14px auto 30px; text-align: left; }
+    .alts-title { font-size: 12.5px; font-weight: 700; color: var(--muted); margin-bottom: 8px; }
+    .alts-list { display: flex; flex-direction: column; gap: 6px; }
+    .alt-item {
+      font-size: 14px; font-weight: 600; color: var(--text);
+      padding: 8px 12px; border-radius: 10px;
+      background: var(--glass, rgba(255,255,255,.05));
+      border: 1px solid var(--glass-brd, rgba(255,255,255,.08));
+    }
+    a.alt-item { text-decoration: none; display: block; }
+    a.alt-item:hover { border-color: var(--accent); }
+
     .safe-btn { padding: 16px 36px; font-size: 16px; border-radius: var(--r-md); }
     .safe-btn svg { width: 20px; height: 20px; }
 
@@ -196,13 +214,18 @@
   <div class="blocked-card">
     <div class="status">
       <span class="dot" aria-hidden="true"></span>
-      Protection Active
+      <span data-ol-str="blocked.status_pill">Protection Active</span>
     </div>
 
     <div class="shield">
       <img src="icons/icon128.png" alt="Oath Light">
     </div>
-    <h1>Take a deep breath</h1>
+    <!-- Copy bound to the voice layer (UX Direction §2) — the text between the
+         tags is only the no-JS fallback; voice-sync.js overwrites it on load
+         and again on every voice/Serious-Mode flip. #reason is deliberately
+         NOT bound: blocked.js fills it with a per-block detail line, and a
+         repaint would clobber it. -->
+    <h1 data-ol-str="blocked.headline">Take a deep breath</h1>
     <div class="reason" id="reason">This page was blocked to help you stay focused on your goals.</div>
 
     <div class="quote" id="quote" title="Tap for another">
@@ -217,29 +240,38 @@
           <svg class="svgi" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
         </div>
         <div class="stat-value" id="totalBlocks">0</div>
-        <div class="stat-label">Sites Blocked</div>
+        <div class="stat-label" data-ol-str="blocked.stat_blocked_label">Sites Blocked</div>
       </div>
       <div class="stat">
         <div class="stat-ico">
           <svg class="svgi" viewBox="0 0 24 24"><path d="M12 3c1 3-1.5 4.5-1.5 7a1.5 1.5 0 003 0c0-.8-.3-1.4-.3-1.4 2 1.4 3.3 3.6 3.3 6.1a6.5 6.5 0 11-13 0C3.5 11 7 9 7.5 5.5 9.5 7 10 4.5 12 3z"/></svg>
         </div>
         <div class="stat-value" id="daysClean">0</div>
-        <div class="stat-label">Days Protected</div>
+        <div class="stat-label" data-ol-str="blocked.stat_days_label">Days Protected</div>
       </div>
     </div>
 
-    <div class="message">
+    <div class="message" data-ol-str="blocked.message">
       You're making progress. Every time you see this page, you're choosing growth over impulse.
+    </div>
+
+    <!-- Habit replacement (plan 5.6). Populated by blocked.js from the user's
+         own configured alternatives; the whole block is hidden when they
+         haven't written any, because a generic "go for a walk!" from software
+         is worse than silence. -->
+    <div class="alts" id="alts" hidden>
+      <div class="alts-title">Instead, you said you'd rather:</div>
+      <div class="alts-list" id="altsList"></div>
     </div>
 
     <button class="btn btn-primary safe-btn" id="goBackBtn">
       <svg class="svgi" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-      Return to Safety
+      <span data-ol-str="blocked.cta_leave">Return to Safety</span>
     </button>
     <br>
     <button class="btn btn-ghost safe-btn panic-btn" id="panicBtn">
       <svg class="svgi" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
-      I need help right now
+      <span data-ol-str="blocked.cta_panic">I need help right now</span>
     </button>
   </div>
 
@@ -267,6 +299,8 @@
     </div>
   </div>
 
+  <script src="strings.js"></script>
+  <script src="voice-sync.js"></script>
   <script src="blocked.js"></script>
 </body>
 </html>

@@ -243,6 +243,11 @@ const NativeMessagingBridge = (function () {
     console.log('[OathLight] blocking settings received — redirect:',
       settings.redirectLinkOn ? (settings.redirectUrl || '(blank)') : 'off');
     try { await chrome.storage.local.set({ ppBlocking: settings }); } catch (_) {}
+    // Voice layer (UX Direction §1/§2): the worker keeps its own OL_STRINGS
+    // instance, so it has to follow the same push the pages do (they read
+    // `ppBlocking` through voice-sync.js). `voice` is the user's onboarding
+    // choice; `serious` is backend-owned and overrides it inside `t()`.
+    applyVoiceSettings(settings);
     // Re-arm the reminder loop to reflect the new schedule immediately.
     if (typeof armReminderAlarm === 'function') armReminderAlarm();
     // Lockdown schedule-from-vulnerable-hours (4.4 v2): arm/disarm the
@@ -265,6 +270,28 @@ const NativeMessagingBridge = (function () {
     // Store the object plus mirrored top-level keys (blocked.js reads either).
     await chrome.storage.local.set({ display, ...display });
   }
+
+  // ─ Voice / Serious Mode for the worker's own OL_STRINGS ────
+  // The pages get this through voice-sync.js; the service worker has no DOM
+  // and no access to that file, so it configures its own copy here. Safe to
+  // call with a partial/absent settings object — both setters ignore junk.
+  function applyVoiceSettings(settings) {
+    const S = typeof globalThis !== 'undefined' ? globalThis.OL_STRINGS : null;
+    if (!S) return;
+    const s = settings && typeof settings === 'object' ? settings : {};
+    S.setVoice(s.voice || S.defaultVoice);
+    S.setSeriousMode(!!s.serious);
+  }
+
+  // MV3 service workers are killed and restarted constantly; re-hydrate the
+  // voice from the last push on every cold start so a notification fired
+  // before the desktop reconnects still speaks in the right register.
+  (async function restoreVoice() {
+    try {
+      const { ppBlocking } = await chrome.storage.local.get(['ppBlocking']);
+      applyVoiceSettings(ppBlocking);
+    } catch (_) { /* storage unavailable — defaults are already correct */ }
+  })();
 
   // ─ Handle blocklist updates from desktop ───────────────────
   async function handleBlocklistUpdate(msg) {

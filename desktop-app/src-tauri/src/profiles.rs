@@ -39,9 +39,13 @@ const CACHE_TTL: Duration = Duration::from_secs(30);
 /// the old 8s TTL they were re-parsed roughly 4x as often for no benefit — 30s
 /// is still far below the uninstall-friction cool-off timescale (minutes to
 /// hours), so it costs us nothing that actually matters for tamper resistance.
+/// Per-browser-key cache entry: when it was computed, and what was found
+/// (`None` = "we looked and there are no profiles", which is cached too — it
+/// is just as expensive to re-derive as a positive result).
+type ProfileCacheEntry = (Instant, Option<Vec<ProfileExt>>);
+
 pub fn cached_profiles(def: &BrowserDef) -> Option<Vec<ProfileExt>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, Option<Vec<ProfileExt>>)>>> =
-        OnceLock::new();
+    static CACHE: OnceLock<Mutex<HashMap<String, ProfileCacheEntry>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
     if let Some((t, v)) = cache.lock().unwrap().get(def.key) {

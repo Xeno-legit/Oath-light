@@ -113,21 +113,64 @@ oath-light/
 
 ## Improving Blocklists
 
-### Adding Domains
+**List contributions are the single highest-value thing an outside contributor
+can send.** No vendor's internal team can keep up with the web; a community
+can. This is how uBlock Origin won its category, and it is the plan's item 3.6.
 
-1. Research the domain thoroughly
-2. Verify it's actually NSFW
-3. Add to `blocklists/domains.json`
-4. Keep list alphabetically sorted
-5. Test that it blocks correctly
+Because of that, list PRs get their own automated review
+(`.github/workflows/list-pr.yml`) that runs before a human looks at anything.
+You can run exactly what CI runs, locally, before you push:
 
-### Adding Keywords
+```bash
+node scripts/ci/validate-blocklists.mjs          # file shape
+node scripts/ci/check-list-pr.mjs --base main    # review of your diff
+node extension/tests/run-all.cjs                 # the full matcher suite
+```
 
-1. Consider false positive rate
-2. Test with real-world examples
-3. Add to `blocklists/keywords.json`
-4. Keep list alphabetically sorted
-5. Test that it blocks correctly
+The review posts a summary (added/removed counts, per-domain verdicts) to the
+workflow's job summary on your PR's Checks tab.
+
+### Adding domains to the blocklist
+
+Add entries to one of `extension/blocklists/domains_part1.json`,
+`domains_part2.json`, `domains_part3.json`, or — for AI-erotica sites —
+`domains_ai.json`. Each file is `{ "domains": [...] }`; `domains_ai.json` also
+carries a `category`.
+
+Every **newly added** domain must:
+
+1. **Be a bare domain, lowercase.** `example.com`, not `https://example.com/x`,
+   not `Example.com`. Subdomains are fine (`sub.example.com`).
+2. **Not collide with the allowlist floor.** `WHITELIST_DOMAINS` in
+   `extension/bg/matching.js` lists domains the matcher explicitly protects —
+   an entry that collides with one is dead on arrival *and* a sign something
+   has gone wrong upstream. This is the check that most matters: the worst
+   thing a bad list PR can do is break a mainstream site for every user.
+3. **Not be a public suffix or shared-hosting root.** `com`, `blogspot.com`,
+   `vercel.app` and friends are rejected — blocking one takes out every site
+   underneath it. Block the specific subdomain instead.
+4. **Not already be covered.** If `example.com` is already listed,
+   `sub.example.com` is redundant (the matcher walks parent domains). You'll
+   get a warning, not a rejection.
+
+Removals are welcome and are **never** blocked by the gate. A domain that was
+wrongly listed is a real bug — see [BYPASSES.md](BYPASSES.md), which counts
+false positives as in-scope reports for exactly this reason.
+
+### Adding keywords
+
+Keywords are matched as substrings against hostnames, which makes them far
+riskier than a domain entry: one bad stem can Scunthorpe thousands of
+legitimate sites. Before proposing one:
+
+1. Check it against `KEYWORD_WHITELIST_WORDS` in `extension/bg/matching.js` —
+   the trap-word list that already exists precisely because of past collisions.
+2. Run `node extension/tests/run-all.cjs`. The domain corpus and adversarial
+   suites (600+ cases) are what will catch a collision you didn't think of.
+3. Say in the PR *why* the stem is safe, not just what it catches. A stem that
+   only works as a compound (`aigirlfriend`, never bare `girlfriend`) belongs
+   in `KEYWORD_COMPOUNDS`, not in the stem list — there are worked examples in
+   the comments there.
 
 ## Performance Considerations
 

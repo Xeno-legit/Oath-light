@@ -204,6 +204,10 @@ pub fn message_for(kind: &str, name: &str) -> (String, String) {
             "saw an unusually high number of blocked sites in a short time",
             "This isn't about what was blocked — only that a lot of blocks happened close together. Could be nothing (a bad link, a burst of ads), but it's the kind of moment this notification exists for.",
         ),
+        "serious_disable_requested" => (
+            "asked to turn Serious Mode off",
+            "Serious Mode is Oath Light's strictest configuration. Turning it off starts a waiting period, and it stays fully active the whole time — nothing has weakened yet, and the request can still be cancelled. This note fires at request time on purpose, so the moment isn't a private one.",
+        ),
         "heartbeat" => (
             "is still protecting this computer",
             "This is a routine monthly note so that silence itself would be a signal. Nothing happened — Oath Light is simply still installed and running.",

@@ -1,9 +1,8 @@
 // extension/tests/test-adversarial.cjs
-// Ported verbatim from "MD files/cjs files/test-adversarial-fixes.cjs" — every
-// §1-§9 adversarial-report reproduction case from that file is asserted here,
-// unchanged, against the split bg/*.js modules. Only the harness plumbing
-// (chrome stub + check() helper) was adapted to reuse the shared vm sandbox
-// instead of loading a monolithic background.js directly.
+// Every §1-§9 reproduction case from the original adversarial audit rounds,
+// asserted unchanged against the split bg/*.js modules. This file IS the record
+// of those rounds — the scratch script and the report they came from are
+// retired, because a passing test can't go stale the way a document can.
 'use strict';
 const { buildSandbox } = require('./_harness.cjs');
 const { createRunner } = require('./_assert.cjs');
@@ -11,7 +10,7 @@ const { createRunner } = require('./_assert.cjs');
 function run() {
   const { sandbox } = buildSandbox({ mode: 'firefox' });
   const shouldBlockUrl = sandbox.shouldBlockUrl;
-  const runner = createRunner('test-adversarial (ported from MD files/cjs files/test-adversarial-fixes.cjs)');
+  const runner = createRunner('test-adversarial');
 
   function check(label, url, expect) {
     const r = shouldBlockUrl(url) || {};

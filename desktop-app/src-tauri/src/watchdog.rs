@@ -450,10 +450,71 @@ mod imp {
         c
     }
 
-    /// Register Oath Light to start at user login. Idempotent — `/f` overwrites,
-    /// so this also self-heals the entry (e.g. if the exe moved) on every launch.
-    /// The launch carries `--autostart` so it comes up minimized in the
-    /// background. Tamper-resistance, like the watchdog: enforced, not a toggle.
+    /// Scheduled-task name for the second, independent autostart registration
+    /// (plan item 4.6). Named plainly on purpose — this is tamper *resistance*,
+    /// not concealment, and a user auditing their own machine should be able to
+    /// see exactly what Oath Light installed.
+    const LOGON_TASK_NAME: &str = "OathLight Autostart";
+
+    /// `schtasks` command that never flashes a console window (mirrors `reg`).
+    fn schtasks() -> std::process::Command {
+        use std::os::windows::process::CommandExt;
+        let mut c = std::process::Command::new("schtasks");
+        c.creation_flags(CREATE_NO_WINDOW);
+        c
+    }
+
+    /// Second autostart registration, as a per-user logon Scheduled Task
+    /// (plan item 4.6's "double-registration").
+    ///
+    /// Why two: the HKCU Run value is a single registry string that any user —
+    /// or any "startup manager" utility, or Task Manager's own Startup tab —
+    /// can delete in about four seconds, with no elevation and no friction.
+    /// After that, the app simply never comes back on the next boot and the
+    /// watchdog it would have started never runs. A logon task is a second,
+    /// independent path with a completely different UI to find and remove, so
+    /// deleting one leaves the other standing and the next launch re-asserts
+    /// the missing one (both registrations are idempotent and run on every
+    /// startup, so this self-heals).
+    ///
+    /// Honest scope note, so nobody reads more into this than it does: this
+    /// registers a normal ONLOGON task at the default run level, which needs
+    /// no admin rights. It does NOT survive Windows **Safe Mode** — Safe Mode
+    /// starts neither Run-key entries nor ordinary scheduled tasks, and
+    /// covering it would need a service registered under the `SafeBoot` keys,
+    /// which requires elevation. That gap is documented in SECURITY.md rather
+    /// than papered over here.
+    fn register_logon_task(exe: &std::path::Path) {
+        let tr = format!("\"{}\" {}", exe.display(), AUTOSTART_ARG);
+        let ok = schtasks()
+            .args([
+                "/create", "/tn", LOGON_TASK_NAME, "/tr", &tr, "/sc", "onlogon", "/f",
+            ])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            log::info!("autostart logon task registered: {LOGON_TASK_NAME}");
+        } else {
+            // Not fatal: the Run key is still registered, and a machine with
+            // the Task Scheduler service disabled is a legitimate (if odd)
+            // configuration. One path is the baseline, two is the goal.
+            log::warn!("autostart logon task registration failed (Run key still active)");
+        }
+    }
+
+    /// Remove the logon Scheduled Task. Silent about failure — being absent is
+    /// the desired end state, and "it wasn't there" is not an error.
+    fn unregister_logon_task() {
+        let _ = schtasks().args(["/delete", "/tn", LOGON_TASK_NAME, "/f"]).status();
+    }
+
+    /// Register Oath Light to start at user login, through BOTH the HKCU Run
+    /// key and a logon Scheduled Task (4.6). Idempotent — `/f` overwrites in
+    /// both cases, so this also self-heals either entry (a moved exe, or one
+    /// of the two deleted by hand) on every launch. The launch carries
+    /// `--autostart` so it comes up minimized in the background.
+    /// Tamper-resistance, like the watchdog: enforced, not a toggle.
     pub fn register_autostart() {
         let exe = match std::env::current_exe() {
             Ok(p) => p,
@@ -473,12 +534,17 @@ mod imp {
         } else {
             log::warn!("autostart registration failed");
         }
+        register_logon_task(&exe);
     }
 
-    /// Remove the login autostart entry (called from the uninstall flow).
+    /// Remove BOTH login autostart registrations (called from the uninstall
+    /// flow). Removal has to clear both, or an uninstalled app would come back
+    /// at the next logon through whichever one was missed — which would read
+    /// as malware, not tamper-resistance.
     pub fn unregister_autostart() {
         let _ = reg().args(["delete", RUN_KEY, "/v", RUN_VALUE, "/f"]).status();
-        log::info!("autostart entry removed");
+        unregister_logon_task();
+        log::info!("autostart entries removed (Run key + logon task)");
     }
 
     /// True if this process was started by the login autostart entry, so the

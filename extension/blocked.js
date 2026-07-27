@@ -7,7 +7,18 @@
 const THEMES = ['light', 'dark'];
 const STYLES = ['aurora', 'lagoon', 'dawn', 'midnight', 'forest', 'ember', 'noir'];
 const BGS = ['both', 'orbs', 'waves', 'stars', 'ripple', 'smoke', 'off'];
-const DEFAULTS = { theme: 'dark', style: 'aurora', bg: 'both', intensity: 7 };
+// Noir is the only theme the app offers now (UX Direction §7); the STYLES list
+// above stays only so a stale persisted palette name still resolves to a
+// styled page rather than an unstyled one.
+const DEFAULTS = { theme: 'dark', style: 'noir', bg: 'both', intensity: 7 };
+
+/* Voice layer (UX Direction §2) — voice-sync.js paints every `data-ol-str`
+ * element in blocked.html on its own; this is the lookup for the handful of
+ * strings this file builds in JS. Guarded so the page still renders if the
+ * strings layer ever fails to load. */
+function t(key, params) {
+  return window.OLVoice ? window.OLVoice.t(key, params) : key;
+}
 
 function pick(value, allowed, fallback) {
   return allowed.includes(value) ? value : fallback;
@@ -185,10 +196,12 @@ const reasonMap = {
   graylist_explicit: `NSFW content blocked on monitored site`,
   safesearch_bypass: `SafeSearch was disabled — bypass attempt blocked`,
   // Lockdown Mode (plan 4.4) — allowlist-only browsing. Mentor-toned, not
-  // punitive: this is a wall the user chose to put up for themselves.
-  lockdown: `Lockdown is on — only your allowlist is reachable right now`,
+  // punitive: this is a wall the user chose to put up for themselves. Voiced
+  // (UX Direction §2) because it's the one reason line that's a message rather
+  // than a per-block detail; the rest stay literal on purpose.
+  lockdown: t('blocked.reason_lockdown'),
 };
-reasonEl.textContent = reasonMap[reason] || 'This page was blocked to help you stay focused.';
+reasonEl.textContent = reasonMap[reason] || t('blocked.body');
 
 // During a lockdown, add a second line of context under the reason so it reads
 // as a chosen pre-commitment, not an error. Kept out of the reasonMap so the
@@ -199,6 +212,46 @@ if (reason === 'lockdown') {
   note.textContent = "You set this up when you were thinking clearly. It lifts on its own when the timer ends — nothing to do but let it hold. If a site you genuinely need is blocked, you can add it from Oath Light (it takes effect after a short pause).";
   if (reasonEl.parentNode) reasonEl.parentNode.insertBefore(note, reasonEl.nextSibling);
 }
+
+/* ============================================================
+   HABIT REPLACEMENT (plan 5.6)
+   The user's own alternatives, pushed by the desktop app inside the blocking
+   settings. Rendered as data — this page attaches no meaning to any entry, so
+   nothing here needs updating when someone writes a new one.
+
+   Nothing is shown when the list is empty, which is the default. A block
+   screen that invents its own advice ("try going for a walk!") reads as a
+   greeting card; one that reflects back what the user themselves decided,
+   while they were thinking clearly, is the actual 5.6 mechanism.
+   ============================================================ */
+(function renderAlternatives() {
+  if (typeof chrome === 'undefined' || !chrome.storage) return;
+  chrome.storage.local.get(['ppBlocking'], (r) => {
+    const list = (r && r.ppBlocking && Array.isArray(r.ppBlocking.alternatives))
+      ? r.ppBlocking.alternatives : [];
+    if (!list.length) return;
+    const box = document.getElementById('alts');
+    const out = document.getElementById('altsList');
+    if (!box || !out) return;
+
+    list.slice(0, 6).forEach((alt) => {
+      const text = (alt && alt.text ? String(alt.text) : '').trim();
+      if (!text) return;
+      // Only http(s) links become anchors — a `javascript:` or `data:` URL in
+      // a user-supplied field must never become a clickable element on a page
+      // that runs in every tab.
+      const url = alt && alt.url ? String(alt.url).trim() : '';
+      const safe = /^https?:\/\//i.test(url);
+      const el = document.createElement(safe ? 'a' : 'div');
+      el.className = 'alt-item';
+      el.textContent = text;
+      if (safe) { el.href = url; el.rel = 'noreferrer noopener'; }
+      out.appendChild(el);
+    });
+
+    if (out.children.length) box.hidden = false;
+  });
+})();
 
 const quoteEl = document.getElementById('quote');
 const quoteTextEl = document.getElementById('quoteText');
@@ -270,8 +323,10 @@ document.getElementById('goBackBtn').addEventListener('click', () => {
    connected — this overlay runs either way, so the best moment to help
    never depends on the companion app.
    ============================================================ */
-// Verbatim from the desktop Mentor copy (pages-mentor.jsx) — one voice everywhere.
-const PANIC_WAVE_COPY = "The urge feels huge, but it's a wave — it peaks around 20 minutes and then it fades whether you feed it or not. You don't have to fight it. Just let it move through. I'm right here.";
+// The wave / breathe / exit copy now lives in the strings layer
+// (`panic.*` in strings.js) so it stays identical across every surface AND
+// follows the active voice — the grounding prompts below stay literal here
+// because they're a fixed 5-4-3-2-1 script, not voiced copy.
 const PANIC_GROUND_STEPS = [
   { count: 5, sense: 'see', prompt: 'Look around and name five things you can see.' },
   { count: 4, sense: 'hear', prompt: 'Listen for a moment. Name four things you can hear.' },
@@ -335,9 +390,9 @@ function panicRender() {
   const nextBtn = panicEl('panicNextBtn');
 
   if (panicStage === 0) {
-    eyebrow.textContent = "You're safe here";
-    title.textContent = "Let's breathe first.";
-    sub.textContent = 'In for four, hold for four, out for four, hold for four. Nothing to fix right now — just follow the circle.';
+    eyebrow.textContent = t('panic.eyebrow_safe');
+    title.textContent = t('panic.breathe_title');
+    sub.textContent = t('panic.breathe_sub');
     nextBtn.textContent = 'Continue';
     const started = Date.now();
     panicTicker = setInterval(() => {
@@ -348,26 +403,26 @@ function panicRender() {
     panicTimer = setTimeout(panicAdvance, PANIC_BREATH_SECS * 1000);
   } else if (panicStage === 1) {
     eyebrow.textContent = 'The wave';
-    title.textContent = 'This will pass.';
-    sub.textContent = PANIC_WAVE_COPY;
-    nextBtn.textContent = "I'm still here";
+    title.textContent = t('panic.wave_title');
+    sub.textContent = t('panic.wave_body');
+    nextBtn.textContent = t('panic.wave_cta');
     panicTimer = setTimeout(panicAdvance, PANIC_WAVE_SECS * 1000);
   } else if (panicStage === 2) {
     const gs = PANIC_GROUND_STEPS[panicStep];
     eyebrow.textContent = 'Grounding · 5-4-3-2-1';
-    title.textContent = 'Come back to the room.';
+    title.textContent = t('panic.ground_title');
     sub.textContent = gs.prompt;
     panicEl('panicGroundCount').textContent = String(gs.count);
     panicEl('panicGroundSense').textContent = gs.sense;
-    nextBtn.textContent = 'Done — next';
+    nextBtn.textContent = t('panic.ground_cta');
     panicTimer = setTimeout(panicAdvance, PANIC_GROUND_STEP_SECS * 1000);
   } else {
     // Exit: no auto-timer — leaving is always the user's own choice.
     // TODO(5.4): when the urge-log store exists, report a flow-completion
     // event here and offer the one-tap urge log before exit.
     eyebrow.textContent = 'You rode it out';
-    title.textContent = 'Well done. Truly.';
-    sub.textContent = "The urge is already weaker than when you arrived. Choose where to go next — somewhere that feeds the person you're becoming.";
+    title.textContent = t('panic.exit_title');
+    sub.textContent = t('panic.exit_body');
     nextBtn.textContent = 'Stay here';
     panicRedirectTarget((target) => {
       panicGoTarget = target || 'https://www.google.com';

@@ -38,6 +38,33 @@ jobs:
       - name: Validate blocklist JSON shape (valid JSON, lowercase domains)
         run: node scripts/ci/validate-blocklists.mjs
 
+  design-system-sync:
+    name: Design-system copies in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # tokens.css / strings.js are copied verbatim into each surface (no build
+      # step anywhere). This fails the build the moment a copy is hand-edited
+      # instead of the design-system source — see UX Direction §5.
+      - name: Check every surface copy matches design-system/
+        run: node scripts/ci/check-design-system-sync.mjs
+
+  renderer-transpile:
+    name: Renderer transpiles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # The renderer is transpiled in the browser at runtime, so a syntax error
+      # in a page file is otherwise invisible until someone opens that page.
+      - name: Parse every renderer script with the shipped babel-standalone
+        run: node desktop-app/scripts/check-renderer-transpile.mjs
+
   rust:
     name: Rust workspace (test + clippy)
     # The workspace has Windows-only deps (tauri, the windows crate, the DNS

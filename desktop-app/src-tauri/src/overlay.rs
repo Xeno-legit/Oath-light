@@ -18,18 +18,17 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
-/// How long the overlay's Dismiss button stays disabled after it appears.
-/// Enforced here, not just in the overlay's own countdown UI — see `dismiss`.
+/// How long the overlay's Dismiss button stays disabled after it appears —
+/// the DEFAULT value, before the false-positive auto-tune (2.4) is applied.
+/// Enforced server-side, not just in the overlay's own countdown UI — see
+/// `dismiss`.
 ///
-/// TODO(friction 4.1): `uninstall.rs` has a dedicated cool-off store for the
-/// uninstall flow, but there's no *generalized* friction store yet that other
-/// features (like this dwell timer) could hook into to make it user-
-/// configurable-but-gated (e.g. "shortening the dwell requires the same kind
-/// of deliberate, delayed confirmation as uninstalling does"). Once one
-/// exists, this constant is the obvious place to read from it instead of
-/// being fixed. Not inventing that store here — this stays a plain constant
-/// and the existing Settings path (none, currently) is unchanged.
-pub const DWELL: Duration = Duration::from_secs(30);
+/// This is no longer a fixed constant in practice: `evallog::tuned_dwell_secs`
+/// shortens it (never below `evallog::MIN_DWELL_SECS`) as the user reports
+/// false positives, so a model that keeps interrupting them wrongly costs less
+/// of their time each time. It never shortens to zero and it never affects
+/// *detection* — see evallog.rs for why that boundary is where it is.
+pub const DWELL: Duration = Duration::from_secs(crate::evallog::DEFAULT_DWELL_SECS);
 
 /// After a legitimate dismiss, how long re-escalation is suppressed for that
 /// monitor. Long enough that a single paused-video/false-positive moment
@@ -40,6 +39,20 @@ pub const COOLDOWN: Duration = Duration::from_secs(5 * 60);
 
 fn label_for(monitor_id: u32) -> String {
     format!("pp-overlay-{monitor_id}")
+}
+
+/// The dwell actually required right now: the default, reduced by the
+/// false-positive auto-tune (2.4) and floored at `evallog::MIN_DWELL_SECS`.
+/// Falls back to the untuned default if the app data dir can't be resolved —
+/// an unreadable log must never *shorten* the pause.
+pub fn required_dwell(app: &AppHandle) -> Duration {
+    use tauri::Manager;
+    let Ok(dir) = app.path().app_data_dir() else { return DWELL };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    Duration::from_secs(crate::evallog::tuned_dwell_secs(&dir, now))
 }
 
 /// Per-monitor bookkeeping the tauri command handler (`dismiss_overlay`)
@@ -55,9 +68,43 @@ pub struct OverlayState {
 struct Track {
     shown_at: Instant,
     cooldown_until: Option<Instant>,
+    /// What the ensemble actually saw when this overlay was opened (2.4).
+    /// Recorded here, at escalation time, so a false-positive report carries
+    /// the model's real numbers — the overlay's own JS never supplies them,
+    /// because the webview is not a trust boundary and a self-reported score
+    /// would make the eval log worthless as a record.
+    evidence: Option<Evidence>,
+}
+
+/// The scores + frame digest behind one escalation. Never contains the frame,
+/// a thumbnail, or anything reconstructible — see evallog.rs.
+#[derive(Debug, Clone)]
+pub struct Evidence {
+    pub siglip_nsfw: f32,
+    pub nudenet_explicit: f32,
+    pub screen_hash: String,
 }
 
 impl OverlayState {
+    /// Record what triggered this monitor's escalation, for a possible
+    /// false-positive report. Called by the monitor thread immediately before
+    /// `open`.
+    pub fn set_evidence(&self, monitor_id: u32, evidence: Evidence) {
+        let mut g = self.tracks.lock().unwrap();
+        g.entry(monitor_id)
+            .and_modify(|t| t.evidence = Some(evidence.clone()))
+            .or_insert(Track {
+                shown_at: Instant::now(),
+                cooldown_until: None,
+                evidence: Some(evidence),
+            });
+    }
+
+    /// The evidence behind this monitor's current overlay, if any.
+    pub fn evidence(&self, monitor_id: u32) -> Option<Evidence> {
+        self.tracks.lock().unwrap().get(&monitor_id).and_then(|t| t.evidence.clone())
+    }
+
     /// True while `monitor_id` is within its post-dismiss cooldown window —
     /// `run_monitor` checks this before letting a fresh escalation open a new
     /// overlay, capping it at `Suspect` instead.
@@ -72,9 +119,14 @@ impl OverlayState {
     }
 
     fn mark_shown(&self, monitor_id: u32) {
-        self.tracks.lock().unwrap().insert(
+        // Preserve any evidence `set_evidence` just recorded for this
+        // escalation — it is written immediately BEFORE the window opens, so a
+        // blind insert here would throw it away every time.
+        let mut g = self.tracks.lock().unwrap();
+        let evidence = g.get(&monitor_id).and_then(|t| t.evidence.clone());
+        g.insert(
             monitor_id,
-            Track { shown_at: Instant::now(), cooldown_until: None },
+            Track { shown_at: Instant::now(), cooldown_until: None, evidence },
         );
     }
 
@@ -83,7 +135,7 @@ impl OverlayState {
         let mut g = self.tracks.lock().unwrap();
         g.entry(monitor_id)
             .and_modify(|t| t.cooldown_until = Some(until))
-            .or_insert(Track { shown_at: Instant::now(), cooldown_until: Some(until) });
+            .or_insert(Track { shown_at: Instant::now(), cooldown_until: Some(until), evidence: None });
     }
 }
 
@@ -142,10 +194,15 @@ pub fn close(app: &AppHandle, monitor_id: u32) {
 /// house rule that the webview is not a trust boundary. On success, closes
 /// the window, starts the re-escalation cooldown, and emits `dismissed`.
 pub fn dismiss(app: &AppHandle, state: &OverlayState, monitor_id: u32) -> Result<(), String> {
+    // The dwell in force is the auto-tuned one (2.4), floored — see evallog.rs.
+    // Derived per call rather than cached so a report made from THIS overlay
+    // shortens THIS overlay's remaining wait, which is the behaviour that
+    // makes the feature feel honest rather than theoretical.
+    let dwell = required_dwell(app);
     let dwell_elapsed = {
         let g = state.tracks.lock().unwrap();
         match g.get(&monitor_id) {
-            Some(t) => t.shown_at.elapsed() >= DWELL,
+            Some(t) => t.shown_at.elapsed() >= dwell,
             None => false, // nothing tracked — no legitimately-open overlay to dismiss
         }
     };

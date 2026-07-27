@@ -112,8 +112,11 @@ const HUB_CARDS = [
 
 function HubMenu({ s, go }) {
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const name = s.profile.name.split(' ')[0];
+  // Voice layer (UX Direction §2): every line of hero copy comes from the
+  // strings layer, so Serious Mode flips the whole greeting register — not
+  // just a banner bolted on top of soft copy.
+  const greetKey = hour < 12 ? 'app.greeting_morning' : hour < 18 ? 'app.greeting_afternoon' : 'app.greeting_evening';
   // Live domain count for the Blocklist card's stat chip (null until loaded /
   // outside Tauri) — guarded so a not-yet-wired hook can't crash the hub.
   const counts = (window.useBlocklistCounts || (() => null))();
@@ -129,14 +132,14 @@ function HubMenu({ s, go }) {
       </div>
       <div className="hub-hero fade-up">
         <div className="hub-mark"><Logo size={56} /></div>
-        <div className="eyebrow" style={{ marginTop: 22 }}>{greeting}, {name}</div>
-        <h1 className="hub-title">Welcome back.</h1>
+        <div className="eyebrow" style={{ marginTop: 22 }}>{PP.t(greetKey, { name })}</div>
+        <h1 className="hub-title">{PP.t('app.welcome_title')}</h1>
         <p className="page-sub" style={{ margin: '0 auto', fontSize: 16.5 }}>
-          You're on a <b style={{ color: 'var(--text)' }}>{s.streak}-day</b> streak. Every clear choice is a vote for the person you're becoming.
+          {PP.t('app.welcome_sub', { days: s.streak })}
         </p>
         <div className="row" style={{ justifyContent: 'center', marginTop: 22, gap: 12 }}>
-          <button className="btn btn-primary" onClick={() => go('overview')}><IconArrowUp size={17} /> See my progress</button>
-          <button className="btn btn-ghost" onClick={() => go('mentor')}><IconChat size={17} /> Talk it through</button>
+          <button className="btn btn-primary" onClick={() => go('overview')}><IconArrowUp size={17} /> {PP.t('app.cta_see_progress')}</button>
+          <button className="btn btn-ghost" onClick={() => go('mentor')}><IconChat size={17} /> {PP.t('app.cta_talk_it_through')}</button>
         </div>
       </div>
 

@@ -41,6 +41,9 @@ function UninstallCard() {
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState('');
   const [removing, setRemoving] = React.useState(false);
+  // 4.6 — what the user has typed of the confirmation phrase so far. Local
+  // only; the backend holds the real phrase and does the real comparison.
+  const [typed, setTyped] = React.useState('');
   const [, tick] = React.useReducer((x) => x + 1, 0);
   // Anchor the last backend reading so the local ticker can derive the countdown
   // without hammering the backend every second.
@@ -102,7 +105,10 @@ function UninstallCard() {
     if (!confirm('Remove Oath Light completely?\n\n'
       + 'This disables all protection and deletes Oath Light from your computer. This cannot be undone.')) return;
     setBusy(true);
-    window.PPNative.completeUninstall()
+    // 4.6: the typed confirmation phrase goes with the call. The backend is
+    // what actually checks it (`complete_uninstall`), so a mismatch comes back
+    // as its error message rather than being pre-judged here.
+    window.PPNative.completeUninstall(typed)
       .then(() => {
         setMsg('Removing Oath Light — it will close and delete itself in a moment.');
         setRemoving(true);
@@ -155,14 +161,47 @@ function UninstallCard() {
             </div>
           }
 
-          {/* ready → reset / cancel / remove */}
+          {/* ready → reset / cancel / type-the-phrase / remove.
+              The phrase (4.6) is the last piece of friction in the whole
+              system: the 24 hours guard the impulsive moment, this guards the
+              moment the wait finally ends and the button is live. Deliberately
+              placed above the buttons so it reads as a step, not an obstacle
+              discovered after clicking. */}
           {ready && !removing &&
             <div style={{ marginTop: 16 }}>
-              <div className="ut-ready">The waiting period is over. What would you like to do?</div>
+              <div className="ut-ready">{PP.t('friction.ready_prompt')}</div>
+
+              {st && st.confirm_phrase &&
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8, maxWidth: '64ch' }}>
+                    To remove Oath Light, type this out. Not a test — just a minute of your own attention
+                    before something permanent.
+                  </div>
+                  <div style={{
+                    fontFamily: 'monospace', fontSize: 13, lineHeight: 1.7, padding: '10px 12px',
+                    borderRadius: 10, background: 'var(--glass)', border: '1px solid var(--glass-brd-strong)',
+                    userSelect: 'none', maxWidth: '64ch',
+                  }}>
+                    {st.confirm_phrase}
+                  </div>
+                  <textarea
+                    className="input"
+                    rows={3}
+                    value={typed}
+                    onChange={(e) => setTyped(e.target.value)}
+                    placeholder="Type the phrase above"
+                    style={{ marginTop: 10, width: '100%', maxWidth: '64ch', fontFamily: 'monospace', fontSize: 13 }} />
+                </div>}
+
               <div className="row" style={{ gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
                 <button className="btn btn-ghost btn-sm" disabled={busy} onClick={doReset}>Reset timer</button>
-                <button className="btn btn-ghost btn-sm" disabled={busy} onClick={doCancel}>Cancel — stay protected</button>
-                <button className="btn btn-danger btn-sm" disabled={busy} onClick={doRemove}>Remove completely</button>
+                <button className="btn btn-ghost btn-sm" disabled={busy} onClick={doCancel}>{PP.t('friction.keep')}</button>
+                {/* Enabled only once something has been typed — the backend is
+                    still the authority on whether it MATCHES; this only avoids
+                    a pointless round-trip on an empty box. */}
+                <button className="btn btn-danger btn-sm"
+                        disabled={busy || (st && st.confirm_phrase && !typed.trim())}
+                        onClick={doRemove}>Remove completely</button>
               </div>
             </div>
           }
@@ -739,6 +778,217 @@ function ProtectionHistoryCard() {
   );
 }
 
+// --- False-positive eval log (plan item 2.4) --------------------------------
+
+// The user's own record of every time they told the AI monitor it was wrong,
+// and the effect it had. This card is the "review" half of 2.4 — the overlay's
+// report button is the other half, and it tells the user to come here, so this
+// has to exist for that sentence to be true.
+//
+// Why show the raw scores: because we can. No commercial blocker can display
+// its model's mistakes next to the confidence it had while making them. Doing
+// it turns the ensemble's 95.8% from a marketing number into something the
+// user can audit on their own machine.
+function EvalLogCard() {
+  const available = !!(window.PPNative && window.PPNative.available);
+  const [entries, setEntries] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!available) return;
+    let cancelled = false;
+    window.PPNative.getEvalLog(25).then((list) => {
+      if (!cancelled) setEntries(Array.isArray(list) ? list : []);
+    });
+    return () => { cancelled = true; };
+  }, [available]);
+
+  if (!available) return null;
+  // Nothing to review yet is the good case — don't take up space claiming it.
+  if (entries !== null && entries.length === 0) return null;
+
+  return (
+    <div className="card fade-up" style={{ marginTop: 18 }}>
+      <div className="row" style={{ gap: 14, alignItems: 'flex-start' }}>
+        <div className="ut-ico"><IconSearch size={20} /></div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <b style={{ fontSize: 14.5, fontWeight: 800 }}>When the AI got it wrong</b>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, lineHeight: 1.5, maxWidth: '64ch' }}>
+            Every time you've reported a false alarm, with the scores the model had at the time. The
+            pause before you can dismiss an alert gets shorter as these add up. Stored only on this
+            computer — nothing here is ever sent anywhere.
+          </div>
+
+          {entries === null && <div style={{ marginTop: 12, fontSize: 13, color: 'var(--muted)' }}>Loading…</div>}
+
+          {entries && entries.length > 0 &&
+            <div style={{ marginTop: 12 }}>
+              {entries.map((e, i) => (
+                <div key={i} className="row" style={{
+                  gap: 12, padding: '7px 0', fontSize: 12.5,
+                  borderTop: i === 0 ? 'none' : '1px solid var(--glass-brd)',
+                }}>
+                  <span style={{ color: 'var(--muted)', minWidth: 92 }}>{fmtAgo(e.ts)}</span>
+                  <span style={{ color: 'var(--text-2)' }}>
+                    image {(e.siglip_nsfw * 100).toFixed(0)}% · nudity {(e.nudenet_explicit * 100).toFixed(0)}%
+                  </span>
+                  <span style={{ color: 'var(--muted)', marginLeft: 'auto' }}>pause was {e.dwell_secs}s</span>
+                </div>
+              ))}
+            </div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Serious Mode (UX Direction §1) -----------------------------------------
+
+// The flagship toggle: one switch that flips the app's entire behaviour AND
+// personality to its strictest configuration, with no per-feature exceptions
+// (otherwise it gets negotiated with piecemeal, which is exactly what a weak
+// moment does best).
+//
+// The asymmetry lives in Rust, not here: ON is one instant call; OFF files a
+// pending change under `"serious.disable"` at double the ordinary cool-off,
+// during which the mode stays FULLY active. This component never renders the
+// mode as off on its own say-so — it renders `s.serious`, which is mirrored
+// from the backend by `useSeriousMode()`.
+function SeriousModeCard({ s }) {
+  const available = !!(window.PPNative && window.PPNative.available);
+  const on = !!s.serious;
+  const pending = (window.usePendingWeakenings || (() => []))();
+  const disablePending = pending.find((p) => p.action_id === 'serious.disable') || null;
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+
+  const acquireAuth = () => (window.PPAuth ? window.PPAuth.acquire() : Promise.resolve(null));
+
+  const turnOn = () => {
+    setErr('');
+    if (!confirm(PP.t('serious.enable_confirm'))) return;
+    setBusy(true);
+    window.PPNative.setSeriousMode(true, null)
+      .then(() => { PP.set({ serious: true }); })
+      .catch((e) => setErr(e && e.message ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+
+  const requestOff = () => {
+    setErr('');
+    acquireAuth()
+      .then((token) => { setBusy(true); return window.PPNative.setSeriousMode(false, token); })
+      // Deliberately does NOT set `serious: false` on success — a successful
+      // call here means the REQUEST was filed, not that the mode came off.
+      // `useSeriousMode` flips the mirror when the backend actually applies it.
+      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
+      .finally(() => setBusy(false));
+  };
+
+  const keepItOn = () => { window.PPNative.cancelWeakening('serious.disable'); };
+
+  // Remaining time, in the same shape the strings layer expects.
+  const remaining = disablePending ? Math.max(0, disablePending.remaining_secs | 0) : 0;
+  const remainingParams = { hours: Math.floor(remaining / 3600), minutes: Math.floor((remaining % 3600) / 60) };
+
+  return (
+    <div className="card fade-up" style={{ marginTop: 18 }}>
+      <div className="row" style={{ gap: 14, alignItems: 'flex-start' }}>
+        <div className="ut-ico"><IconFlame size={20} /></div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <b style={{ fontSize: 14.5, fontWeight: 800 }}>Serious Mode</b>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, lineHeight: 1.5, maxWidth: '64ch' }}>
+            Every protection at its strictest, and a harder voice everywhere in the app. It covers
+            everything at once — there is nothing to switch off piece by piece.
+          </div>
+
+          {!available &&
+            <div className="ut-msg" style={{ color: 'var(--muted)', marginTop: 12 }}>Available in the desktop app.</div>}
+
+          {available && !on &&
+            <div style={{ marginTop: 14 }}>
+              <button className="btn btn-primary" onClick={turnOn} disabled={busy}>
+                {PP.t('serious.enable_button')}
+              </button>
+              <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8, maxWidth: '64ch' }}>
+                Turning it on takes one click. Turning it back off takes a long wait — that is the
+                whole point, and it is worth knowing before you commit.
+              </div>
+            </div>}
+
+          {available && on && !disablePending &&
+            <div style={{ marginTop: 14 }}>
+              <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+                <span className="chip" style={{ background: 'var(--accent)', color: '#fff' }}>{PP.t('serious.active_label')}</span>
+                <span style={{ fontSize: 13, color: 'var(--muted)' }}>{PP.t('serious.active_sub')}</span>
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 10, maxWidth: '64ch', lineHeight: 1.5 }}>
+                {PP.t('serious.disable_request_warning')}
+              </div>
+              <button className="btn btn-ghost" style={{ marginTop: 12 }} onClick={requestOff} disabled={busy}>
+                {PP.t('serious.disable_request_button')}
+              </button>
+            </div>}
+
+          {available && on && disablePending &&
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700 }}>
+                {PP.t('serious.disable_pending', remainingParams)}
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 6, maxWidth: '64ch' }}>
+                Nothing has weakened yet. Every protection is still at its strictest until the wait ends.
+              </div>
+              <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={keepItOn}>
+                Keep Serious Mode on
+              </button>
+            </div>}
+
+          {err && <div className="ut-msg" style={{ color: '#e0564f', marginTop: 10 }}>{err}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Voice (UX Direction §2) ------------------------------------------------
+
+// Tone is a user choice, not a demographic guess: pick the register the app
+// speaks in. Serious Mode overrides it while active (the override itself lives
+// in strings.js's `t()`, so it holds on every surface, not just this one) —
+// the picker stays visible but locked so the reason is legible rather than
+// mysterious.
+function VoiceCard({ s, PP }) {
+  const locked = !!s.serious;
+  const VOICES = [
+    { id: 'companion', nameKey: 'onboarding.companion_name', descKey: 'onboarding.companion_desc', icon: IconHeart },
+    { id: 'serious', nameKey: 'onboarding.serious_name', descKey: 'onboarding.serious_desc', icon: IconFlame },
+  ];
+  return (
+    <div className="card fade-up" style={{ marginTop: 18 }}>
+      <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>{PP.t('onboarding.voice_title')}</div>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 10 }}>{PP.t('onboarding.voice_sub')}</div>
+      {VOICES.map((v) => {
+        const active = (s.voice || 'companion') === v.id;
+        return (
+          <div className="setting" key={v.id}>
+            <div className="ico"><v.icon size={20} /></div>
+            <div className="txt"><b>{PP.t(v.nameKey)}</b><span>{PP.t(v.descKey)}</span></div>
+            <button
+              className={'btn ' + (active ? 'btn-primary' : 'btn-ghost')}
+              disabled={locked}
+              onClick={() => PP.set({ voice: v.id })}>
+              {active ? 'Selected' : 'Choose'}
+            </button>
+          </div>
+        );
+      })}
+      {locked &&
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>
+          Serious Mode is on, so the hard voice is in force everywhere regardless of this choice.
+        </div>}
+    </div>
+  );
+}
+
 function SettingsPage({ s, PP }) {
   const p = s.profile;
   const setP = (patch) => PP.set({ profile: patch });
@@ -831,6 +1081,14 @@ function SettingsPage({ s, PP }) {
         <button className="btn btn-ghost" onClick={() => { if (confirm('Reset all app data?')) PP.reset(); }}>Reset</button>
       </div>
 
+      {/* Serious Mode (UX Direction §1) — the strictest configuration, all at
+          once. Placed above the individual protections on purpose: it is the
+          decision that governs all of them. */}
+      <SeriousModeCard s={s} />
+
+      {/* Voice (UX Direction §2) — the register the whole app speaks in */}
+      <VoiceCard s={s} PP={PP} />
+
       {/* trusted contact (5.2, Tier 2) — optional accountability amplifier */}
       <TrustedContactCard s={s} />
 
@@ -842,6 +1100,11 @@ function SettingsPage({ s, PP }) {
 
       {/* tamper-evident event log (4.5) — plain-language history + on-demand verify */}
       <ProtectionHistoryCard />
+
+      {/* false-positive eval log (2.4) — hidden entirely until there's something
+          to review, so a user who has never been wrongly interrupted never sees
+          a card implying they might be */}
+      <EvalLogCard />
 
       {/* pending weakenings (4.1) — guard/monitor disables, custom-block removals, trusted-contact removal, lockdown cancel/escalation */}
       <PendingChangesCard PP={PP} />

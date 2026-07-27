@@ -1,6 +1,7 @@
 mod auth;
 mod browsers;
 mod dns_filter;
+mod evallog;
 mod friction;
 mod lockdown;
 mod notify;
@@ -8,7 +9,9 @@ pub mod nsfw;
 pub mod nudenet;
 mod ota;
 mod overlay;
+mod grayscale;
 mod profiles;
+mod recovery;
 pub mod screen;
 mod settings;
 mod uninstall;
@@ -55,6 +58,18 @@ static UNINSTALL_FIRED: AtomicBool = AtomicBool::new(false);
 /// `open-panic` event. The renderer consumes it on startup via
 /// `take_panic_pending`, so a cold-start request still lands on the flow.
 static PANIC_PENDING: AtomicBool = AtomicBool::new(false);
+
+/// Unix ms at which a grayscale vulnerable-hours window (5.6) should end, or
+/// 0 when grayscale isn't ours to turn off. Set from the extension's
+/// `vulnerable_window_active` message (which carries the remaining minutes)
+/// and cleared by `tick_grayscale` on the monitor tick.
+///
+/// Deliberately a deadline rather than a "the extension will tell us when it
+/// ends" contract: the extension only reports while the window is ACTIVE, so
+/// if it disconnects — browser closed, extension removed, machine asleep — a
+/// signal-based design would leave the user's display monochrome indefinitely.
+/// A deadline always expires.
+static GRAYSCALE_UNTIL: AtomicU64 = AtomicU64::new(0);
 
 // ============================================================================
 // Application State
@@ -202,6 +217,12 @@ pub struct AppState {
     /// `set_lockdown_escalation` and the `"lockdown.escalation_disable"`
     /// applier arm, the only two places that ever change the setting.
     lockdown_escalate: bool,
+    /// Mirror of `SettingsV1.serious_mode` (UX Direction §1), for the same
+    /// reason as `lockdown_escalate` above: `broadcast_blocking` needs it and
+    /// has no `SettingsState` handle. Kept in sync by `set_serious_mode` and
+    /// the `"serious.disable"` applier arm — the only two places that ever
+    /// change the setting — plus the startup seed in `setup()`.
+    serious_mode: bool,
 }
 
 /// Lazily-loaded NSFW models (Phase 4 optional AI monitoring). Both are loaded
@@ -503,6 +524,18 @@ fn run_monitor(
                 // only, no content"). The monitor id is the machine's display
                 // index, not anything identifying.
                 log_event(&app, "monitor_escalated", serde_json::json!({ "monitor_id": monitor_id }));
+                // 2.4: stash the ensemble's own numbers + a frame digest so a
+                // "this was wrong" press has real evidence to record. Written
+                // BEFORE `open` (which calls `mark_shown`) — `mark_shown`
+                // deliberately preserves it. Never the frame itself.
+                overlay_state.set_evidence(
+                    monitor_id,
+                    overlay::Evidence {
+                        siglip_nsfw: payload.classification.nsfw_score,
+                        nudenet_explicit: payload.nudenet.as_ref().map(|r| r.explicit).unwrap_or(0.0),
+                        screen_hash: evallog::hash_frame(dynimg.to_rgb8().as_raw()),
+                    },
+                );
                 if let Err(e) = overlay::open(&app, &overlay_state, monitor_id) {
                     log::warn!("could not open overlay for monitor {monitor_id}: {e}");
                 }
@@ -636,7 +669,7 @@ fn handle_extension_message(
                         while s
                             .block_burst_log
                             .front()
-                            .map_or(false, |(t, _)| now_ms.saturating_sub(*t) > BLOCK_BURST_WINDOW_MS)
+                            .is_some_and(|(t, _)| now_ms.saturating_sub(*t) > BLOCK_BURST_WINDOW_MS)
                         {
                             s.block_burst_log.pop_front();
                         }
@@ -757,6 +790,32 @@ fn handle_extension_message(
                     }
                 }
             }
+
+            // Grayscale vulnerable hours (5.6). Rides the SAME signal as the
+            // lockdown escalation above, for the same reason: this crate has
+            // no timezone database, so the extension owns the local-time
+            // window math and tells us "active, N minutes left". Independent
+            // of the escalation setting — a user can want a desaturated
+            // screen at 1am without wanting allowlist-only browsing.
+            //
+            // `GRAYSCALE_UNTIL` is when to hand the display back; the monitor
+            // tick does the actual restore (see `tick_grayscale`), so the
+            // filter still lifts if the extension disconnects mid-window
+            // rather than leaving someone stuck in monochrome.
+            let want_gray = app
+                .try_state::<Arc<settings::SettingsState>>()
+                .map(|s| s.get().grayscale_vulnerable_hours)
+                .unwrap_or(false);
+            if want_gray && mins > 0 {
+                let until = now_unix_ms() + mins.saturating_mul(60_000);
+                GRAYSCALE_UNTIL.store(until, Ordering::SeqCst);
+                if !grayscale::is_active() {
+                    match grayscale::set(true) {
+                        Ok(()) => log::info!("grayscale on for the vulnerable-hours window ({mins}m)"),
+                        Err(e) => log::warn!("could not enable grayscale: {e}"),
+                    }
+                }
+            }
         }
 
         _ => log::warn!("[conn {}] unknown message type: {}", conn_id, msg_type),
@@ -845,12 +904,24 @@ fn lockdown_field(view: &lockdown::LockdownView, allow: &[String], escalate_vuln
 /// either the base settings or the lockdown state.
 fn broadcast_blocking(state: &Arc<Mutex<AppState>>, lockdown: &lockdown::LockdownStore) -> usize {
     let view = lockdown.view();
-    let (mut settings, allow, escalate) = {
+    let (mut settings, allow, escalate, serious) = {
         let s = state.lock().unwrap();
-        (s.ext_blocking.clone().unwrap_or_else(|| serde_json::json!({})), s.lockdown_allow.clone(), s.lockdown_escalate)
+        (
+            s.ext_blocking.clone().unwrap_or_else(|| serde_json::json!({})),
+            s.lockdown_allow.clone(),
+            s.lockdown_escalate,
+            s.serious_mode,
+        )
     };
     if let Some(obj) = settings.as_object_mut() {
         obj.insert("lockdown".to_string(), lockdown_field(&view, &allow, escalate));
+        // Serious Mode (UX Direction §1) is injected from the BACKEND's
+        // persisted settings, never from whatever the renderer last pushed —
+        // the renderer's copy is a mirror, and a mirror must not be able to
+        // tell the extension that Serious Mode is off. The extension reads
+        // this for both halves of the flip: its strict enforcement presets,
+        // and the voice its pages speak in (voice-sync.js).
+        obj.insert("serious".to_string(), serde_json::Value::Bool(serious));
     }
     let msg = serde_json::json!({ "type": "set_blocking", "settings": settings });
     broadcast_to_extensions(state, &msg)
@@ -889,6 +960,7 @@ fn notify_contact(app: &AppHandle, event_kind: &str) {
         "password_removal_requested" => contact.notify.password_removal_requested,
         "ext_removed" => contact.notify.ext_removed,
         "block_burst" => contact.notify.block_burst,
+        "serious_disable_requested" => contact.notify.serious_disable_requested,
         // The unwire notification (5.2's anti-weak-moment rule) and the
         // monthly heartbeat always send when a contact exists — they're not
         // per-event opt-outs.
@@ -925,6 +997,45 @@ fn notify_contact(app: &AppHandle, event_kind: &str) {
             }
         }
     });
+}
+
+/// Restore the display when a grayscale vulnerable-hours window ends (5.6).
+///
+/// Only ever turns grayscale OFF, and only when Oath Light is the one that
+/// turned it on (`GRAYSCALE_UNTIL != 0`). A user who runs the Windows colour
+/// filter themselves, all day, every day, is never touched by this.
+fn tick_grayscale() {
+    let until = GRAYSCALE_UNTIL.load(Ordering::SeqCst);
+    if until == 0 || now_unix_ms() < until {
+        return;
+    }
+    GRAYSCALE_UNTIL.store(0, Ordering::SeqCst);
+    match grayscale::set(false) {
+        Ok(()) => log::info!("grayscale window ended — display restored"),
+        Err(e) => log::warn!("could not restore colour after the grayscale window: {e}"),
+    }
+}
+
+/// Toggle grayscale-during-vulnerable-hours (5.6).
+///
+/// Instant in BOTH directions, unlike every protection toggle in this file —
+/// see `SettingsV1::grayscale_vulnerable_hours` and grayscale.rs for why the
+/// friction rule deliberately doesn't apply to an environment nudge. Turning
+/// it off also lifts the filter immediately if a window is currently running,
+/// rather than leaving the user monochrome until the window would have ended.
+#[tauri::command]
+fn set_grayscale_vulnerable_hours(
+    app: AppHandle,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    enabled: bool,
+) -> Result<bool, String> {
+    settings.update(|s| s.grayscale_vulnerable_hours = enabled);
+    if !enabled && GRAYSCALE_UNTIL.load(Ordering::SeqCst) != 0 {
+        GRAYSCALE_UNTIL.store(0, Ordering::SeqCst);
+        let _ = grayscale::set(false);
+    }
+    log_event(&app, "grayscale_setting_changed", serde_json::json!({ "enabled": enabled }));
+    Ok(enabled)
 }
 
 /// Monthly "still protecting" heartbeat (5.2's silent-failure mitigation): if
@@ -2422,6 +2533,88 @@ fn set_lockdown_escalation(
 }
 
 // ============================================================================
+// Serious Mode (UX Direction §1) — the one toggle that flips the whole app to
+// its strictest configuration AND its hard voice, with no per-feature
+// exceptions. The asymmetry is the entire product: ON is one click, OFF is the
+// longest cool-off in the app.
+// ============================================================================
+
+/// Turn Serious Mode on or off.
+///
+/// **ON is instant and unconditional** — it's a strengthening, and the whole
+/// design depends on a person in a strong moment being able to commit without
+/// friction. Turning it on also switches ON the protections it implies
+/// (lockdown escalation today) and withdraws any pending disable request: a
+/// strengthening always cancels the matching weakening, same rule as
+/// everywhere else in this file.
+///
+/// **OFF is a weakening** and goes through `friction.rs` under the
+/// `"serious.disable"` action id — which carries double the ordinary
+/// weakening delay (`friction::delay_for`), because this is the strongest
+/// commitment the app offers. Serious Mode stays *fully* active for the whole
+/// wait; nothing about the app softens until the applier arm actually fires.
+/// The master password gates the request if one is set, and the trusted
+/// contact (if any) is told at REQUEST time rather than at apply time — the
+/// same anti-weak-moment rule as `request_remove_trusted_contact`.
+///
+/// The strictness this mode implies is enforced where each layer lives: the
+/// extension reads `serious` off the pushed blocking settings (see
+/// `broadcast_blocking`) and forces its strict presets from there; the
+/// renderer reads it back through `get_app_settings` and flips voice + visuals.
+#[tauri::command]
+fn set_serious_mode(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Mutex<AppState>>>,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    lockdown: tauri::State<'_, Arc<lockdown::LockdownStore>>,
+    enabled: bool,
+    auth: Option<String>,
+) -> Result<WeakeningOutcome, String> {
+    if enabled {
+        state.lock().unwrap().serious_mode = true;
+        settings.update(|s| {
+            s.serious_mode = true;
+            // "It covers everything — no per-feature exceptions." Lockdown
+            // escalation is the one protection Serious Mode subsumes that has
+            // its own persisted flag, so turn it on here rather than leaving
+            // the user to find it. It is NOT turned back off on disable —
+            // un-strengthening something the user may have wanted anyway would
+            // be a weakening we never asked about.
+            s.lockdown.escalate_vulnerable_hours = true;
+        });
+        state.lock().unwrap().lockdown_escalate = true;
+        friction.cancel("serious.disable");
+        let _ = broadcast_blocking(&state, &lockdown);
+        log_event(&app, "serious_mode_enabled", serde_json::json!({}));
+        log::warn!("serious mode ENABLED (instant — strengthening)");
+        return Ok(WeakeningOutcome { applied: true, pending: None });
+    }
+
+    if !settings.get().serious_mode {
+        // Already off — nothing to weaken, so don't open a pointless pending
+        // change the user would then have to cancel.
+        return Ok(WeakeningOutcome { applied: true, pending: None });
+    }
+
+    auth::require_auth(&app, &auth)?;
+    let view = friction.request(
+        "serious.disable",
+        "Turn off Serious Mode",
+        serde_json::json!({}),
+    );
+    // Told now, not when it applies: the point of the notification is that the
+    // weak moment isn't private, and by apply time the moment has passed.
+    notify_contact(&app, "serious_disable_requested");
+    log::warn!(
+        "serious mode disable requested — {}s cool-off started (mode stays FULLY on until it elapses)",
+        view.delay_secs
+    );
+    log_event(&app, "friction_requested", serde_json::json!({ "action": "serious.disable" }));
+    Ok(WeakeningOutcome { applied: false, pending: Some(view) })
+}
+
+// ============================================================================
 // Trusted contact / privacy-first accountability (plan item 5.2, Tier 2) —
 // commands. Solo-first: OFF by default, never nagged. See notify.rs.
 // ============================================================================
@@ -3080,6 +3273,133 @@ fn dismiss_overlay(
     overlay::dismiss(&app, overlay_state.inner(), monitor_id)
 }
 
+// ============================================================================
+// Recovery data (plan items 5.4 + 5.5) — commands. See recovery.rs for why
+// this lives in Rust rather than the renderer's localStorage.
+// ============================================================================
+
+/// The whole recovery view: streak, best streak, urge log, slip log, and every
+/// derived value (gentle mode, clean days, the canonical milestone list). One
+/// call, everything derived server-side, so no two surfaces can disagree.
+#[tauri::command]
+fn get_recovery_log(state: tauri::State<'_, Arc<recovery::RecoveryState>>) -> recovery::RecoveryView {
+    state.view()
+}
+
+/// Log one urge (5.4). `trigger` is a fixed-vocabulary id or null; `source` is
+/// `panic` | `manual`. Never free text — see recovery.rs.
+#[tauri::command]
+fn log_urge(
+    state: tauri::State<'_, Arc<recovery::RecoveryState>>,
+    trigger: Option<String>,
+    source: Option<String>,
+) -> recovery::RecoveryView {
+    state.log_urge(trigger, source.as_deref().unwrap_or("manual"))
+}
+
+/// Log a slip (5.5). Not a reset: the best streak is kept, the slip is
+/// recorded as data, and it mirrors into the urge log for trigger analytics.
+///
+/// Deliberately NOT friction-gated. Logging a slip honestly is an act of
+/// recovery, not a weakening of protection — putting a cool-off in front of it
+/// would teach people to lie to their own log, which is the one outcome that
+/// would make the whole feature worthless.
+#[tauri::command]
+fn log_slip(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<recovery::RecoveryState>>,
+    trigger: Option<String>,
+) -> recovery::RecoveryView {
+    let view = state.log_slip(trigger);
+    // Event log (4.5): the FACT only — no trigger, no time-of-day pattern, no
+    // content. A slip is the user's own data; the event log just shows their
+    // future self that the app was running and honest about it.
+    log_event(&app, "slip_logged", serde_json::json!({}));
+    view
+}
+
+/// Record that a streak milestone has been celebrated, so it fires exactly
+/// once. Monotonic and idempotent — safe to call from a render effect.
+#[tauri::command]
+fn mark_milestone(
+    state: tauri::State<'_, Arc<recovery::RecoveryState>>,
+    days: u64,
+) -> recovery::RecoveryView {
+    state.mark_milestone(days)
+}
+
+/// One-time migration of a streak that predates this store (5.4/5.5). The
+/// renderer offers whatever `streakStart`/`bestStreak` it still has in
+/// localStorage; the backend adopts the anchor only if it is EARLIER than its
+/// own and only while it has no history of its own, so this can carry a real
+/// streak across the move but can never be used to fabricate one afterwards.
+#[tauri::command]
+fn migrate_recovery_streak(
+    state: tauri::State<'_, Arc<recovery::RecoveryState>>,
+    streak_start: u64,
+    best_streak: u64,
+) -> recovery::RecoveryView {
+    state.migrate_streak_start(streak_start, best_streak)
+}
+
+/// Report the current overlay as a FALSE POSITIVE (plan item 2.4).
+///
+/// Callable only from an overlay window — like `dismiss_overlay`, the monitor
+/// id comes from the calling window's own label, so no caller can report on
+/// another monitor's behalf. The scores recorded are the ones the monitor
+/// thread stashed at escalation time, never anything the webview supplies:
+/// a self-reported score would make the eval log worthless as a record of what
+/// the model actually did.
+///
+/// Recording a report immediately re-derives the dwell, so the pause on THIS
+/// overlay shortens straight away rather than only affecting future ones.
+/// Returns the new dwell in seconds so the overlay can update its countdown.
+#[tauri::command]
+fn report_false_positive(
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+    overlay_state: tauri::State<'_, Arc<overlay::OverlayState>>,
+) -> Result<u64, String> {
+    let monitor_id: u32 = window
+        .label()
+        .strip_prefix("pp-overlay-")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| "not an overlay window".to_string())?;
+
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let ev = overlay_state.evidence(monitor_id);
+    let entry = evallog::EvalEntry {
+        ts: now,
+        monitor_id,
+        siglip_nsfw: ev.as_ref().map(|e| e.siglip_nsfw).unwrap_or(0.0),
+        nudenet_explicit: ev.as_ref().map(|e| e.nudenet_explicit).unwrap_or(0.0),
+        // No evidence recorded (an overlay left open across an app restart) —
+        // log the report anyway with an explicit marker rather than silently
+        // dropping the user's feedback. It just can't be deduplicated.
+        screen_hash: ev.map(|e| e.screen_hash).unwrap_or_else(|| "unknown".to_string()),
+        dwell_secs: evallog::tuned_dwell_secs(&dir, now),
+    };
+    evallog::append(&dir, &entry)?;
+
+    // Event log (4.5): the FACT of the report, never the scores or the hash —
+    // same "event only, no content" rule the escalation entry follows.
+    log_event(&app, "false_positive_reported", serde_json::json!({ "monitor_id": monitor_id }));
+    Ok(evallog::tuned_dwell_secs(&dir, now))
+}
+
+/// The local false-positive eval log (2.4), newest first, capped at `limit`.
+/// Purely for the user to read their own history — there is no upload path in
+/// this app, by design.
+#[tauri::command]
+fn get_eval_log(app: AppHandle, limit: Option<usize>) -> Vec<evallog::EvalEntry> {
+    let Ok(dir) = app.path().app_data_dir() else { return Vec::new() };
+    let mut all = evallog::read_all(&dir);
+    all.reverse();
+    all.truncate(limit.unwrap_or(50));
+    all
+}
+
 /// Authorize a real shutdown of the dual-process watchdog so closing the app no
 /// longer triggers resurrection. The legitimate quit path (the uninstall flow,
 /// `perform_uninstall`) calls `watchdog::request_shutdown()` directly — it does
@@ -3121,6 +3441,13 @@ fn uninstall_state_from(store: &friction::FrictionStore) -> uninstall::Uninstall
             elapsed_secs: p.elapsed_secs,
             remaining_secs: p.remaining_secs,
             ready: p.ready,
+            // 4.6: the phrase generated when the request was filed. Empty for
+            // a request made by a build that predates this, which
+            // `phrase_matches` treats as "nothing to type".
+            confirm_phrase: store
+                .payload_of("uninstall")
+                .and_then(|v| v.get("phrase").and_then(|p| p.as_str()).map(String::from))
+                .unwrap_or_default(),
         },
         None => {
             let delay = friction::delay_for("uninstall");
@@ -3131,6 +3458,7 @@ fn uninstall_state_from(store: &friction::FrictionStore) -> uninstall::Uninstall
                 elapsed_secs: 0,
                 remaining_secs: delay,
                 ready: false,
+                confirm_phrase: String::new(),
             }
         }
     }
@@ -3158,7 +3486,17 @@ fn request_uninstall(
 ) -> Result<uninstall::UninstallState, String> {
     auth::require_auth(&app, &auth)?;
     let existing = friction.get("uninstall").is_some();
-    let view = friction.request("uninstall", "Remove Oath Light from this computer", serde_json::json!({}));
+    // 4.6: mint the confirmation phrase once, at request time, and persist it
+    // with the request. Re-requesting an already-pending uninstall must NOT
+    // roll a new phrase — `friction.request` is idempotent for an existing
+    // action id, so the original payload (and phrase) stands, which is what
+    // keeps the phrase stable for the whole 24 hours and across restarts.
+    let phrase = uninstall::generate_phrase();
+    let view = friction.request(
+        "uninstall",
+        "Remove Oath Light from this computer",
+        serde_json::json!({ "phrase": phrase }),
+    );
     if let Ok(dir) = app.path().app_data_dir() {
         uninstall::write_marker(&dir, Some(view.requested_at));
     }
@@ -3539,9 +3877,21 @@ fn perform_uninstall(app: &AppHandle) -> Result<String, String> {
 fn complete_uninstall(
     app: AppHandle,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    confirm: Option<String>,
 ) -> Result<String, String> {
     if !friction.get("uninstall").is_some_and(|p| p.ready) {
         return Err("The waiting period hasn't elapsed yet.".to_string());
+    }
+    // 4.6 — type-the-phrase friction. The 24h wait guards the impulsive
+    // moment; this guards the moment it ends, when the button is finally live
+    // and a whole day of anticipation is behind it. Checked in Rust, not the
+    // renderer, so it holds for any caller of this command.
+    let expected = friction
+        .payload_of("uninstall")
+        .and_then(|v| v.get("phrase").and_then(|p| p.as_str()).map(String::from))
+        .unwrap_or_default();
+    if !uninstall::phrase_matches(&expected, confirm.as_deref().unwrap_or("")) {
+        return Err("The confirmation phrase doesn't match. Type it out exactly as shown.".to_string());
     }
     // Event log (4.5): record that removal was actually executed, before the
     // app tears itself down — the app-data dir (and this log with it) is
@@ -3615,6 +3965,14 @@ pub fn run() {
             stop_nsfw_monitor,
             nsfw_monitor_running,
             dismiss_overlay,
+            report_false_positive,
+            get_eval_log,
+            get_recovery_log,
+            log_urge,
+            log_slip,
+            mark_milestone,
+            migrate_recovery_streak,
+            set_grayscale_vulnerable_hours,
             stop_watchdog,
             get_uninstall_state,
             request_uninstall,
@@ -3632,6 +3990,7 @@ pub fn run() {
             cancel_lockdown,
             request_lockdown_allow,
             set_lockdown_escalation,
+            set_serious_mode,
             get_trusted_contact,
             set_trusted_contact,
             request_remove_trusted_contact,
@@ -3762,6 +4121,11 @@ pub fn run() {
             app.manage(friction_store.clone());
             let settings_state = Arc::new(settings::SettingsState::load(&udd));
             app.manage(settings_state.clone());
+            // Recovery data — urge log, slip log, streak (5.4/5.5). Moved out
+            // of the renderer's localStorage so a browser-data reset or a
+            // devtools edit can't erase or rewrite a ninety-day streak; see
+            // recovery.rs for the full reasoning.
+            app.manage(Arc::new(recovery::RecoveryState::load(&udd)));
             // System DNS filter (1.1/1.2). Managed here so commands + the
             // monitor tick share one instance. If it was on at last shutdown,
             // start + re-takeover now (idempotent) — off the startup path so
@@ -3803,12 +4167,15 @@ pub fn run() {
             // AppState was constructed with the hardcoded pre-setup default
             // (`guard_enabled: true`) before the persisted settings file could
             // be read — now that it's loaded, the persisted value wins. Same
-            // for the lockdown-escalation mirror (4.4 v2) `broadcast_blocking`
-            // reads instead of a `SettingsState` handle of its own.
+            // for the lockdown-escalation mirror (4.4 v2) and the Serious Mode
+            // mirror (UX Direction §1), which `broadcast_blocking` reads
+            // instead of holding a `SettingsState` handle of its own.
             {
                 let mut s0 = shared_state.lock().unwrap();
-                s0.guard_enabled = settings_state.get().guard_enabled;
-                s0.lockdown_escalate = settings_state.get().lockdown.escalate_vulnerable_hours;
+                let persisted = settings_state.get();
+                s0.guard_enabled = persisted.guard_enabled;
+                s0.lockdown_escalate = persisted.lockdown.escalate_vulnerable_hours;
+                s0.serious_mode = persisted.serious_mode;
             }
             // No background watcher for the uninstall request specifically:
             // the cool-off elapsing only flips `UninstallState.ready`,
@@ -3876,6 +4243,12 @@ pub fn run() {
                         // one, send "still protecting <name>'s computer" so that
                         // silence itself becomes a signal. Checked cheaply once a
                         // minute; the 30-day gate makes the actual send rare.
+                        // Grayscale window expiry (5.6) — hand the display
+                        // back the moment the window ends, and also if the
+                        // extension went away mid-window (the deadline is
+                        // absolute; see GRAYSCALE_UNTIL).
+                        tick_grayscale();
+
                         if tick % 60 == 0 {
                             maybe_send_contact_heartbeat(&app2, &settings2);
                         }
@@ -3999,6 +4372,20 @@ pub fn run() {
                                 state2.lock().unwrap().lockdown_escalate = false;
                                 let _ = broadcast_blocking(&state2, &lockdown2);
                                 log::warn!("friction: lockdown schedule-from-vulnerable-hours disabled (weakening applied)");
+                            } else if action_id == "serious.disable" {
+                                // UX Direction §1: the doubled Serious Mode
+                                // cool-off elapsed — only NOW does the mode
+                                // actually come off. It stayed fully active
+                                // for the whole wait, which is the entire
+                                // point of the asymmetry. Everything Serious
+                                // Mode turned ON stays on: this un-forces the
+                                // strictness, it doesn't undo protections the
+                                // user may independently want (see
+                                // `set_serious_mode`).
+                                settings2.update(|s| s.serious_mode = false);
+                                state2.lock().unwrap().serious_mode = false;
+                                let _ = broadcast_blocking(&state2, &lockdown2);
+                                log::warn!("friction: serious mode disabled (weakening applied)");
                             } else if action_id == "trusted_contact.remove" {
                                 // 5.2: the unwire delay elapsed — actually
                                 // clear the contact. The contact was already

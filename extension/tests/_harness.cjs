@@ -30,6 +30,11 @@ const EXT_ROOT = path.join(__dirname, '..');
 // Must match manifest.json's background.scripts order (Firefox), minus the
 // trailing background.js entry (added separately below).
 const BG_FILES = [
+  // Voice layer (UX Direction §2) — byte-identical copy of
+  // design-system/strings.js. Dependency-free and DOM-free (it must run in an
+  // MV3 service worker), so it loads first and anything below can call
+  // OL_STRINGS.t() for user-facing copy.
+  'strings.js',
   'bg/blocklists.js',
   'bg/matching.js',
   'bg/graylist.js',
@@ -47,8 +52,7 @@ function readExt(relPath) {
   return fs.readFileSync(path.join(EXT_ROOT, relPath), 'utf8');
 }
 
-// ── minimal chrome stub (modeled on the proven harness in
-//    "MD files/cjs files/test-adversarial-fixes.cjs") ────────────────────────
+// ── minimal chrome stub ─────────────────────────────────────────────────────
 function makeChromeStub() {
   const noop = () => {};
   const listener = { addListener: noop, removeListener: noop, hasListener: () => false };

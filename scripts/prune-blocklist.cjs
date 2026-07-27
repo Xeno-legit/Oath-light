@@ -10,32 +10,25 @@
  *
  * Dry run by default. Pass --apply to overwrite the JSON files.
  *
- *   node prune-blocklist.cjs            # report only
- *   node prune-blocklist.cjs --apply    # write pruned lists
+ *   node scripts/prune-blocklist.cjs            # report only
+ *   node scripts/prune-blocklist.cjs --apply    # write pruned lists
  */
 const fs = require('fs');
 const path = require('path');
+// Same sandbox the test suites use, so the pruner is judged by the REAL engine
+// (bg/matching.js et al. in manifest load order) and can never drift from it.
+const { buildSandbox } = require('../extension/tests/_harness.cjs');
 
 const APPLY = process.argv.includes('--apply');
-const ROOT = __dirname;
-const BG = path.join(ROOT, 'extension', 'background.js');
+const ROOT = path.join(__dirname, '..');
 const LIST_DIR = path.join(ROOT, 'extension', 'blocklists');
 const FILES = ['domains_part1.json', 'domains_part2.json', 'domains_part3.json'];
 
-// --- load shouldBlockUrl from background.js with a chrome shim ---------------
-const code = fs.readFileSync(BG, 'utf8') + '\nreturn { shouldBlockUrl };';
-const noop = () => {};
-const L = { addListener: noop };
-const chrome = {
-  runtime: { onInstalled: L, onStartup: L, onMessage: L,
-    connectNative: () => ({ onMessage: L, onDisconnect: L, postMessage: noop }),
-    getManifest: () => ({ version: 't' }), getURL: (s) => s, lastError: null },
-  storage: { local: { get: () => Promise.resolve({}), set: () => Promise.resolve(), remove: () => Promise.resolve() } },
-  tabs: { onRemoved: L, onUpdated: L, get: () => Promise.resolve({}), update: noop },
-  webNavigation: { onBeforeNavigate: L, onHistoryStateUpdated: L }, cookies: { set: noop },
-};
-const silent = { log: noop, warn: noop, error: noop };
-const { shouldBlockUrl } = new Function('chrome', 'console', code)(chrome, silent);
+// The sandbox starts with an EMPTY in-memory blacklist, which is exactly what
+// this tool needs: every block it sees comes from the logic layers (keyword /
+// adult-TLD / native-IDN / bypass), never from the list being pruned.
+const { sandbox } = buildSandbox({ mode: 'firefox' });
+const shouldBlockUrl = sandbox.shouldBlockUrl;
 
 function caughtByLogic(domain) {
   try {

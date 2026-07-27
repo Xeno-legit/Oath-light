@@ -82,12 +82,23 @@ function run() {
   }
 
   // Every bg/ file on disk is actually declared (no orphan module silently
-  // never loaded in the browser).
+  // never loaded in the browser). BG_FILES also carries non-bg/ entries — the
+  // shared design-system copies loaded into the worker, e.g. strings.js — so
+  // filter to the bg/ ones before comparing against the directory listing.
   const onDisk = fs.readdirSync(path.join(EXT_ROOT, 'bg')).filter((f) => f.endsWith('.js')).sort();
   runner.equal(
     JSON.stringify(onDisk),
-    JSON.stringify([...BG_FILES].map((f) => f.replace('bg/', '')).sort()),
+    JSON.stringify(BG_FILES.filter((f) => f.startsWith('bg/')).map((f) => f.replace('bg/', '')).sort()),
     'every bg/*.js on disk is declared in the load order'
+  );
+
+  // The worker's strings copy must be the design-system source verbatim — the
+  // same invariant scripts/ci/check-design-system-sync.mjs enforces repo-wide,
+  // asserted here too so the extension suite alone catches a hand-edited copy.
+  runner.equal(
+    readExt('strings.js'),
+    fs.readFileSync(path.join(EXT_ROOT, '..', 'design-system', 'strings.js'), 'utf8'),
+    'extension/strings.js is byte-identical to design-system/strings.js'
   );
 
   return runner.summary();
