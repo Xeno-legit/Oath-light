@@ -117,6 +117,46 @@ the settings field name down to the request builder.
 * Settings exposes a picker built from the Rust catalog, so the UI can't offer a
   provider the request path can't talk to.
 
+### One unified font
+
+Polishing.md: *"remove that fancy font from the design system, everything has
+one unified font."* Instrument Serif is gone completely — 4 `@font-face` blocks,
+the `--ol-font-display` token, its `tokens.js` entry, the `--font-display` alias
+in all three surface stylesheets, `preview.html`'s own copy, and 16 woff2 files
+(4 subsets × 4 font dirs). The token was **removed, not re-pointed at Manrope** —
+an alias would leave two names for one thing, which is how a second typeface
+creeps back.
+
+The website (separate repo, `Oath-light.github.io`) got the same treatment plus
+its own extras: **Space Grotesk removed** (541 refs across 16 pages), **all 48
+Google Fonts `<link>` tags removed**, and its stale `assets/tokens.css` +
+`assets/fonts` re-synced from `design-system/`. The site now loads one
+self-hosted family and makes **no third-party font request at all**.
+
+`JetBrains Mono` is deliberately left in the code-block stack — with the Google
+Fonts loads gone it resolves to system `monospace`, and forcing code into a
+proportional face would be worse, not more unified.
+
+### Dead palette variants stripped — and a real bug behind them
+
+The 6 unused palettes (`aurora`/`lagoon`/`dawn`/`midnight`/`forest`/`ember`) are
+gone from all three stylesheets: **219 lines removed**. Noir has been the only
+built-in theme since the 2026-07-19 owner decision.
+
+This wasn't only cleanup. **The extension pages defaulted to
+`data-style="aurora"`** in their HTML, so `popup.html`, `blocked.html` and
+`blocklists.html` rendered in violet/pink until `theme-sync.js` ran — while the
+desktop app was monochrome. The palette no longer keys off `data-style` at all
+(selectors are plain `[data-theme="…"]` now), so a stale attribute value can
+never leave the theme variables undefined. The attribute was dropped from all
+four HTML files.
+
+> **Still to do here:** `app.jsx`, `theme-sync.js`, `blocked.js`, `store.js`
+> (`display.style`) and the Themes page still *write* and store a `style` value
+> that nothing reads any more. It is harmless dead weight — no CSS depends on
+> it — but it should come out when the Themes page is rebuilt. Note the hub card
+> shows `s.display.style` as a stat chip, so that needs a replacement.
+
 ### Recovery Program page
 
 * Description cut from a paragraph to one line.
@@ -135,11 +175,12 @@ In Polishing.md order. Nothing below has been started.
 | # | Task | Notes |
 |---|---|---|
 | 1 | **Tips & Questions** UI rebuild | Use the new `SectionCard`/`Setting`/`InfoDot` primitives |
-| 2 | **Themes** UI rebuild | Also **strip the 6 dead palette variants** — `aurora`/`lagoon`/`dawn`/`midnight`/`forest`/`ember` are still in all three stylesheets but Noir is the only built-in theme (owner decision 2026-07-19) and `index.html` pins `data-style="noir"`. That's ~90 dead lines × 3 files. Custom colours are runtime `--ol-*` token overrides, already wired in `app.jsx` |
+| 2 | **Themes** UI rebuild | The dead palettes are already stripped (above) — what's left is the *page*. Custom colours are runtime `--ol-*` token overrides, already wired in `app.jsx`. Also remove the now-vestigial `style` plumbing noted above |
 | 3 | **Settings** UI rebuild | Info icons; **rename "Drill Sergeant"** (owner: *"seems like something a child would name it"*) — it's the `serious` voice in `strings.js`/`VOICE.md`, so rename the *label*, not the `voice: 'serious'` id; **verify notifications actually work**; audit remaining "not built yet" rows the way the Blocking ones were audited — at least two were already built |
-| 4 | **System DNS** | *"resolver started but isn't answering on 127.0.0.1:53"*. Not investigated at all. Start at `desktop-app/dns/` and `dns_filter.rs`'s health-check/failsafe path |
+| 4 | **System DNS** | *"resolver started but isn't answering on 127.0.0.1:53"*. Not investigated at all. Start at `desktop-app/dns/` and `dns_filter.rs`'s health-check/failsafe path. **Highest-value item left** — it's a functional failure, not a cosmetic one |
 | 5 | **Extension code review** | Broken code + over-complicated structures. Not started |
-| 6 | **Website** | Remove the display font — **one unified font** (owner explicitly wants the "fancy font" gone from the design system); match the design system. `tokens.css` still ships `--ol-font-display: 'Instrument Serif'` and the repo carries its woff2 subsets. Note: removing it is a design-system change, so re-run the sync gate |
+
+The website item is **done** (see "One unified font" above).
 
 Also still open from ROADMAP's "Before Alpha": Arabic review, OTA production
 keys, and the pre-Alpha full-scale test.

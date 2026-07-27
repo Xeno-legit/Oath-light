@@ -1,7 +1,7 @@
 /* ============================================================
    OATH LIGHT — desktop app
    Calm, serene, spa-like. Glassy panels, soft gradients.
-   Theming: [data-theme] (light|dark) × [data-style] (aurora|lagoon|dawn)
+   Theming: [data-theme] (light|dark). Noir is the only palette.
    ============================================================ */
 
 /* @font-face declarations for Manrope come from
@@ -72,109 +72,32 @@
   --desktop: radial-gradient(120% 120% at 80% -10%, #eee7f6 0%, #e7e2f3 55%, #ddd8ee 100%);
 }
 
-/* ---- AURORA (violet → pink) — its own distinct preset, unchanged.
-   theme-sync.js / blocked.js still switch between all 7 named variants
-   for anyone who has one selected; NOIR below is the one wired to
-   tokens.css, since it's the variant the design system's values were
-   promoted from. ---- */
-[data-style="aurora"][data-theme="dark"] {
-  --bg-0: #16111f; --bg-1: #1c1629; --text: #f3eefa; --text-2: #c8bcdd; --muted: #9286a6;
-  --accent: #b69bff; --accent-2: #f1a6e6; --accent-3: #8b7cff;
-  --orb-a: #7c5cff; --orb-b: #e879c6; --orb-c: #5b8cff;
-}
-[data-style="aurora"][data-theme="light"] {
-  --bg-0: #faf7ff; --bg-1: #ffffff; --text: #2a2140; --text-2: #574a70; --muted: #877a9c;
-  --accent: #7c5cff; --accent-2: #d962c0; --accent-3: #6a5af0;
-  --orb-a: #b9a4ff; --orb-b: #f4b6e6; --orb-c: #a8c2ff;
-}
 
-/* ---- LAGOON (teal → green) ---- */
-[data-style="lagoon"][data-theme="dark"] {
-  --bg-0: #0e1a1c; --bg-1: #122327; --text: #eafaf7; --text-2: #b6d6d2; --muted: #7fa39f;
-  --accent: #5fded0; --accent-2: #8fe6a4; --accent-3: #54c7e0;
-  --orb-a: #1fb6c9; --orb-b: #3fd49a; --orb-c: #2a8fd8;
-}
-[data-style="lagoon"][data-theme="light"] {
-  --bg-0: #f1fbf9; --bg-1: #ffffff; --text: #142a2a; --text-2: #436360; --muted: #6e918d;
-  --accent: #109e94; --accent-2: #2fae6a; --accent-3: #1496bd;
-  --orb-a: #8fe3da; --orb-b: #aeebbf; --orb-c: #9dd4ef;
-}
 
-/* ---- DAWN (peach → rose/gold) ---- */
-[data-style="dawn"][data-theme="dark"] {
-  --bg-0: #1d1416; --bg-1: #261a1c; --text: #fbeee9; --text-2: #e0c4bb; --muted: #b08f86;
-  --accent: #ffb38a; --accent-2: #ff9bb0; --accent-3: #ffd27a;
-  --orb-a: #ff8a6b; --orb-b: #ff7aa0; --orb-c: #ffc46b;
-}
-[data-style="dawn"][data-theme="light"] {
-  --bg-0: #fff7f3; --bg-1: #ffffff; --text: #3a2420; --text-2: #6e4d44; --muted: #a07a70;
-  --accent: #f0793f; --accent-2: #ef5d80; --accent-3: #e9a23a;
-  --orb-a: #ffc3a8; --orb-b: #ffb0c2; --orb-c: #ffdca8;
-}
 
-/* ---- MIDNIGHT (navy → electric blue) ---- */
-[data-style="midnight"][data-theme="dark"] {
-  --bg-0: #0d1321; --bg-1: #111b30; --text: #e8f0ff; --text-2: #9db4d8; --muted: #6a82a6;
-  --accent: #4f9fff; --accent-2: #7c63ff; --accent-3: #38d6ff;
-  --orb-a: #1a5fff; --orb-b: #6040e0; --orb-c: #1ab8e8;
-}
-[data-style="midnight"][data-theme="light"] {
-  --bg-0: #f0f4ff; --bg-1: #ffffff; --text: #0f1e3a; --text-2: #2d4a6e; --muted: #5a7295;
-  --accent: #2563eb; --accent-2: #5b4ae8; --accent-3: #0ea5e9;
-  --orb-a: #93c5fd; --orb-b: #c4b5fd; --orb-c: #7dd3fc;
-}
 
-/* ---- FOREST (pine → sage green) ---- */
-[data-style="forest"][data-theme="dark"] {
-  --bg-0: #0c1610; --bg-1: #111f14; --text: #eaf6ed; --text-2: #a8ceb0; --muted: #6a9272;
-  --accent: #52d47c; --accent-2: #8bdb5a; --accent-3: #26c4a2;
-  --orb-a: #1f9e5c; --orb-b: #5ec44a; --orb-c: #18a89e;
-}
-[data-style="forest"][data-theme="light"] {
-  --bg-0: #f2faf4; --bg-1: #ffffff; --text: #0e2416; --text-2: #2d5c38; --muted: #5a8462;
-  --accent: #16a34a; --accent-2: #4d9a25; --accent-3: #0d9488;
-  --orb-a: #86efac; --orb-b: #bef264; --orb-c: #5eead4;
-}
 
-/* ---- EMBER (charcoal → burnt orange → amber) ---- */
-[data-style="ember"][data-theme="dark"] {
-  --bg-0: #1a1208; --bg-1: #221a0c; --text: #fdf4e7; --text-2: #e8ccaa; --muted: #b09070;
-  --accent: #ff9c3a; --accent-2: #ff5e3a; --accent-3: #ffd03a;
-  --orb-a: #cc6010; --orb-b: #cc2a10; --orb-c: #cc9010;
-}
-[data-style="ember"][data-theme="light"] {
-  --bg-0: #fff8f0; --bg-1: #ffffff; --text: #2a1800; --text-2: #6b3c10; --muted: #9a6030;
-  --accent: #d97706; --accent-2: #dc4e0e; --accent-3: #ca8a04;
-  --orb-a: #fcd34d; --orb-b: #fb923c; --orb-c: #fbbf24;
-}
 
 /* ---- NOIR (black & white — pure monochrome) ---- */
 /* NOIR is the design system default — wired straight to tokens.css so
    editing tokens.css (via preview.html) re-skins this preset. No
    --ol-orb-* tokens exist, so the orb triplet maps to the accent
    triplet, the closest conceptual equivalent. */
-[data-style="noir"][data-theme="dark"] {
+[data-theme="dark"] {
   --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1); --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
   --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
   --accent-ink: var(--ol-accent-ink);
   --orb-a: var(--ol-accent); --orb-b: var(--ol-accent-2); --orb-c: var(--ol-accent-3);
 }
-[data-style="noir"][data-theme="light"] {
+[data-theme="light"] {
   --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1); --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
   --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
   --accent-ink: var(--ol-accent-ink);
   --orb-a: var(--ol-accent); --orb-b: var(--ol-accent-2); --orb-c: var(--ol-accent-3);
 }
 
-/* per-style desktop bg override (dark) */
-[data-style="midnight"][data-theme="dark"] { --desktop: radial-gradient(120% 120% at 80% -10%, #142040 0%, #0d1625 55%, #080f1e 100%); }
-[data-style="forest"][data-theme="dark"]   { --desktop: radial-gradient(120% 120% at 80% -10%, #122018 0%, #0c1810 55%, #080f09 100%); }
-[data-style="ember"][data-theme="dark"]    { --desktop: radial-gradient(120% 120% at 80% -10%, #281808 0%, #1a1208 55%, #100c04 100%); }
-[data-style="midnight"][data-theme="light"]{ --desktop: radial-gradient(120% 120% at 80% -10%, #dce8ff 0%, #d0dcf8 55%, #c8d4f0 100%); }
-[data-style="forest"][data-theme="light"]  { --desktop: radial-gradient(120% 120% at 80% -10%, #d8f0e0 0%, #cde8d5 55%, #c4e0cc 100%); }
-[data-style="ember"][data-theme="light"]   { --desktop: radial-gradient(120% 120% at 80% -10%, #ffecd8 0%, #ffe4cc 55%, #ffdcc0 100%); }
-[data-style="noir"][data-theme="dark"]     { --desktop: radial-gradient(120% 120% at 80% -10%, #1a1a1a 0%, #0e0e0e 55%, #050505 100%); }
-[data-style="noir"][data-theme="light"]    { --desktop: radial-gradient(120% 120% at 80% -10%, #f0f0f0 0%, #e8e8e8 55%, #dedede 100%); }
+[data-theme="dark"]     { --desktop: radial-gradient(120% 120% at 80% -10%, #1a1a1a 0%, #0e0e0e 55%, #050505 100%); }
+[data-theme="light"]    { --desktop: radial-gradient(120% 120% at 80% -10%, #f0f0f0 0%, #e8e8e8 55%, #dedede 100%); }
 
 /* ============================================================
    RESET / BASE
