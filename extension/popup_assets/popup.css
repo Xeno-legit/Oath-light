@@ -1,18 +1,17 @@
-/* @font-face declarations for Manrope + Instrument Serif come from
+/* @font-face declarations for Manrope come from
    tokens.css (linked before this file in popup.html) — the previous
    locally-duplicated font subsets were removed from here. */
 
 /* ============================================================
    OATH LIGHT — browser extension popup
    Reuses the desktop app's visual language:
-   Manrope + Instrument Serif · glass panels · gradient orbs
+   Manrope · glass panels · gradient orbs
    Theming: [data-theme] (light|dark) × [data-style]
             (aurora|lagoon|dawn|midnight|forest|ember)
    ============================================================ */
 
 :root {
   --font-ui: var(--ol-font-ui);
-  --font-display: var(--ol-font-display);
 
   --r-sm: var(--ol-radius-sm); /* 10px, exact match */
   --r-md: 14px;  /* popup's own smaller scale — no clean --ol-radius-* match */
@@ -351,7 +350,7 @@ input { font-family: inherit; }
 }
 .quote:hover { border-color: var(--glass-brd-strong); background: var(--glass-2); }
 .quote-mark {
-  font-family: var(--font-display); font-size: 56px; line-height: .6;
+  font-family: var(--font-ui); font-size: 56px; line-height: .6;
   color: color-mix(in oklab, var(--accent) 55%, transparent);
   position: absolute; top: 16px; inset-inline-start: 14px; pointer-events: none;
 }

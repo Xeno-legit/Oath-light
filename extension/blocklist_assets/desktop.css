@@ -4,7 +4,7 @@
    Theming: [data-theme] (light|dark) × [data-style] (aurora|lagoon|dawn)
    ============================================================ */
 
-/* @font-face declarations for Manrope + Instrument Serif come from
+/* @font-face declarations for Manrope come from
    tokens.css (linked before this file in blocked.html / user_blocklist.html)
    — the previous locally-duplicated font subsets were removed from here. */
 
@@ -30,7 +30,6 @@
 
 :root {
   --font-ui: var(--ol-font-ui);
-  --font-display: var(--ol-font-display);
 
   --r-sm: var(--ol-radius-sm);
   --r-md: var(--ol-radius-md);

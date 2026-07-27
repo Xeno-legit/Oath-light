@@ -47,7 +47,6 @@ globalThis.OL_TOKENS = [
 
   /* ---------------- typography ---------------- */
   { name: '--ol-font-ui',        group: 'type',  type: 'text',   label: 'Font — UI stack' },
-  { name: '--ol-font-display',   group: 'type',  type: 'text',   label: 'Font — display stack' },
   { name: '--ol-size-xs',        group: 'type',  type: 'length', label: 'Size — XS' },
   { name: '--ol-size-sm',        group: 'type',  type: 'length', label: 'Size — SM' },
   { name: '--ol-size-base',      group: 'type',  type: 'length', label: 'Size — Base' },

@@ -4,7 +4,7 @@
    Theming: [data-theme] (light|dark) × [data-style] (aurora|lagoon|dawn)
    ============================================================ */
 
-/* @font-face declarations for Manrope + Instrument Serif now live in
+/* @font-face declarations for Manrope now live in
    tokens.css (design-system/tokens.css, linked before this file in
    index.html / overlay.html) — same subset files, byte-identical fonts/,
    so they were removed here to avoid duplicate @font-face registration. */
@@ -31,7 +31,6 @@
 
 :root {
   --font-ui: var(--ol-font-ui);
-  --font-display: var(--ol-font-display);
 
   --r-sm: var(--ol-radius-sm);
   --r-md: var(--ol-radius-md);
