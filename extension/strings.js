@@ -531,34 +531,45 @@
       companion: 'What actually keeps Oath Light in place and working.',
       serious: 'What keeps Oath Light in place and working.',
     },
+    // Nothing in this section is a toggle any more, so the card's own
+    // explanation is no longer about the on/off asymmetry — it is about there
+    // being no off. The asymmetry copy still exists and is still true; it moved
+    // to the settings that really are choices.
     'blocking.protection_info': {
-      companion: 'Turning any of these ON is instant. Turning one OFF files a request that waits out the delay first — during which the protection stays fully active. That asymmetry is deliberate and applies everywhere in the app.',
-      serious: 'ON is instant. OFF files a request and waits out the delay, fully active the whole time. That asymmetry is deliberate and applies everywhere.',
+      companion: "These are what Oath Light is. None of them have a switch — not one behind a password, not one behind a waiting period — because a protection you can end up talking yourself out of isn't protection. Everything on this page that IS a choice is still a choice.",
+      serious: 'These are what Oath Light is. No switches, no password, no waiting period — there is no off. The settings that are choices are still choices.',
     },
+
+    // The one chip every mandatory row wears. Shared rather than per-row: five
+    // rows saying the same thing in five slightly different ways is how a page
+    // stops reading like one decision.
+    'blocking.always_on': { companion: 'Always on', serious: 'Always on' },
 
     'blocking.guard_title': { companion: 'Uninstall guard', serious: 'Uninstall guard' },
     'blocking.guard_desc_on': {
-      companion: 'On — extension kept installed, private windows closed off',
-      serious: 'On — extension kept installed, private windows closed off',
+      companion: 'Extension kept installed, private windows closed off',
+      serious: 'Extension kept installed, private windows closed off',
     },
     'blocking.guard_info': {
-      companion: "Keeps the extension force-installed on every supported browser and re-applies the policy if it's removed. It also closes the two surfaces the extension can't reach on its own: Incognito/Private windows and Guest profiles.",
-      serious: 'Keeps the extension force-installed on every supported browser and re-applies the policy if it goes. Incognito/Private windows and Guest profiles are closed off too.',
+      companion: "Keeps the extension force-installed on every supported browser and re-applies the policy if it's removed. It also closes the two surfaces the extension can't reach on its own: Incognito/Private windows and Guest profiles. No switch — it can't be turned off.",
+      serious: 'Keeps the extension force-installed on every supported browser and re-applies the policy if it goes. Incognito/Private windows and Guest profiles are closed off too. No switch. It does not come off.',
     },
-    'blocking.guard_pending_what': { companion: 'The uninstall guard', serious: 'The uninstall guard' },
 
     'blocking.safesearch_title': { companion: 'SafeSearch', serious: 'SafeSearch' },
     'blocking.safesearch_desc': { companion: 'Forced on every connected browser', serious: 'Forced on every connected browser' },
     'blocking.safesearch_info': {
-      companion: 'Google, Bing, DuckDuckGo and Yahoo are pinned to SafeSearch and their toggle UI is hidden. There is deliberately no switch for this one — it can\'t be turned off.',
+      companion: 'Google, Bing, DuckDuckGo and Yahoo are pinned to SafeSearch and their toggle UI is hidden. No switch — it can\'t be turned off.',
       serious: 'Google, Bing, DuckDuckGo and Yahoo are pinned to SafeSearch and their toggle is hidden. No switch. It does not come off.',
     },
-    'blocking.safesearch_chip': { companion: 'Always on', serious: 'Always on' },
 
     'blocking.youtube_title': { companion: 'YouTube Restricted Mode', serious: 'YouTube Restricted Mode' },
+    'blocking.youtube_desc_on': {
+      companion: 'Mature videos and comments filtered by YouTube',
+      serious: 'Mature videos and comments filtered by YouTube',
+    },
     'blocking.youtube_info': {
-      companion: "Applies YouTube's own strict Restricted Mode through a header rule — the same mechanism school networks use — so YouTube filters mature videos and comments on its side. Included in Strict.",
-      serious: "Applies YouTube's own strict Restricted Mode, so YouTube filters mature videos and comments on its side. Included in Strict.",
+      companion: "Applies YouTube's own strict Restricted Mode through a header rule — the same mechanism school networks use — so YouTube filters mature videos and comments on its side. No switch — it can't be turned off.",
+      serious: "Applies YouTube's own strict Restricted Mode, so YouTube filters mature videos and comments on its side. No switch. It does not come off.",
     },
 
     'blocking.sub_apps': { companion: 'Apps and browsers', serious: 'Apps and browsers' },
@@ -596,35 +607,36 @@
     // it's the exception — "status yes, map no" (VOICE.md). The copy also avoids
     // promising that every browser gets this: most don't need it, because their
     // extension can't be removed in the first place.
+    //
+    // The off-state and pending-weakening keys are gone with the switch. What
+    // replaced them is the recovery sentence: the lock is survivable because a
+    // window is always available, and the copy has to say so, or being locked
+    // out reads as being locked out permanently.
     'blocking.browser_lock_title': {
       companion: 'Require the extension to browse',
       serious: 'Require the extension to browse' },
     'blocking.browser_lock_desc_on': {
       companion: "A browser without it won't open",
       serious: "A browser without it won't open" },
-    'blocking.browser_lock_desc_off': {
-      companion: 'Off — the extension can be switched off',
-      serious: 'Off — the extension can be switched off' },
     'blocking.browser_lock_info': {
-      companion: "One browser can't be made to keep the extension the way the others can, so staying protected there is a choice you'd have to keep making. With this on, that browser simply doesn't open until the extension is on. If it's ever closed on you, come here and Oath Light will open it for a short window so you can switch the extension back on.",
-      serious: "One browser can't be forced to keep the extension. With this on, it doesn't open without it. To fix that, come here and Oath Light gives you a short window to switch the extension on." },
-    'blocking.browser_lock_pending_what': {
-      companion: 'Requiring the extension to browse',
-      serious: 'Requiring the extension to browse' },
+      companion: "One browser can't be made to keep the extension the way the others can, so it simply doesn't open until the extension is on. If it's ever closed on you, come here and Oath Light will open it for a short window so you can switch the extension back on — as many times as you need. No switch, and no exceptions.",
+      serious: "One browser can't be forced to keep the extension, so it doesn't open without it. Come here and Oath Light gives you a short window to switch the extension on — as often as it takes. No switch. No exceptions." },
 
     'blocking.dns_title': { companion: 'System DNS filter', serious: 'System DNS filter' },
     'blocking.dns_info': {
-      companion: 'Extends blocking past the browser to every other app on this computer. Needs administrator rights once, to take over DNS. Opt-in — turning it on is instant, turning it off goes through the waiting period.',
-      serious: 'Extends blocking past the browser to every app on this computer. Needs administrator rights once. On is instant; off waits out the delay.',
+      companion: "Extends blocking past the browser to every other app on this computer. Needs administrator rights once, to take over DNS — until you grant that, this layer can't cover anything outside your browser. No switch; if it ever stops, Oath Light starts it again by itself.",
+      serious: "Extends blocking past the browser to every app on this computer. Needs administrator rights once. Until you grant it, nothing outside the browser is covered. No switch — if it stops, it restarts itself.",
     },
     'blocking.dns_status_active': { companion: 'Filtering every app on this computer', serious: 'Filtering every app on this computer' },
     'blocking.dns_status_no_adapter': {
-      companion: 'Running, but no adapter could be redirected — needs administrator rights',
-      serious: 'Running, but no adapter could be redirected — needs administrator rights',
+      companion: 'Running, but nothing outside your browser is covered yet — needs administrator rights',
+      serious: 'Running, but nothing outside your browser is covered yet — needs administrator rights',
     },
-    'blocking.dns_status_off': {
-      companion: 'Off — only the browser extension is filtering',
-      serious: 'Off — only the browser extension is filtering',
+    // The resolver itself is down. Says the two things worth saying: what is
+    // still protecting you, and that nobody has to do anything about it.
+    'blocking.dns_status_retrying': {
+      companion: 'Starting again — your browser is still protected',
+      serious: 'Starting again — your browser is still protected',
     },
     // Running and taken over, but something else on the machine is answering
     // DNS (see dns_filter.rs's `exposure_warning`). The detail sentence comes
@@ -634,11 +646,8 @@
       companion: 'Running, but not covering every app right now',
       serious: 'Running, but not covering every app right now',
     },
-    'blocking.dns_warn_restart': {
-      companion: '{status}. Restart Oath Light as administrator and switch this on again.',
-      serious: '{status}. Restart Oath Light as administrator and switch it on again.',
-    },
-    'blocking.dns_pending_what': { companion: 'The DNS filter', serious: 'The DNS filter' },
+    'blocking.dns_grant_admin': { companion: 'Grant admin', serious: 'Grant admin' },
+    'blocking.dns_retry': { companion: 'Try now', serious: 'Try now' },
 
     'blocking.monitor_title': { companion: 'AI screen monitor', serious: 'AI screen monitor' },
     'blocking.monitor_sub': {

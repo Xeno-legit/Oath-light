@@ -223,43 +223,53 @@ const BROWSER_STATE = {
   not_installed:     { labelKey: 'status.not_installed', color: 'var(--muted)', dot: 'color-mix(in oklab, var(--muted) 70%, transparent)', off: true },
 };
 
-// Secondary note describing the force-install lock and — critically — its
-// scope. A user-scope (HKCU) lock is real but the user can delete it, so we say
-// "user-level" rather than implying it's un-removable. Machine-scope (HKLM,
-// elevated) is the hard lock. Shown on healthy rows too, so the tamper-lock's
-// presence and strength are always visible, not only when the extension is gone.
+// Secondary note on the row: what state the extension is in, and — where there
+// is one — what the user is expected to do next.
 //
-// Deliberately NOT in strings.js, unlike every other string on this page:
-// these lines say where the lock is weak and what it would take to defeat it,
-// which is the one thing the shared catalog refuses to carry (VOICE.md,
-// "status yes, map no" — this function is named there as the example). Cutting
-// them down to a flat status is a copy decision for the owner, not something
-// to launder into the design system by moving it.
+// **What this must never do again.** It used to publish the lock's weak points:
+// "(user-level)" told the reader the policy is one they can delete themselves,
+// and "not locked (removable)" said outright that the extension on this browser
+// comes off whenever they like. Both were accurate, and accuracy is not the
+// standard here — a note that ends "(removable)" is not a status, it is an
+// instruction, handed to the one person in the world who is looking for it.
+// (VOICE.md, "status yes, map no"; the strength of a lock is not a status the
+// user can act on, it is a map.)
+//
+// So the scope of the lock is no longer reported at all. "Locked" means the
+// extension is pinned; whether that pin came from HKLM or HKCU is an
+// implementation detail the app acts on — the Grant-admin action still upgrades
+// a user-hive lock — and nothing the reader needs told. What survives is
+// strictly the states with something to *do*: an approval to click, an install
+// to complete, an admin prompt to accept.
+//
+// Deliberately NOT in strings.js, unlike every other string on this page: the
+// shared catalog carries two voices for every key, and these are already the
+// flattest possible statements of fact. Keeping them here also keeps this
+// function reviewable as one block, which is what the old version needed and
+// did not get.
 function enforcementNote(b) {
   const missing = b.state === 'extension_missing' || b.state === 'running_partial';
   switch (b.enforcement) {
-    case 'enforced':      return missing ? 'restoring on restart' : 'locked';
-    case 'enforced_user': return missing ? 'restoring on restart (user-level)' : 'locked (user-level)';
+    // Machine-wide and user-hive locks read identically on purpose — see above.
+    case 'enforced':
+    case 'enforced_user': return missing ? 'restoring on restart' : 'locked';
     // Policy is written but the extension isn't actually installed yet. Never
     // claim "locked" here — that conflation is the bug we fixed.
-    case 'pending':       return 'policy set — waiting for the browser to install it';
-    case 'pending_user':  return 'policy set (user-level) — waiting for the browser to install it';
+    case 'pending':
+    case 'pending_user':  return 'policy set — waiting for the browser to install it';
     // Writing the policy needs admin on most machines (the Software\Policies key
-    // is usually admin-only in both hives), so say so plainly.
+    // is usually admin-only in both hives). Kept because it is the one thing the
+    // user can fix, and it sits next to the button that fixes it.
     case 'failed':        return 'needs admin to lock';
-    // Auto-installed rather than force-installed (the Edge path). The browser
-    // fetched it on its own and is holding it switched off until the user
-    // approves it once — that prompt is a browser security control, so the note
-    // asks for the click instead of implying we can skip it.
+    // The browser fetched it on its own and is holding it switched off until the
+    // user approves it once — that prompt is a browser security control, so the
+    // note asks for the click instead of implying we can skip it.
     case 'needs_approval': return 'downloaded — turn it on in your browser';
-    // Approved and running. Real protection, but nothing pins it here, so this
-    // must never borrow the word "locked".
-    case 'auto_installed': return 'installed — not locked (removable)';
-    // Edge, on a PC that isn't domain/Entra-joined, force-installs ONLY from the
-    // Microsoft Edge Add-ons store — a Chrome Web Store entry is accepted as
-    // policy and then silently ignored. Admin does not change that, so the note
-    // must not imply it might.
-    case 'store_unavailable': return 'won’t auto-install here — add it yourself';
+    // Approved and running.
+    case 'auto_installed': return 'installed';
+    // No store will force-install here, so the extension has to be added by
+    // hand. Says what to do, not why the automatic path failed.
+    case 'store_unavailable': return 'add it in your browser';
     case 'dormant':       return 'auto-restore on hold'; // engine not configured (defensive)
     default:              return null; // 'off' or not present
   }

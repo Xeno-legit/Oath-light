@@ -91,9 +91,9 @@ API fields stay stable.
 
 ### 4. SafeSearch and search enforcement
 SafeSearch is forced on Google, Bing, DuckDuckGo and Yahoo by URL parameter and
-the toggle UI is hidden; YouTube Restricted Mode is available as a strictness
-level. Explicit search queries are blocked, including a keyword filter on Reddit
-and Patreon search paths.
+the toggle UI is hidden; YouTube Restricted Mode is applied by header rule. Both
+are permanent — neither has a switch. Explicit search queries are blocked,
+including a keyword filter on Reddit and Patreon search paths.
 
 ### 5. Bypass and evasion defense
 - Translation and archive wrappers are unwrapped and the real target re-checked.
@@ -105,8 +105,10 @@ and Patreon search paths.
 A local filtering resolver takes over the system DNS, so the same blacklist and
 keyword engine apply to **every application**, not just browsers with the
 extension. DNS-over-HTTPS is closed off by policy where browsers expose it and
-by blocking well-known DoH endpoints in the resolver. Opt-in, needs admin, and
-disabling it is a friction-gated weakening like everything else.
+by blocking well-known DoH endpoints in the resolver. Always on and not
+disableable; it needs admin once to point the adapters at itself, and keeps
+retrying — including the takeover — until it gets it. If the resolver ever stops
+answering, real DNS is restored immediately and the filter restarts itself.
 
 ### 7. On-device AI screen protection
 An ONNX ensemble (SigLIP Image-Guard + NudeNet) runs **entirely locally** —
@@ -117,10 +119,15 @@ pause without ever making the filter catch less.
 
 ## Tamper resistance
 
-- **Delayed weakening.** Turning any protection *on* is instant. Turning one
-  *off* — the AI monitor, DNS filtering, lockdown, Serious Mode, a custom
-  block — files a request with a 24-hour cool-off. Uninstall additionally
-  requires typing a random 12-word phrase minted when the request was filed.
+- **No off switch on the core.** The uninstall guard, SafeSearch, YouTube
+  Restricted Mode, the extension requirement and the system DNS filter cannot be
+  turned off — not with the master password, not by waiting, not by editing the
+  settings file (the floor is re-applied on every load).
+- **Delayed weakening.** For everything that *is* a choice: turning it *on* is
+  instant, turning it *off* — the AI monitor, lockdown, Serious Mode, a blocked
+  app, a custom block — files a request with a 24-hour cool-off. Uninstall
+  additionally requires typing a random 12-word phrase minted when the request
+  was filed.
 - **Clock-tamper immunity.** Timers use a monotonic anchor; rolling the system
   clock forward freezes the timer and logs the event instead of skipping it.
 - **Lockdown Mode.** Allowlist-only browsing during vulnerable hours or on
@@ -132,8 +139,17 @@ pause without ever making the filter catch less.
   deleted from history — accountability integrity with no server.
 - **Dual-process watchdog** and double autostart registration (Run key **plus**
   a logon scheduled task), each self-healing the other.
+- **Self-repairing companions.** The watchdog guardian and the native-messaging
+  host are embedded in the app binary and checked against it on every launch.
+  Both are normally running when an update lands, and Windows will not let an
+  installer overwrite a locked executable — so an upgrade could otherwise leave
+  a new app driving two old companions. Anything that doesn't match is rewritten
+  before the watchdog starts; a missing one is restored.
 - **All-browser enforcement.** Force-install via browser policy on Chromium and
-  Firefox, plus incognito/guest blocking and evasion-browser detection.
+  Firefox, plus incognito/guest blocking and evasion-browser detection. Edge
+  cannot be force-installed on a consumer PC (Microsoft only permits it from
+  Edge Add-ons), so Edge is instead held shut until it is carrying the
+  extension — with a short, repeatable recovery window from the app.
 
 ## Recovery layer
 

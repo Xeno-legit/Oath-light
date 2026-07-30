@@ -87,11 +87,18 @@ pub const CHROMIUM_UPDATE_URL: &str = "https://clients2.google.com/service/updat
 /// our ID appears nowhere in the log, while other force-installs in the same
 /// session fetch normally). It just looks like the extension never installs.
 ///
-/// Once the extension is published to Edge Add-ons, put its item ID here and
-/// Edge force-install starts working with no other change — `forcelist_target`
-/// already prefers it and pairs it with `EDGE_UPDATE_URL`. Until then Edge
-/// reports `StoreUnavailable` and the UI says so instead of pretending a
-/// written-but-inert policy is a lock.
+/// **The owner's decision (2026-07-31): Oath Light is not being published to
+/// Edge Add-ons.** The listing's verification requirements are not worth it for
+/// a store that will not meaningfully distribute the extension anyway. So this
+/// stays empty, Edge stays `StoreUnavailable`, and the browser lock
+/// (`browser_lock.rs`) is not a stopgap for Edge — it is *the* mechanism there,
+/// permanently. Read `requires_manual_install` with that in mind: it is not
+/// waiting for anything.
+///
+/// The machinery for the other outcome is left intact and costs nothing — if
+/// that decision is ever revisited, putting an item ID here is the only change
+/// needed and `forcelist_target` already prefers it, pairs it with
+/// `EDGE_UPDATE_URL`, and drops Edge out of the lock automatically.
 pub const EDGE_STORE_EXTENSION_ID: &str = "";
 
 /// Update endpoint for the Microsoft Edge Add-ons store — the only source Edge
@@ -679,27 +686,11 @@ pub fn requires_manual_install(def: &BrowserDef) -> bool {
         && forcelist_target(def).is_none()
 }
 
-/// True when some browser **other than `def`** is installed and is one we can
-/// actually pin the extension into — i.e. bricking `def` still leaves the user a
-/// working, protected way onto the web.
-///
-/// The browser lock's single exemption depends on this. A machine where Edge is
-/// the only browser is a machine where bricking Edge means no browsing at all:
-/// no way to download a second browser, no way to reach a support page, no way
-/// out. That is not strictness, it is a dead end.
-///
-/// The alternative must not itself be lockable (`!requires_manual_install`), or
-/// two mutually-locked browsers could exempt each other and neither would ever
-/// be enforced. Today nothing else is lockable, but the invariant is cheap to
-/// state and expensive to rediscover.
-///
-/// Uses the 60s-cached probe: this runs on the monitor tick, and "is Chrome
-/// installed" does not change second to second.
-pub fn has_alternative_browser(def: &BrowserDef) -> bool {
-    BROWSERS
-        .iter()
-        .any(|other| other.key != def.key && !requires_manual_install(other) && is_installed_cached(other))
-}
+// REMOVED: `has_alternative_browser`. It existed for one caller — the browser
+// lock's "this is the machine's only browser, stand down" exemption — and that
+// exemption is gone (see `browser_lock`'s module doc). Keeping the helper would
+// have left a ready-made switch for putting the hole back; the lock now has no
+// input describing what else is installed, which is the point.
 
 // NOTE (removed with publication): an earlier `offstore_forceinstall_supported()`
 // gated enforcement on the machine being enterprise-managed, because Chrome/Edge

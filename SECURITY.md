@@ -13,7 +13,10 @@ What the app does, what it touches on your machine, and what it never does.
 * Unwraps proxies, translators and archive viewers, then checks the real destination.
 * Filters at the system DNS level, so it covers every app, not only browsers.
 * Watches the screen with on-device AI and covers what it finds.
-* Holds protections on: turning one off waits out a cool-off period.
+* Holds its core protections on permanently — the uninstall guard, SafeSearch,
+  YouTube Restricted Mode, the extension requirement and the system DNS filter
+  have no off switch at all. Settings that *are* choices wait out a cool-off
+  before they weaken.
 * Keeps itself installed and running through a watchdog and browser policy.
 
 ## What it installs and runs
@@ -25,11 +28,13 @@ Everything below is on your machine. Nothing is hosted anywhere.
 | Desktop app + guardian process | Program folder, autostart | Runs the protections and keeps them running |
 | Native messaging host | Registered per browser | Lets the extension and the app talk locally |
 | Browser policy keys | Windows registry | Keeps the extension installed and SafeSearch on |
-| Local DNS resolver | 127.0.0.1, opt-in | System-wide domain filtering |
+| Local DNS resolver | 127.0.0.1, always on | System-wide domain filtering |
 | Settings and logs | App data folder | Your settings, streak, and event history |
 
 Some of this needs administrator rights once, at setup. That is used to write
-browser policy and register autostart — nothing else.
+browser policy, point this machine's DNS at the local resolver, and register
+autostart — nothing else. Decline it and the app still runs: the browser stays
+protected, and the DNS layer keeps asking until you allow it.
 
 ## Permissions, and what they are for
 

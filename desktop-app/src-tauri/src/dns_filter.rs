@@ -67,6 +67,28 @@ const FORWARD_FAILURE_LIMIT: u64 = 4;
 /// re-pick would keep landing on the same unreachable candidates, the fallbacks
 /// would keep failing, and the counter would keep refilling.
 const UPSTREAM_REPICK_COOLDOWN: Duration = Duration::from_secs(30);
+/// First gap before retrying a filter that failed to come up, and the ceiling
+/// the gap doubles towards.
+///
+/// **Why a retry loop exists at all.** The filter used to be opt-in, so "it
+/// isn't running" was assumed to be a choice and nothing ever tried again. Two
+/// consequences, and between them they are most of why this feature was
+/// reported as simply not working:
+///
+/// * the fail-open teardown below (correctly) restores real DNS when the
+///   resolver stops answering — and then left it off for the rest of the
+///   session, with the switch showing off and nothing saying why. A blip at
+///   3pm meant no whole-machine filtering until the next restart.
+/// * `enable` at startup runs while Windows is still bringing the network up.
+///   A machine that is mid-DHCP, mid-VPN, or briefly holding port 53 fails that
+///   one attempt and, again, stayed off.
+///
+/// Neither is a decision anybody made. The filter is mandatory now, so "off" is
+/// always a fault, and a fault is something to keep trying — backing off so a
+/// genuinely impossible case (port 53 permanently taken) costs one attempt every
+/// five minutes rather than one every three seconds.
+const RETRY_BACKOFF_START: u64 = 15;
+const RETRY_BACKOFF_MAX: u64 = 300;
 
 fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
@@ -164,6 +186,13 @@ pub struct DnsFilterState {
     /// Unix seconds of the last upstream re-pick (0 = never), for
     /// `UPSTREAM_REPICK_COOLDOWN`.
     last_repick: AtomicU64,
+    /// Unix seconds at which the next attempt to bring the filter up is due
+    /// (0 = nothing scheduled, which means either it is running or it was torn
+    /// down on purpose by uninstall/update).
+    retry_at: AtomicU64,
+    /// Current gap between attempts, doubling from `RETRY_BACKOFF_START` to
+    /// `RETRY_BACKOFF_MAX`. Reset by any success and by an explicit user retry.
+    retry_backoff: AtomicU64,
     /// Last exposure reading, so a change can be logged once instead of every
     /// deep tick for as long as the condition lasts.
     exposure: Mutex<Exposure>,
@@ -177,6 +206,8 @@ impl DnsFilterState {
             status: Mutex::new(DnsStatus::default()),
             health_failures: AtomicU64::new(0),
             last_repick: AtomicU64::new(0),
+            retry_at: AtomicU64::new(0),
+            retry_backoff: AtomicU64::new(0),
             exposure: Mutex::new(Exposure::default()),
         }
     }
@@ -202,6 +233,86 @@ impl DnsFilterState {
     /// health check / revert on the monitor tick should be active).
     pub fn is_active(&self) -> bool {
         self.status.lock().unwrap().running
+    }
+
+    /// Book the next attempt, doubling the gap each time up to the ceiling.
+    fn schedule_retry(&self) {
+        let next = match self.retry_backoff.load(Ordering::SeqCst) {
+            0 => RETRY_BACKOFF_START,
+            n => (n * 2).min(RETRY_BACKOFF_MAX),
+        };
+        self.retry_backoff.store(next, Ordering::SeqCst);
+        self.retry_at.store(now_secs() + next, Ordering::SeqCst);
+        log::info!("dns_filter: next attempt in {next}s");
+    }
+
+    /// Forget the schedule. Called on success, on a deliberate teardown, and by
+    /// the command behind the UI's retry — someone who has just granted admin
+    /// should not be made to sit out a delay computed from failures that
+    /// happened before they fixed the cause.
+    pub fn reset_retry(&self) {
+        self.retry_backoff.store(0, Ordering::SeqCst);
+        self.retry_at.store(0, Ordering::SeqCst);
+    }
+
+    /// One retry tick (called from `start_monitor` whenever the filter is *not*
+    /// running). Does nothing until the scheduled moment arrives, then tries
+    /// `enable` once and re-books on failure. Returns true if the filter came
+    /// back up, so the caller can log it.
+    ///
+    /// Cheap enough for the 3s tick in the common case: two atomic loads and an
+    /// early return. Nothing spawns a process until an attempt is actually due.
+    pub fn tick_retry(&self) -> bool {
+        if self.is_active() {
+            return false;
+        }
+        let due = self.retry_at.load(Ordering::SeqCst);
+        if due == 0 || now_secs() < due {
+            return false;
+        }
+        match self.enable() {
+            Ok(_) => {
+                log::info!("dns_filter: back up after a retry");
+                true
+            }
+            Err(e) => {
+                log::warn!("dns_filter: retry failed: {e}");
+                false
+            }
+        }
+    }
+
+    /// Re-attempt the adapter takeover for a filter that is running but was
+    /// refused the redirect (almost always: the app was not elevated when it
+    /// started). Called on the same throttled ~30s cadence as the drift check.
+    ///
+    /// Without this, "grant admin" fixed nothing until the next logon: the
+    /// resolver was already up, so the enable path never ran again, and the
+    /// elevated pass had no way to reach back into a running filter. Returns
+    /// true when a previously-refused takeover has just succeeded.
+    pub fn tick_retry_takeover(&self) -> bool {
+        {
+            let s = self.status.lock().unwrap();
+            if !s.running || s.taken_over {
+                return false;
+            }
+        }
+        match takeover::takeover(&self.dns_json()) {
+            Ok(_) => {
+                let mut s = self.status.lock().unwrap();
+                s.taken_over = true;
+                s.last_error = String::new();
+                log::info!("dns_filter: adapter takeover succeeded on retry");
+                true
+            }
+            Err(e) => {
+                // Expected on every tick until something changes (still not
+                // elevated). Kept at debug so it can't drown the log.
+                log::debug!("dns_filter: takeover retry still refused: {e}");
+                self.status.lock().unwrap().last_error = e;
+                false
+            }
+        }
     }
 
     /// Start the resolver and take over adapter DNS. Strengthening — meant to
@@ -239,6 +350,7 @@ impl DnsFilterState {
         // conflict case — return it verbatim, take over nothing.
         let server = oathlight_dns::start(upstreams_pair).inspect_err(|e| {
             self.set_error(e.clone());
+            self.schedule_retry();
         })?;
 
         // Load the user's custom-blocked domains into the resolver + start
@@ -259,6 +371,7 @@ impl DnsFilterState {
                        traffic to 127.0.0.1:53. No network settings were changed."
                 .to_string();
             self.set_error(msg.clone());
+            self.schedule_retry();
             return Err(msg);
         }
 
@@ -275,6 +388,11 @@ impl DnsFilterState {
         };
 
         self.health_failures.store(0, Ordering::SeqCst);
+        // The resolver is up, so nothing is owed a retry. Note this is reached
+        // even when `taken_over` is false: the filter IS running, and the part
+        // that failed (redirecting adapters) is the deep tick's
+        // `tick_retry_takeover` to keep attempting, not the enable path's.
+        self.reset_retry();
         // A fresh enable starts from a clean slate on both derived signals: the
         // cooldown must not carry over from a previous session, and the stored
         // exposure must not suppress the first log of a condition that is still
@@ -296,10 +414,14 @@ impl DnsFilterState {
     }
 
     /// Stop the resolver and restore adapter DNS to the captured upstreams.
-    /// Best-effort and idempotent — safe to call when already stopped. This
-    /// is the "apply" step invoked by the friction applier once a
-    /// `dns.disable` weakening's delay elapses, and by the uninstall
-    /// teardown; the command layer only registers the weakening.
+    /// Best-effort and idempotent — safe to call when already stopped.
+    ///
+    /// **The only deliberate teardown left.** The `dns.disable` weakening it
+    /// used to serve is gone (the filter is mandatory), so the callers are now
+    /// the uninstall teardown and the update window — both of which are about to
+    /// stop or replace the process that hosts the resolver, and neither of which
+    /// wants the retry loop bringing it back in the meantime. Hence the
+    /// `reset_retry`: this is the one path where "not running" is intended.
     pub fn disable(&self) {
         if let Some(server) = self.server.lock().unwrap().take() {
             server.stop();
@@ -311,6 +433,7 @@ impl DnsFilterState {
         }
         self.health_failures.store(0, Ordering::SeqCst);
         self.last_repick.store(0, Ordering::SeqCst);
+        self.reset_retry();
         *self.exposure.lock().unwrap() = Exposure::default();
         let mut s = self.status.lock().unwrap();
         s.running = false;
@@ -327,6 +450,14 @@ impl DnsFilterState {
     /// `HEALTH_FAIL_LIMIT` (~10s), restores the real upstreams and flips the
     /// status to a visible error — the plan's core failsafe: broken DNS must
     /// never brick the machine. Returns nothing; the UI reads `status()`.
+    ///
+    /// Failing open is still right, and it is now **temporary**. Standing the
+    /// filter down is the correct response to a dead resolver; leaving it down
+    /// until a human noticed was not, and it is most of what "the DNS filter
+    /// doesn't work" meant in practice — a transient fault silently became a
+    /// permanent one. The teardown books a retry on the way out (see
+    /// `RETRY_BACKOFF_START`), so DNS is handed back within seconds and the
+    /// filter comes back on its own once whatever broke it has passed.
     pub fn tick_health_check(&self) {
         if !self.is_active() {
             return;
@@ -352,6 +483,7 @@ impl DnsFilterState {
         self.health_failures.store(0, Ordering::SeqCst);
         self.last_repick.store(0, Ordering::SeqCst);
         *self.exposure.lock().unwrap() = Exposure::default();
+        self.schedule_retry();
         let mut s = self.status.lock().unwrap();
         s.running = false;
         s.taken_over = false;
@@ -360,7 +492,7 @@ impl DnsFilterState {
         s.exposure_warning = String::new();
         s.last_error =
             "The local DNS resolver stopped responding, so your real DNS servers were restored \
-             automatically. The system DNS filter is now off — you can turn it back on."
+             and Oath Light is starting it again. Your browser stayed protected throughout."
                 .to_string();
     }
 
@@ -551,6 +683,78 @@ fn exposure_message(e: &Exposure) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn state() -> DnsFilterState {
+        DnsFilterState::new(std::path::Path::new("."))
+    }
+
+    /// The backoff climbs and then stops climbing. A machine where the filter
+    /// genuinely cannot run (port 53 permanently held) must settle into one
+    /// cheap attempt every few minutes, not hammer every tick and not give up.
+    #[test]
+    fn the_retry_gap_doubles_up_to_the_ceiling_and_stays_there() {
+        let st = state();
+        let mut gaps = Vec::new();
+        for _ in 0..8 {
+            st.schedule_retry();
+            gaps.push(st.retry_backoff.load(Ordering::SeqCst));
+        }
+        assert_eq!(gaps[0], RETRY_BACKOFF_START);
+        assert_eq!(gaps[1], RETRY_BACKOFF_START * 2);
+        assert!(gaps.windows(2).all(|w| w[1] >= w[0]), "the gap must never shrink: {gaps:?}");
+        assert_eq!(*gaps.last().unwrap(), RETRY_BACKOFF_MAX);
+    }
+
+    /// A scheduled retry is a real appointment: something must be booked, and it
+    /// must be in the future rather than "now, repeatedly".
+    #[test]
+    fn scheduling_books_an_attempt_in_the_future() {
+        let st = state();
+        assert_eq!(st.retry_at.load(Ordering::SeqCst), 0, "nothing is owed before a failure");
+        st.schedule_retry();
+        assert!(st.retry_at.load(Ordering::SeqCst) > now_secs());
+    }
+
+    /// The user has just granted admin (or fixed their network). Making them
+    /// wait out a delay derived from failures that predate the fix would punish
+    /// them for fixing it.
+    #[test]
+    fn an_explicit_retry_clears_the_accumulated_backoff() {
+        let st = state();
+        for _ in 0..5 {
+            st.schedule_retry();
+        }
+        st.reset_retry();
+        assert_eq!(st.retry_at.load(Ordering::SeqCst), 0);
+        st.schedule_retry();
+        assert_eq!(
+            st.retry_backoff.load(Ordering::SeqCst),
+            RETRY_BACKOFF_START,
+            "the next failure starts the ladder again from the bottom"
+        );
+    }
+
+    /// `disable` is the one intended teardown (uninstall / update window). It
+    /// must not leave an appointment behind, or the retry loop would resurrect a
+    /// resolver hosted by a process that is deliberately going away.
+    #[test]
+    fn a_deliberate_teardown_leaves_nothing_scheduled() {
+        let st = state();
+        st.schedule_retry();
+        st.disable();
+        assert_eq!(st.retry_at.load(Ordering::SeqCst), 0);
+        assert!(!st.tick_retry(), "a torn-down filter must not restart itself");
+    }
+
+    /// Nothing is due until its moment arrives — the 3s monitor tick calls this
+    /// constantly and must not turn a backoff into a busy loop.
+    #[test]
+    fn a_retry_that_is_not_due_yet_does_nothing() {
+        let st = state();
+        st.schedule_retry();
+        assert!(!st.tick_retry(), "the gap has not elapsed");
+        assert!(st.retry_at.load(Ordering::SeqCst) > now_secs(), "and the appointment stands");
+    }
 
     #[test]
     fn no_candidates_means_fallbacks_and_no_warning() {

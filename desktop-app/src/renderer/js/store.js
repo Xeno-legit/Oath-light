@@ -141,8 +141,12 @@
       // that ships mostly-off. Older builds stored gentle|balanced|standard;
       // those migrate up on load (see migrateStrictness).
       strictness: 'strict',
+      // Both mandatory — see `forceMandatory` below and, on the backend side,
+      // `settings::force_mandatory`. Kept in the store because the extension
+      // reads them off the pushed blocking payload, not because they are still
+      // answers to a question.
       uninstallGuard: true,
-      youtubeRestrict: false, // opt-in strictness — enforced by the extension via a YouTube-Restrict header rule
+      youtubeRestrict: true, // enforced by the extension via a YouTube-Restrict header rule
       redirectUrl: '',
       redirectLinkOn: false,
       // Removed here, deliberately: `sensitivity`, `lock`, `safeSearch`,
@@ -343,6 +347,25 @@
   // nothing selected and the extension with a strictness it doesn't know.
   try {
     if (state && state.blocking) state.blocking.strictness = migrateStrictness(state.blocking.strictness);
+  } catch (e) {}
+
+  // Protections that are no longer optional, re-asserted on every load.
+  //
+  // A default alone would not do it: `deepMerge` keeps whatever a previous
+  // build persisted, so a profile that had YouTube Restricted Mode off (its old
+  // default) or had switched the guard off would carry that answer forward
+  // forever. This state also lives in `localStorage`, which is a devtools edit
+  // away from anything — the same reason the Rust side re-applies its own floor
+  // on load rather than trusting `settings.json`.
+  //
+  // One direction only, always towards more protection, so it can never undo a
+  // stricter choice — the codebase's standing rule for anything that changes a
+  // setting without being asked.
+  try {
+    if (state && state.blocking) {
+      state.blocking.uninstallGuard = true;
+      state.blocking.youtubeRestrict = true;
+    }
   } catch (e) {}
 
   // ── Voice + locale layer (UX Direction §2) ────────────────────────────────

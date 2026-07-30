@@ -21,8 +21,8 @@
 //! **What it is NOT.** This never touches a browser we can force-install
 //! (`browsers::requires_manual_install` is the gate), because those already fix
 //! themselves and killing one would *prevent* the reinstall it needs to run to
-//! perform. It is off by default, turning it on is instant, and turning it off
-//! is a friction-gated weakening like every other protection here.
+//! perform. It is always on and there is no switch: a browser running without
+//! the extension is half this app gone, and that is not a preference.
 //!
 //! ## The grace window
 //!
@@ -40,19 +40,25 @@
 //! to ask for another one — which costs another deliberate trip to the app, and
 //! that friction is the point. Nothing about being "nearly done" buys more time.
 //!
-//! ## The one exemption: a machine with no other browser
+//! ## There are no exemptions
 //!
-//! Bricking the only browser on a computer doesn't produce a protected user, it
-//! produces a user who cannot reach anything at all — including the page they
-//! would need in order to install a second browser, or this app's own help. That
-//! is not strictness, it is a machine with no way out.
+//! An earlier version stood the lock down entirely when this was the machine's
+//! *only* browser, on the reasoning that bricking it leaves the user unable to
+//! reach anything — including a second browser, or this app's own help.
 //!
-//! So the lock stands down, completely, when no *other* browser is installed
-//! (`BrowserFacts::sole_browser`). This is not a softening of the rule and it
-//! cannot be used as one: installing literally any second browser — every one of
-//! which we CAN force-install and pin — removes the exemption and Edge is
-//! bricked from that moment on. The escape hatch is "go get a real browser",
-//! which is the outcome we wanted anyway.
+//! That was cut, deliberately. It was the largest hole in the app: uninstalling
+//! every other browser turned the one browser we cannot pin into an unenforced
+//! one, and "uninstall Chrome" is not a difficult idea to arrive at. Worse, it
+//! made the protection weakest on exactly the machine that needs it most — the
+//! stock consumer PC where Edge is all there is.
+//!
+//! The "no way out" worry is answered by the grace window, not by an exemption.
+//! The user is never locked away from the browser: they are locked away from
+//! *browsing in it unprotected*. Twenty seconds is available on demand, from the
+//! app, as many times as they care to ask, and the app opens the browser
+//! straight at the page that fixes it. If somebody spends five windows failing
+//! to install an extension, that is a person choosing not to — which is a
+//! different thing from being trapped, and not a case this module bends for.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -112,10 +118,6 @@ pub struct BrowserFacts {
     /// treated as "unprotected" — killing on a failed read would brick a browser
     /// because a file was locked.
     pub ground_truth: bool,
-    /// No other browser is installed on this machine, so bricking this one
-    /// leaves the user with no way to reach anything. The lock stands down
-    /// entirely — see the module doc. Installing any second browser ends it.
-    pub sole_browser: bool,
 }
 
 impl BrowserLockState {
@@ -160,13 +162,6 @@ impl BrowserLockState {
     /// Retires a spent window as it goes, so "expired" is observed exactly once
     /// rather than by every subsequent tick.
     pub fn decide(&self, key: &str, facts: BrowserFacts) -> LockDecision {
-        // Bricking the only browser on the machine leaves no way to reach
-        // anything — including whatever the user would need to fix it. Stand
-        // down completely; installing any second browser ends this.
-        if facts.sole_browser {
-            self.grants.lock().unwrap().remove(key);
-            return LockDecision::Allow;
-        }
         // No usable read of the profiles → no evidence → never kill. A locked
         // prefs file must not be able to brick a browser.
         if !facts.ground_truth {
@@ -198,9 +193,9 @@ impl BrowserLockState {
 mod tests {
     use super::*;
 
-    /// The ordinary case: a machine with other browsers on it, prefs readable.
+    /// The ordinary case: prefs readable.
     fn facts(protected: bool) -> BrowserFacts {
-        BrowserFacts { protected, ground_truth: true, sole_browser: false }
+        BrowserFacts { protected, ground_truth: true }
     }
 
     /// Force the window to have already closed, without sleeping.
@@ -226,32 +221,39 @@ mod tests {
     #[test]
     fn no_ground_truth_never_kills() {
         let st = BrowserLockState::default();
-        let blind =
-            BrowserFacts { protected: false, ground_truth: false, sole_browser: false };
+        let blind = BrowserFacts { protected: false, ground_truth: false };
         assert_eq!(st.decide("edge", blind), LockDecision::Allow);
     }
 
-    /// The one exemption. Bricking the only browser on the machine leaves the
-    /// user unable to reach anything at all — including a second browser.
+    /// The exemption that used to live here — "this is the machine's only
+    /// browser, so stand down" — is gone, and this is the test that keeps it
+    /// gone. Nothing about the machine's browser inventory reaches `decide` any
+    /// more, so the only unprotected browser on a one-browser PC is treated
+    /// exactly like the third one on a four-browser PC. The way back is a
+    /// restore window, not an exemption.
     #[test]
-    fn the_only_browser_on_the_machine_is_never_bricked() {
+    fn the_only_browser_on_the_machine_is_locked_like_any_other() {
         let st = BrowserLockState::default();
-        let sole = BrowserFacts { protected: false, ground_truth: true, sole_browser: true };
-        assert_eq!(st.decide("edge", sole), LockDecision::Allow);
+        assert_eq!(st.decide("edge", facts(false)), LockDecision::Kill);
+        // …and the way back still works there, which is what makes the lack of
+        // an exemption survivable rather than a brick.
+        assert_eq!(st.grant("edge"), GRACE_WINDOW.as_secs());
+        assert_eq!(st.decide("edge", facts(false)), LockDecision::Allow);
     }
 
-    /// …and it is an exemption, not a loophole: the moment a second browser
-    /// exists, the same unprotected Edge is bricked.
+    /// Asking repeatedly is the designed recovery path, not an abuse of one:
+    /// there is no attempt counter, no escalating delay and no lockout, because
+    /// the only thing a window buys is the chance to install the extension.
     #[test]
-    fn installing_a_second_browser_ends_the_exemption() {
+    fn a_window_can_be_asked_for_as_many_times_as_it_takes() {
         let st = BrowserLockState::default();
-        let sole = BrowserFacts { protected: false, ground_truth: true, sole_browser: true };
-        assert_eq!(st.decide("edge", sole), LockDecision::Allow);
-        assert_eq!(
-            st.decide("edge", facts(false)),
-            LockDecision::Kill,
-            "sole_browser is the only thing that was holding the lock off"
-        );
+        for _ in 0..5 {
+            st.grant("edge");
+            expire(&st, "edge");
+            assert_eq!(st.decide("edge", facts(false)), LockDecision::Kill);
+        }
+        assert_eq!(st.grant("edge"), GRACE_WINDOW.as_secs(), "the sixth ask is worth the same");
+        assert_eq!(st.decide("edge", facts(false)), LockDecision::Allow);
     }
 
     #[test]

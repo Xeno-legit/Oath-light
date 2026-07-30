@@ -16,6 +16,7 @@ mod profiles;
 mod recovery;
 pub mod screen;
 mod settings;
+mod sidecars;
 mod uninstall;
 mod update;
 mod watchdog;
@@ -1738,6 +1739,14 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
                         log_event(&app, "dns_upstreams_repicked", serde_json::json!({}));
                     }
                     if enforce_tick % 10 == 1 {
+                        // Running but never redirected — almost always because
+                        // the app wasn't elevated at launch. Keep asking: the
+                        // elevated pass (or the next elevated logon) makes this
+                        // succeed without the user having to find the switch
+                        // again.
+                        if dns.tick_retry_takeover() {
+                            log_event(&app, "dns_takeover_recovered", serde_json::json!({}));
+                        }
                         let reverted = dns.tick_revert_drift();
                         if reverted > 0 {
                             log_event(&app, "dns_changed", serde_json::json!({ "adapters_reverted": reverted }));
@@ -1763,8 +1772,17 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
                             log::info!("[{}] DoH-disable policy write: {}", def.key, enforce_str(o));
                         }
                     }
-                } else if !dns_doh_enforced.is_empty() {
-                    dns_doh_enforced.clear();
+                } else {
+                    // Not running. That is always a fault now — the filter is
+                    // mandatory — so keep trying to bring it back on the backoff
+                    // schedule instead of waiting for a restart.
+                    if dns.tick_retry() {
+                        log_event(&app, "dns_recovered", serde_json::json!({}));
+                        RE_ENFORCE_REQUESTED.store(true, Ordering::SeqCst);
+                    }
+                    if !dns_doh_enforced.is_empty() {
+                        dns_doh_enforced.clear();
+                    }
                 }
             }
 
@@ -1963,13 +1981,17 @@ const BROWSER_LOCK_EMIT_THROTTLE: Duration = Duration::from_secs(60);
 /// the thing that shouldn't be up to the user at 2am. Making the browser
 /// unusable until the extension is on is the remaining lever.
 ///
-/// Three guards keep this from being a browser that randomly dies:
-///   * it does nothing unless the user turned it on AND the guard is on;
+/// Two guards keep this from being a browser that randomly dies:
 ///   * it only ever touches `browsers::requires_manual_install` browsers, so a
 ///     force-installable one is never killed (killing one would *prevent* the
 ///     launch during which its policy reinstalls the extension); and
 ///   * it needs real ground truth from the profile scan. Unreadable prefs are
 ///     not evidence, and must never be able to brick a browser.
+///
+/// There used to be a third — "the user turned this on" — and a fourth, the
+/// only-browser-on-the-machine exemption. Both are gone: the lock is mandatory
+/// and `settings::force_mandatory` holds the flag true, so the early return
+/// below is now unreachable defence rather than a real off state.
 fn enforce_browser_lock(
     app: &AppHandle,
     cfg: &settings::SettingsV1,
@@ -1993,35 +2015,12 @@ fn enforce_browser_lock(
         if !browsers::requires_manual_install(def) {
             continue;
         }
-        // The only exemption: this is the machine's one browser, so bricking it
-        // would leave no way to reach anything — including a second browser.
-        let sole_browser = !browsers::has_alternative_browser(def);
-        st.locked_out = !sole_browser;
-
-        // …and record it when it engages. The exemption is a real hole — a user
-        // who uninstalls every other browser gets an unenforced one back — and
-        // the standing rule here is that the app never silently stops delivering
-        // protection it is configured for. Deliberately an event-log entry and
-        // NOT UI copy: writing "your only browser is exempt" on screen would be
-        // publishing the recipe (VOICE.md, "status yes, map no"). One entry per
-        // transition, not one per tick.
-        {
-            let mut seen = browser_lock_exempt_memo().lock().unwrap();
-            if seen.insert(def.key, sole_browser) != Some(sole_browser) {
-                if sole_browser {
-                    log::warn!(
-                        "browser_lock: [{}] exempt — it is the only browser on this machine, so \
-                         locking it would leave no way to browse at all",
-                        def.key
-                    );
-                }
-                log_event(
-                    app,
-                    "browser_lock_exempt",
-                    serde_json::json!({ "browser": def.key, "exempt": sole_browser }),
-                );
-            }
-        }
+        // No exemptions. This used to stand down when the browser was the only
+        // one on the machine; that made the protection weakest on exactly the
+        // stock consumer PC it exists for, and made "uninstall your other
+        // browsers" a working bypass. See `browser_lock`'s module doc — the
+        // recovery path is the restore window, which is available here too.
+        st.locked_out = true;
 
         // Read the profiles directly rather than leaning on `st.installed`: the
         // decision needs "every profile has it" (a second profile without the
@@ -2031,13 +2030,8 @@ fn enforce_browser_lock(
             Some(list) => browser_lock::BrowserFacts {
                 protected: !list.is_empty() && list.iter().all(|p| p.installed),
                 ground_truth: true,
-                sole_browser,
             },
-            None => browser_lock::BrowserFacts {
-                protected: false,
-                ground_truth: false,
-                sole_browser,
-            },
+            None => browser_lock::BrowserFacts { protected: false, ground_truth: false },
         };
         if locks.decide(&st.key, facts) == browser_lock::LockDecision::Kill && st.running {
             condemned.push(def);
@@ -2102,13 +2096,6 @@ fn enforce_browser_lock(
 /// Mutex<HashMap<…>>>` shape as `browsers::is_installed_cached`.
 fn browser_lock_emit_memo() -> &'static Mutex<HashMap<&'static str, Instant>> {
     static MEMO: OnceLock<Mutex<HashMap<&'static str, Instant>>> = OnceLock::new();
-    MEMO.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Last known "is this browser exempt from the lock" per browser, so the
-/// transition is logged once rather than every 3s tick for as long as it holds.
-fn browser_lock_exempt_memo() -> &'static Mutex<HashMap<&'static str, bool>> {
-    static MEMO: OnceLock<Mutex<HashMap<&'static str, bool>>> = OnceLock::new();
     MEMO.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -2421,55 +2408,55 @@ pub struct WeakeningOutcome {
     pub pending: Option<friction::PendingView>,
 }
 
-/// Toggle the "keep the extension installed" guard (the uninstall-guard
-/// switch). Turning it ON is always instant (a strengthening) and withdraws
-/// any pending disable. Turning it OFF is a weakening (4.1): the guard stays
-/// ON until the friction delay elapses and the applier thread (in `setup`)
-/// actually flips it — this only registers the request and returns it.
+/// The message every mandatory-protection command returns when something asks
+/// it to switch off. One string for all three so the refusal reads the same
+/// wherever it surfaces, and so it stays a plain statement of fact rather than
+/// an argument — there is no delay to wait out and no password to find, because
+/// there is no off state to reach.
+const NOT_OPTIONAL: &str = "This protection is part of Oath Light and cannot be turned off.";
+
+/// Re-assert the "keep the extension installed" guard.
 ///
-/// Master-password gate (4.2) applies ONLY to the actual off-and-currently-on
-/// path below: enabling and the already-off no-op are both intentionally
-/// ungated (see `auth.rs`'s module doc — strengthenings and no-ops never
-/// require the password, only the one branch that actually starts a
-/// weakening's cool-off).
+/// The guard used to be a switch: on instantly, off through the master password
+/// plus a `guard.disable` cool-off. It isn't one any more — it is the thing that
+/// keeps the extension in place, and an anti-addiction tool whose enforcement
+/// layer has an off switch is a tool that gets switched off. `enabled: false`
+/// is refused outright rather than filed as a weakening, and `settings.rs`'s
+/// `force_mandatory` holds the same floor against anything that edits the file
+/// directly.
+///
+/// The command survives (rather than being deleted) because the renderer's
+/// reconciliation effect and the onboarding flow both call it to push the guard
+/// ON, and because a hostile or stale caller asking for OFF should get a clear
+/// refusal instead of a missing-command error.
+///
+/// `auth` is still accepted so the renderer's call sites need no signature
+/// change; nothing consults it now, since neither branch starts a weakening.
 #[tauri::command]
 fn set_guard_enabled(
-    app: AppHandle,
     state: tauri::State<'_, Arc<Mutex<AppState>>>,
     settings: tauri::State<'_, Arc<settings::SettingsState>>,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
     enabled: bool,
-    auth: Option<String>,
+    _auth: Option<String>,
 ) -> Result<WeakeningOutcome, String> {
-    if enabled {
-        state.lock().unwrap().guard_enabled = true;
-        settings.update(|s| s.guard_enabled = true);
-        friction.cancel("guard.disable");
-        log::info!("Guard enabled set to true");
-        return Ok(WeakeningOutcome { applied: true, pending: None });
+    if !enabled {
+        log::warn!("guard disable refused — the uninstall guard is not optional");
+        return Err(NOT_OPTIONAL.to_string());
     }
-
-    let already_off = !state.lock().unwrap().guard_enabled;
-    if already_off {
-        return Ok(WeakeningOutcome { applied: true, pending: None });
-    }
-
-    auth::require_auth(&app, &auth)?;
-
-    let view = friction.request("guard.disable", "Turn off the uninstall guard", serde_json::json!({}));
-    log::warn!(
-        "guard disable requested — {}s cool-off started (guard stays on until it elapses)",
-        view.delay_secs
-    );
-    log_event(&app, "friction_requested", serde_json::json!({ "action": "guard.disable" }));
-    Ok(WeakeningOutcome { applied: false, pending: Some(view) })
+    state.lock().unwrap().guard_enabled = true;
+    settings.update(|s| s.guard_enabled = true);
+    // Withdraw a cool-off filed by an older build, so an upgrade can't have one
+    // land after the protection became mandatory.
+    friction.cancel("guard.disable");
+    Ok(WeakeningOutcome { applied: true, pending: None })
 }
 
 // ============================================================================
 // System-level DNS filtering (plan items 1.1 + 1.2) — commands.
 // Lifecycle/health/takeover live in `dns_filter.rs`; these mirror the
-// `set_guard_enabled` pattern exactly: enabling is a strengthening (instant),
-// disabling is a friction-gated weakening (`dns.disable`).
+// `set_guard_enabled` pattern exactly: the filter is mandatory, so the only
+// thing a caller can ask for is another attempt at bringing it up.
 // ============================================================================
 
 /// Live status the renderer's "System DNS filter" card reads:
@@ -2481,51 +2468,42 @@ fn get_dns_status(dns: tauri::State<'_, Arc<dns_filter::DnsFilterState>>) -> dns
     dns.status()
 }
 
-/// Turn the system DNS filter on or off.
+/// Bring the system DNS filter up now.
 ///
-/// ON is a strengthening — applied instantly: start the resolver, verify it's
-/// healthy, then capture + take over adapter DNS. Also cancels any pending
-/// `dns.disable` weakening. A bind conflict (port 53 already in use) or a
-/// failed takeover surfaces as an `Err` string the UI shows verbatim, and no
-/// adapter is touched in the bind-conflict case.
+/// The filter is mandatory (`settings::force_mandatory`), so this is no longer a
+/// toggle — it is the "try again now" the UI offers when the resolver is down or
+/// couldn't take over an adapter, and the retry loop on the monitor tick is
+/// doing the same thing on its own in the background. Start the resolver, verify
+/// it's healthy, then capture + take over adapter DNS; a bind conflict (port 53
+/// in use) or a refused takeover surfaces as an `Err` string the UI shows
+/// verbatim, and no adapter is touched in the bind-conflict case.
 ///
-/// OFF is a weakening — `require_auth` (master password, 4.2) then a
-/// `dns.disable` friction entry; the filter stays fully ON until the delay
-/// elapses and the applier thread actually stops the resolver + restores DNS.
+/// `enabled: false` is refused. There is nothing to gate it behind: the whole
+/// point of this layer is that it covers the apps a browser extension can't
+/// reach, and those are exactly the ones worth reaching at 2am.
 #[tauri::command]
 fn set_dns_filter_enabled(
-    app: AppHandle,
     settings: tauri::State<'_, Arc<settings::SettingsState>>,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
     dns: tauri::State<'_, Arc<dns_filter::DnsFilterState>>,
     enabled: bool,
-    auth: Option<String>,
+    _auth: Option<String>,
 ) -> Result<WeakeningOutcome, String> {
-    if enabled {
-        // Strengthening: bring the resolver up + take over now. If this
-        // fails (port conflict / no admin), report it and DON'T flip the
-        // persisted flag — the filter genuinely isn't on.
-        dns.enable()?;
-        settings.update(|s| s.dns_filter_enabled = true);
-        friction.cancel("dns.disable");
-        RE_ENFORCE_REQUESTED.store(true, Ordering::SeqCst); // reapply DoH policy this tick
-        log::info!("DNS filter enabled");
-        return Ok(WeakeningOutcome { applied: true, pending: None });
+    if !enabled {
+        log::warn!("DNS filter disable refused — the system DNS filter is not optional");
+        return Err(NOT_OPTIONAL.to_string());
     }
-
-    let already_off = !settings.get().dns_filter_enabled;
-    if already_off {
-        return Ok(WeakeningOutcome { applied: true, pending: None });
-    }
-
-    auth::require_auth(&app, &auth)?;
-
-    let view = friction.request("dns.disable", "Turn off the system DNS filter", serde_json::json!({}));
-    log::warn!(
-        "DNS filter disable requested — {}s cool-off started (filter stays on until it elapses)",
-        view.delay_secs
-    );
-    Ok(WeakeningOutcome { applied: false, pending: Some(view) })
+    // A manual retry clears the backoff: the user has just done something (most
+    // often granting admin) that the schedule knows nothing about, so making
+    // them wait out a delay computed from earlier failures would be punishing
+    // them for fixing it.
+    dns.reset_retry();
+    dns.enable()?;
+    settings.update(|s| s.dns_filter_enabled = true);
+    friction.cancel("dns.disable"); // withdraw a cool-off filed by an older build
+    RE_ENFORCE_REQUESTED.store(true, Ordering::SeqCst); // reapply DoH policy this tick
+    log::info!("DNS filter enabled");
+    Ok(WeakeningOutcome { applied: true, pending: None })
 }
 
 // ============================================================================
@@ -2534,46 +2512,35 @@ fn set_dns_filter_enabled(
 // things the user can do about it.
 // ============================================================================
 
-/// Turn the browser lock on or off.
+/// Re-assert the browser lock.
 ///
-/// ON is a strengthening — instant, and it takes effect on the next monitor
-/// tick. It also cancels any pending `browser_lock.disable`.
+/// Mandatory, for the plainest reason in the app: a browser running without the
+/// extension is not a slightly weaker Oath Light, it is no Oath Light at all on
+/// the surface that matters most. Offering that as a switch — even one behind a
+/// password and a 24-hour delay — meant the answer to "how do I browse
+/// unfiltered" was printed on the settings page.
 ///
-/// OFF is a weakening: `require_auth` then a friction entry, exactly like the
-/// DNS filter and the uninstall guard. The lock stays fully on until the delay
-/// elapses. That asymmetry is the point — this is the protection most likely to
-/// be resented in the moment it is working.
+/// `enabled: false` is refused. The way back into a locked-out browser is the
+/// restore window (`request_browser_restore`), which grants seconds and not
+/// access, and can be asked for as many times as it takes.
 #[tauri::command]
 fn set_browser_lock_enabled(
-    app: AppHandle,
     settings: tauri::State<'_, Arc<settings::SettingsState>>,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
     locks: tauri::State<'_, Arc<browser_lock::BrowserLockState>>,
     enabled: bool,
-    auth: Option<String>,
+    _auth: Option<String>,
 ) -> Result<WeakeningOutcome, String> {
-    if enabled {
-        settings.update(|s| s.lock_unverified_browsers = true);
-        friction.cancel("browser_lock.disable");
-        // A window opened before the lock was last turned off must not survive
-        // into the new session as a free pass.
-        locks.clear_all();
-        log::info!("browser lock enabled");
-        return Ok(WeakeningOutcome { applied: true, pending: None });
+    if !enabled {
+        log::warn!("browser lock disable refused — the browser lock is not optional");
+        return Err(NOT_OPTIONAL.to_string());
     }
-
-    if !settings.get().lock_unverified_browsers {
-        return Ok(WeakeningOutcome { applied: true, pending: None });
-    }
-    auth::require_auth(&app, &auth)?;
-    let view =
-        friction.request("browser_lock.disable", "Turn off the browser lock", serde_json::json!({}));
-    log::warn!(
-        "browser lock disable requested — {}s cool-off started (lock stays on until it elapses)",
-        view.delay_secs
-    );
-    log_event(&app, "friction_requested", serde_json::json!({ "action": "browser_lock.disable" }));
-    Ok(WeakeningOutcome { applied: false, pending: Some(view) })
+    settings.update(|s| s.lock_unverified_browsers = true);
+    friction.cancel("browser_lock.disable"); // withdraw an older build's cool-off
+    // A window opened before an older build turned the lock off must not survive
+    // into this session as a free pass.
+    locks.clear_all();
+    Ok(WeakeningOutcome { applied: true, pending: None })
 }
 
 /// Open a restore window for one locked-out browser: re-assert the auto-install
@@ -3534,28 +3501,37 @@ fn open_extensions_page(browser_key: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Ask for admin once and lock the extension. Writing a browser force-install
-/// policy requires elevation (the `Software\Policies` registry key is admin-only
-/// in *both* hives), so an unelevated app can't do it. This relaunches ourselves
-/// elevated (a single UAC prompt) with `--elevated-setup`; that short-lived
-/// instance writes the policy and registers an elevated login task, then exits.
-/// When it finishes we flush the monitor's memo so the UI flips to "locked".
+/// Ask for admin once and lock everything that needs it. Writing a browser
+/// force-install policy requires elevation (the `Software\Policies` registry key
+/// is admin-only in *both* hives) and so does pointing an adapter's DNS at the
+/// local resolver, so an unelevated app can't do either. This relaunches
+/// ourselves elevated (a single UAC prompt) with `--elevated-setup`; that
+/// short-lived instance writes the policy, takes over adapter DNS and registers
+/// an elevated login task, then exits. When it finishes we flush the monitor's
+/// memo so the UI flips to "locked".
+///
+/// The app data dir is handed over explicitly rather than re-derived in the
+/// child: the elevated pass runs before Tauri is built, so it has no `AppHandle`
+/// to ask, and a second guess at where `dns.json` lives is exactly the kind of
+/// near-miss that would write a restore point somewhere nothing reads.
 ///
 /// Fire-and-forget from the UI's side: it returns immediately and a background
 /// thread waits on the elevated pass. Windows-only; a no-op error elsewhere.
 #[tauri::command]
-fn request_elevated_setup() -> Result<(), String> {
+fn request_elevated_setup(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let udd = app.path().app_data_dir().map_err(|e| e.to_string())?;
         // Single-quote for PowerShell, escaping embedded quotes by doubling.
         let exe_ps = exe.to_string_lossy().replace('\'', "''");
+        let udd_ps = udd.to_string_lossy().replace('\'', "''");
         std::thread::spawn(move || {
             let ps = format!(
-                "Start-Process -FilePath '{}' -ArgumentList '--elevated-setup' -Verb RunAs -Wait",
-                exe_ps
+                "Start-Process -FilePath '{exe_ps}' -ArgumentList '--elevated-setup',\
+                 '--app-data-dir','{udd_ps}' -Verb RunAs -Wait"
             );
             let status = std::process::Command::new("powershell")
                 .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps])
@@ -3579,8 +3555,9 @@ fn request_elevated_setup() -> Result<(), String> {
 
 /// The elevated one-shot (`--elevated-setup`). Runs with admin rights, writes the
 /// force-install policy for every configured browser (Chromium via the Web Store,
-/// Firefox via AMO), and registers an elevated logon task so future sessions
-/// re-assert the lock without a prompt. Then exits.
+/// Firefox via AMO), points every network adapter at the local DNS resolver, and
+/// registers an elevated logon task so future sessions re-assert the lock without
+/// a prompt. Then exits.
 ///
 /// BRICK SAFETY: each force-install points at the published extension via its
 /// store's canonical URL (Chrome Web Store / AMO) — the store always answers and
@@ -3600,6 +3577,28 @@ fn elevated_setup() {
         let _ = browsers::enforce_incognito_guest_policy(def);
     }
 
+    // Companion binaries. On a per-machine install these live in Program Files,
+    // so the unelevated app's own repair pass can find a stale one and be unable
+    // to do anything about it. This is that repair, with the rights to finish
+    // it — which is why "grant admin" is one prompt and not three.
+    let report = sidecars::repair();
+    if report.changed() {
+        log::warn!("elevated setup: repaired {} companion binary/ies", report.replaced);
+    }
+
+    // Adapter DNS takeover — the other thing on this machine that needs admin,
+    // and the reason "grant admin" used to fix the extension lock while leaving
+    // the DNS filter exactly as broken as it was. Only the *write* needs
+    // elevation; the resolver itself is already listening in the ordinary
+    // unelevated app, so pointing the adapters at 127.0.0.1 from here is enough
+    // and the running filter picks it up on its next drift check.
+    //
+    // Deliberately does not start a resolver of its own: this process is about
+    // to exit, and taking over DNS on behalf of a resolver that is about to
+    // disappear is the one thing this whole subsystem promises not to do. If the
+    // main app isn't serving, the takeover is undone by its own health check.
+    elevated_dns_takeover();
+
     // Elevated logon task: re-asserts the lock on future logins with no prompt.
     // Best-effort — the policy just written persists regardless, so the lock
     // holds even if the task never runs.
@@ -3612,6 +3611,47 @@ fn elevated_setup() {
             ])
             .creation_flags(CREATE_NO_WINDOW)
             .status();
+    }
+}
+
+/// Point every adapter at the local resolver, from inside the elevated one-shot.
+///
+/// Two preconditions, both non-negotiable, because getting either wrong turns a
+/// protection into a machine with no working DNS:
+///
+/// 1. **The app data dir must have been handed to us** (`--app-data-dir`). That
+///    is where `dns.json` — the pre-takeover restore point — is written and where
+///    every restore path (`dns_filter::disable`, the health-check failsafe, the
+///    guardian's last act) looks for it. Writing it anywhere else would mean the
+///    takeover has no reachable undo, so with no path we do nothing at all.
+/// 2. **The resolver must already be answering on 127.0.0.1:53.** This process
+///    exits in a moment and hosts nothing; the resolver lives in the ordinary
+///    unelevated app. If that isn't serving right now, redirecting adapters at it
+///    would break DNS for as long as it took something else to notice.
+#[cfg(target_os = "windows")]
+fn elevated_dns_takeover() {
+    let mut args = std::env::args();
+    let mut app_data_dir: Option<std::path::PathBuf> = None;
+    while let Some(a) = args.next() {
+        if a == "--app-data-dir" {
+            app_data_dir = args.next().map(std::path::PathBuf::from);
+            break;
+        }
+    }
+    let Some(dir) = app_data_dir else {
+        log::warn!("elevated setup: no --app-data-dir; skipping DNS takeover");
+        return;
+    };
+    if !oathlight_dns::health_check(Duration::from_secs(2)) {
+        log::warn!(
+            "elevated setup: the resolver is not answering on 127.0.0.1:53 — skipping DNS \
+             takeover rather than pointing adapters at nothing"
+        );
+        return;
+    }
+    match oathlight_dns::takeover::takeover(&dir.join("dns.json")) {
+        Ok(_) => log::info!("elevated setup: adapter DNS takeover applied"),
+        Err(e) => log::warn!("elevated setup: DNS takeover failed: {e}"),
     }
 }
 
@@ -4674,6 +4714,18 @@ pub fn run() {
         return;
     }
 
+    // Companion binaries, BEFORE anything spawns one.
+    //
+    // An installer cannot overwrite `oathlightguard.exe` or
+    // `oath-light-host.exe` while they are running — which, by design, they
+    // usually are — so an upgrade can leave a new app driving two old
+    // companions and say nothing about it. The app carries its own copies and
+    // rewrites whatever doesn't match (see `sidecars`). Ordering is the whole
+    // point of doing it here: `init_main` just below is what spawns the
+    // guardian, and repairing afterwards would mean the stale one runs anyway
+    // for the rest of the session.
+    let sidecar_report = sidecars::repair();
+
     // Dual-process watchdog (Phase 4 tamper resistance). Acquire the main-role
     // mutex and start guarding the guardian *before* the window comes up; this
     // also exits early if another main instance is already running.
@@ -4910,18 +4962,32 @@ pub fn run() {
             // recovery.rs for the full reasoning.
             app.manage(Arc::new(recovery::RecoveryState::load(&udd)));
             // System DNS filter (1.1/1.2). Managed here so commands + the
-            // monitor tick share one instance. If it was on at last shutdown,
-            // start + re-takeover now (idempotent) — off the startup path so
-            // a couple of PowerShell spawns don't block the window coming up.
+            // monitor tick share one instance. Started unconditionally now that
+            // the filter is mandatory — off the startup path, because a couple
+            // of PowerShell spawns must not hold the window back.
+            //
+            // A failure here is not the end of it: the monitor's retry loop
+            // (`tick_retry`) picks it up on a backoff, so a machine that was
+            // mid-reconnect, mid-VPN or momentarily holding port 53 at launch
+            // comes up filtered a few seconds later instead of staying off for
+            // the session.
             let dns_state = Arc::new(dns_filter::DnsFilterState::new(&udd));
             app.manage(dns_state.clone());
-            if settings_state.get().dns_filter_enabled {
+            {
                 let dns2 = dns_state.clone();
                 std::thread::spawn(move || {
                     if let Err(e) = dns2.enable() {
-                        log::warn!("DNS filter auto-start failed: {e}");
+                        log::warn!("DNS filter auto-start failed ({e}) — the retry loop has it");
                     }
                 });
+            }
+            // Protections that used to be optional and no longer are: withdraw
+            // any cool-off an older build left pending against them, so an
+            // upgrade never carries a scheduled weakening into a build where
+            // that weakening has no meaning. The applier drops these too — this
+            // is what stops one sitting in the UI as a countdown to nothing.
+            for stale in ["guard.disable", "browser_lock.disable", "dns.disable"] {
+                friction_store.cancel(stale);
             }
             // Tamper-evident event log (4.5) — managed before anything that
             // might append (the TCP server / monitor threads below), so the
@@ -4930,6 +4996,21 @@ pub fn run() {
             // was edited/truncated/deleted since last run — see eventlog.rs.
             let event_log = Arc::new(EventLog::load(&udd));
             app.manage(event_log.clone());
+            // Companion-binary repair (run before the builder, so it could not
+            // reach the log then). Recorded only when something actually
+            // happened: a healthy install would otherwise write an entry every
+            // launch saying nothing, and the entries that matter here are
+            // "your last update left a stale companion behind" and "we could
+            // not fix it" — both of which are the user's business.
+            if sidecar_report.changed() || sidecar_report.failed > 0 {
+                event_log.append(
+                    "sidecars_repaired",
+                    serde_json::json!({
+                        "replaced": sidecar_report.replaced,
+                        "failed": sidecar_report.failed,
+                    }),
+                );
+            }
             // Lockdown Mode (4.4) — clock-immune credited-time engine, same
             // pattern as the friction store.
             let lockdown_store = Arc::new(lockdown::LockdownStore::load(&udd));
@@ -4982,7 +5063,6 @@ pub fn run() {
                 let state2 = shared_state.clone();
                 let settings2 = settings_state.clone();
                 let auth2 = auth_state.clone();
-                let dns2 = dns_state.clone();
                 let lockdown2 = lockdown_store.clone();
                 let event_log2 = event_log.clone();
                 std::thread::spawn(move || {
@@ -5037,18 +5117,21 @@ pub fn run() {
                         }
 
                         for (action_id, payload) in friction2.take_ready() {
-                            if action_id == "guard.disable" {
-                                state2.lock().unwrap().guard_enabled = false;
-                                settings2.update(|s| s.guard_enabled = false);
-                                log::warn!("friction: uninstall guard disabled (weakening applied)");
-                            } else if action_id == "browser_lock.disable" {
-                                settings2.update(|s| s.lock_unverified_browsers = false);
-                                if let Some(locks) =
-                                    app2.try_state::<Arc<browser_lock::BrowserLockState>>()
-                                {
-                                    locks.clear_all();
-                                }
-                                log::warn!("friction: browser lock disabled (weakening applied)");
+                            // Weakenings that no longer exist. A cool-off filed
+                            // by an older build can still come due here after an
+                            // upgrade, and the one thing it must not do is land:
+                            // the protections it points at are mandatory now, so
+                            // the request is dropped rather than applied. The
+                            // commands cancel these on sight too — this is the
+                            // arm that catches one that ripened first.
+                            if matches!(
+                                action_id.as_str(),
+                                "guard.disable" | "browser_lock.disable" | "dns.disable"
+                            ) {
+                                log::warn!(
+                                    "friction: '{action_id}' came due but that protection is no \
+                                     longer optional — dropped"
+                                );
                             } else if action_id == "monitor.disable" {
                                 if let Some(monitor) = app2.try_state::<MonitorState>() {
                                     monitor.running.store(false, Ordering::SeqCst);
@@ -5112,17 +5195,6 @@ pub fn run() {
                                 // the default log-only tier.
                                 settings2.update(|s| s.block_unknown_browsers = false);
                                 log::warn!("friction: evasion-browser kill switch disabled (weakening applied)");
-                            } else if action_id == "dns.disable" {
-                                // 1.1/1.2: stop the resolver + restore adapter
-                                // DNS, persist the flag off, and drop the DoH
-                                // policy from every browser (the reason it was
-                                // written is gone).
-                                dns2.disable();
-                                settings2.update(|s| s.dns_filter_enabled = false);
-                                for def in BROWSERS {
-                                    browsers::remove_dns_policy(def);
-                                }
-                                log::warn!("friction: system DNS filter disabled (weakening applied)");
                             } else if action_id == "lockdown.cancel" {
                                 // 4.4: a NORMAL lockdown's early-end delay
                                 // elapsed — actually end it now and push the

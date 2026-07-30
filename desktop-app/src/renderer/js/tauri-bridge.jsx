@@ -45,20 +45,15 @@
       return invoke('request_browser_restore', { browserKey })
         .catch((e) => console.warn('[OathLight] requestBrowserRestore failed:', e));
     },
-    // Toggle the browser lock (kill a browser that can't be force-installed
-    // until it carries the extension). ON is instant; OFF is a friction-gated
-    // weakening — same { applied, pending } contract as `setGuard`, and the same
-    // rule: `applied: false` means the lock is still fully ON.
+    // Re-assert the browser lock (kill a browser that can't be force-installed
+    // until it carries the extension). Mandatory: `false` REJECTS rather than
+    // filing a weakening, so there is nothing here for a caller to gate.
     setBrowserLock(enabled, auth) {
       return invoke('set_browser_lock_enabled', { enabled: !!enabled, auth: auth || null });
     },
-    // Toggle the "keep the extension installed" guard. Turning it ON is
-    // instant; turning it OFF is a friction-gated weakening (4.1) — resolves
-    // to { applied, pending }. When `applied` is false the guard is still ON
-    // and stays that way until `pending`'s delay elapses; callers must not
-    // treat the guard as off just because this resolved. `auth` is a master-
-    // password session token (4.2) — required only when turning OFF a guard
-    // that's currently on; every other caller passes null.
+    // Re-assert the "keep the extension installed" guard. Also mandatory —
+    // `setGuard(false)` rejects. The `auth` parameter survives on both of these
+    // only so existing call sites keep working; nothing consults it.
     setGuard(enabled, auth) { return invoke('set_guard_enabled', { enabled: !!enabled, auth: auth || null }); },
     // Ask all connected extensions to push fresh stats/blocklists.
     requestSync() { return invoke('request_sync'); },
@@ -175,11 +170,10 @@
 
     // System DNS filter (1.1/1.2). `getDnsStatus` -> { running, taken_over,
     // last_error, upstreams, upstream_warning, exposure_warning }.
-    // `setDnsFilter(true)` is a strengthening —
-    // instant, and REJECTS (throws) on a port-53 conflict / no-admin so the
-    // caller can show the error verbatim; `setDnsFilter(false, auth)` is a
-    // friction-gated weakening (same { applied, pending } shape as setGuard)
-    // and requires the master-password token if one is set.
+    // `setDnsFilter(true)` brings the resolver up now and REJECTS (throws) on a
+    // port-53 conflict / refused takeover, so the caller can show the error
+    // verbatim — it is the UI's "try again", not a toggle. Rust retries on its
+    // own schedule regardless. `setDnsFilter(false)` rejects: mandatory.
     getDnsStatus() {
       return invoke('get_dns_status')
         .catch((e) => { console.warn('[OathLight] getDnsStatus failed:', e); return null; });

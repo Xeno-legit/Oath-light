@@ -92,7 +92,6 @@ function AppBlockingSection() {
   const pending = (window.usePendingWeakenings || (() => []))();
   const pendingRemovals = pending.filter((p) => p.action_id.indexOf('process_block.remove:') === 0);
   const evasionPending = pending.find((p) => p.action_id === 'evasion_kill.disable');
-  const browserLockPending = pending.find((p) => p.action_id === 'browser_lock.disable');
 
   const refresh = React.useCallback(() => {
     if (!available) return;
@@ -158,28 +157,8 @@ function AppBlockingSection() {
       .finally(() => setBusy(false));
   }
 
-  // Same asymmetry as every other protection here: on instantly, off only
-  // through auth + a cool-off.
-  function toggleBrowserLock(enabled) {
-    setErr('');
-    if (enabled) {
-      setBusy(true);
-      window.PPNative.setBrowserLock(true, null)
-        .then(() => refresh())
-        .catch((e) => setErr(e && e.message ? e.message : String(e)))
-        .finally(() => setBusy(false));
-      return;
-    }
-    acquireAuth()
-      .then((token) => { setBusy(true); return window.PPNative.setBrowserLock(false, token); })
-      .then(() => refresh())
-      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
-      .finally(() => setBusy(false));
-  }
-
   const blockedList = (cfg && cfg.blocked_processes) || [];
   const killUnknown = !!(cfg && cfg.block_unknown_browsers);
-  const browserLock = !!(cfg && cfg.lock_unverified_browsers);
 
   return (
     <React.Fragment>
@@ -247,18 +226,21 @@ function AppBlockingSection() {
       <PendingNote pending={evasionPending} whatKey="blocking.evasion_pending_what"
                    onKeep={() => window.PPNative.cancelWeakening('evasion_kill.disable').then(refresh)} />
 
-      {/* Same "status yes, map no" rule: this says a browser that won't run the
-          extension won't run, without naming which browser or why it's the one
-          that can be made to behave this way. */}
+      {/* No switch, by design — see SafeSearch above for the same treatment.
+          A browser running without the extension is not a weaker Oath Light,
+          it is none of it, and the off position of that switch was the answer
+          to "how do I browse unfiltered" printed on the settings page.
+
+          Same "status yes, map no" rule as before: this says a browser that
+          won't run the extension won't run, without naming which browser or
+          why it's the one that has to be made to behave this way. */}
       <Setting
         icon={IconLock}
         title={PP.t('blocking.browser_lock_title')}
-        desc={PP.t(browserLock ? 'blocking.browser_lock_desc_on' : 'blocking.browser_lock_desc_off')}
+        desc={PP.t('blocking.browser_lock_desc_on')}
         info={PP.t('blocking.browser_lock_info')}>
-        <Switch on={browserLock} onClick={() => toggleBrowserLock(!browserLock)} disabled={busy || !available} />
+        <span className="chip chip-ok">{PP.t('blocking.always_on')}</span>
       </Setting>
-      <PendingNote pending={browserLockPending} whatKey="blocking.browser_lock_pending_what"
-                   onKeep={() => window.PPNative.cancelWeakening('browser_lock.disable').then(refresh)} />
 
       {recent.length > 0 &&
         <div className="sub-block">
@@ -275,9 +257,15 @@ function AppBlockingSection() {
 
 // System-level DNS filter (plan items 1.1 + 1.2). A coarse whole-domain
 // backstop for surfaces the browser extension can't reach, enforced by a local
-// DNS resolver the desktop app points every network adapter at. The real gate
-// lives in Rust (`set_dns_filter_enabled`); this is a view onto `get_dns_status`
-// plus the instant-enable / friction-gated-disable requests.
+// DNS resolver the desktop app points every network adapter at.
+//
+// **No switch.** It shipped opt-in, which meant the one layer that covers
+// everything outside the browser was off unless somebody went and found it —
+// and once anything knocked it over it stayed off. Now it is always on and
+// always trying: Rust re-attempts on a backoff (`dns_filter::tick_retry`) and
+// re-attempts the adapter takeover on its own too. What is left here is a
+// status line and, when the machine is withholding the one thing the filter
+// can't get for itself, the button that asks for it.
 function DnsFilterSection() {
   const available = !!(window.PPNative && window.PPNative.available);
   // { running, taken_over, last_error, upstreams, upstream_warning, exposure_warning }
@@ -285,58 +273,69 @@ function DnsFilterSection() {
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState('');
 
-  const pending = (window.usePendingWeakenings || (() => []))();
-  const disablePending = pending.find((p) => p.action_id === 'dns.disable');
-
   const refresh = React.useCallback(() => {
     if (!available) return;
     window.PPNative.getDnsStatus().then((s) => { if (s) setStatus(s); });
   }, [available]);
 
   React.useEffect(() => { refresh(); }, [refresh]);
-  // Re-poll while active (health/takeover state can flip on its own — e.g. the
-  // failsafe restoring real DNS if the resolver dies) and whenever a pending
-  // weakening resolves.
+  // Re-poll continuously: every state on this row can now change with nobody
+  // touching anything — the failsafe stands the filter down, the retry loop
+  // brings it back, an elevated pass lands the takeover.
   React.useEffect(() => {
     if (!available) return;
     const id = setInterval(refresh, 3000);
     return () => clearInterval(id);
   }, [available, refresh]);
-  React.useEffect(() => { refresh(); }, [pending.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const on = !!(status && status.running);
+  const takenOver = !!(status && status.taken_over);
 
-  function toggle() {
+  // Ask now rather than waiting out the backoff. Not a toggle — there is no
+  // off — just "try again, I've changed something".
+  function retryNow() {
     setErr('');
-    if (!on) {
-      // Turning it on is a strengthening — instant, no auth. A bind conflict
-      // or missing-admin failure rejects; surface it verbatim.
-      setBusy(true);
-      window.PPNative.setDnsFilter(true, null)
-        .then(() => refresh())
-        .catch((e) => setErr(e && e.message ? e.message : String(e)))
-        .finally(() => setBusy(false));
-      return;
-    }
-    // Turning it off is a weakening — password gate (4.2) then friction delay.
-    acquireAuth()
-      .then((token) => { setBusy(true); return window.PPNative.setDnsFilter(false, token); })
+    setBusy(true);
+    window.PPNative.setDnsFilter(true, null)
       .then(() => refresh())
-      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
+      .catch((e) => setErr(e && e.message ? e.message : String(e)))
       .finally(() => setBusy(false));
   }
 
-  // Status line: off / active / active-but-sidelined / active-but-not-taken-over
-  // / error. The 'reduced' tone is deliberately NOT 'warn': nothing is broken
-  // and there is nothing to restart, so it must not pull in the
-  // restart-as-administrator note below.
+  // One UAC prompt writes the adapter DNS this can't write for itself; the
+  // elevated pass performs the takeover directly, so the row goes green without
+  // a restart. Same command the extension rows use.
+  function grantAdmin() {
+    setErr('');
+    setBusy(true);
+    window.PPNative.requestElevatedSetup()
+      .catch((e) => setErr(e && e.message ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  }
+
+  // Status line: active / active-but-sidelined / active-but-not-taken-over /
+  // down-and-retrying. The 'reduced' tone is deliberately NOT 'warn': nothing is
+  // broken and there is nothing to do about it, so it must not pull in the
+  // admin action below.
   let statusText, statusTone;
   if (!status) { statusText = PP.t('app.loading'); statusTone = 'muted'; }
-  else if (status.last_error && !on) { statusText = status.last_error; statusTone = 'danger'; }
-  else if (on && status.taken_over && status.exposure_warning) { statusText = PP.t('blocking.dns_status_reduced'); statusTone = 'reduced'; }
-  else if (on && status.taken_over) { statusText = PP.t('blocking.dns_status_active'); statusTone = 'ok'; }
-  else if (on && !status.taken_over) { statusText = status.last_error || PP.t('blocking.dns_status_no_adapter'); statusTone = 'warn'; }
-  else { statusText = PP.t('blocking.dns_status_off'); statusTone = 'muted'; }
+  else if (on && takenOver && status.exposure_warning) { statusText = PP.t('blocking.dns_status_reduced'); statusTone = 'reduced'; }
+  else if (on && takenOver) { statusText = PP.t('blocking.dns_status_active'); statusTone = 'ok'; }
+  else if (on) { statusText = PP.t('blocking.dns_status_no_adapter'); statusTone = 'warn'; }
+  else { statusText = PP.t('blocking.dns_status_retrying'); statusTone = 'warn'; }
+
+  // Why it is down / not covering, in Rust's own words (a port-53 conflict, a
+  // refused adapter write, the failsafe having just stood it down). Kept out of
+  // the status line so the row stays one line, and kept on screen because
+  // "retrying" without a reason is the kind of vagueness this app doesn't do.
+  const reason = status && status.last_error && statusTone === 'warn' ? status.last_error : '';
+
+  // The admin prompt is the fix for exactly one state — running but never
+  // allowed to redirect an adapter. When the resolver itself is down, elevation
+  // changes nothing, so that state gets a plain retry instead.
+  const action = statusTone !== 'warn' ? null
+    : on ? { label: PP.t('blocking.dns_grant_admin'), run: grantAdmin }
+         : { label: PP.t('blocking.dns_retry'), run: retryNow };
 
   return (
     <React.Fragment>
@@ -345,12 +344,11 @@ function DnsFilterSection() {
         title={PP.t('blocking.dns_title')}
         desc={statusText}
         info={PP.t('blocking.dns_info')}>
-        <Switch on={on} onClick={toggle} disabled={busy || !available} />
+        {action
+          ? <button className="btn btn-sm" onClick={action.run} disabled={busy || !available}>{action.label}</button>
+          : <span className="chip chip-ok">{PP.t('blocking.always_on')}</span>}
       </Setting>
-      {statusTone === 'warn' &&
-        <div className="warn-note">
-          {PP.t('blocking.dns_warn_restart', { status: statusText })}
-        </div>}
+      {reason && <div className="warn-note">{reason}</div>}
       {/* Separate from the status line on purpose: the filter IS working, the
           network isn't. Merging the two would make a bad Wi-Fi day look like a
           broken protection. */}
@@ -363,40 +361,26 @@ function DnsFilterSection() {
       {on && status && status.exposure_warning &&
         <div className="warn-note">{status.exposure_warning}</div>}
       {err && <div className="err-note">{err}</div>}
-      <PendingNote pending={disablePending} whatKey="blocking.dns_pending_what"
-                   onKeep={() => window.PPNative.cancelWeakening('dns.disable').then(refresh)} />
     </React.Fragment>
   );
 }
 
-function ProtectionsCard({ s, PP }) {
-  const b = s.blocking;
-  const set = (patch) => PP.set({ blocking: patch });
-  const toggle = (k) => set({ [k]: !b[k] });
-  const guardPending = (window.usePendingWeakenings || (() => []))().find((p) => p.action_id === 'guard.disable');
-
-  // Turning the uninstall guard OFF is a weakening, gated behind the master
-  // password (4.2) when one is set — turning it back ON is a strengthening and
-  // stays instant/ungated, the same asymmetry as every other friction rule
-  // here. Only the off-and-currently-on click goes through PPAuth.
-  //
-  // This calls `PPNative.setGuard` directly with the acquired token rather than
-  // flipping the local store and letting app.jsx's reconciliation effect push
-  // it — that effect deliberately passes no token (it's a reconciler, not a
-  // user action), so it alone could never get past the backend gate. The store
-  // only flips after the gated call actually succeeds.
-  const toggleGuard = () => {
-    if (!b.uninstallGuard) { toggle('uninstallGuard'); return; }
-    acquireAuth()
-      .then((auth) => (window.PPNative && PPNative.available
-        ? PPNative.setGuard(false, auth)
-        : Promise.resolve({ applied: true })))
-      .then(() => toggle('uninstallGuard'))
-      .catch((e) => {
-        if (!e || e.message !== 'cancelled') console.warn('[OathLight] toggleGuard failed:', e);
-      });
-  };
-
+// Everything in this card is a floor, not a preference.
+//
+// It used to be three switches and one chip, and the switches were the problem:
+// each one taught the reader that the protection beside it was negotiable, and
+// between them they described — accurately, in plain English, on one screen —
+// how to end up with an unprotected computer. SafeSearch was already the
+// exception ("There is deliberately no switch for this one"), and it was the
+// only row that had the tone right.
+//
+// So the rest joined it. Nothing here has an off position now: the uninstall
+// guard, SafeSearch, YouTube Restricted Mode, the browser lock and the system
+// DNS filter are all "Always on", and the backend refuses a disable rather than
+// gating one (lib.rs's `NOT_OPTIONAL`, `settings::force_mandatory`). The
+// asymmetric friction system still exists and still matters — it governs the
+// things that *are* choices, further down this page and elsewhere.
+function ProtectionsCard({ PP }) {
   return (
     <SectionCard
       title={PP.t('blocking.protection_title')}
@@ -406,26 +390,25 @@ function ProtectionsCard({ s, PP }) {
       <Setting
         icon={IconShield}
         title={PP.t('blocking.guard_title')}
-        desc={PP.t(b.uninstallGuard ? 'blocking.guard_desc_on' : 'app.state_off')}
+        desc={PP.t('blocking.guard_desc_on')}
         info={PP.t('blocking.guard_info')}>
-        <Switch on={b.uninstallGuard} onClick={toggleGuard} />
+        <span className="chip chip-ok">{PP.t('blocking.always_on')}</span>
       </Setting>
-      <PendingNote pending={guardPending} whatKey="blocking.guard_pending_what" />
 
       <Setting
         icon={IconSearch}
         title={PP.t('blocking.safesearch_title')}
         desc={PP.t('blocking.safesearch_desc')}
         info={PP.t('blocking.safesearch_info')}>
-        <span className="chip chip-ok">{PP.t('blocking.safesearch_chip')}</span>
+        <span className="chip chip-ok">{PP.t('blocking.always_on')}</span>
       </Setting>
 
       <Setting
         icon={IconShield}
         title={PP.t('blocking.youtube_title')}
-        desc={PP.t(b.youtubeRestrict ? 'app.state_on' : 'app.state_off')}
+        desc={PP.t('blocking.youtube_desc_on')}
         info={PP.t('blocking.youtube_info')}>
-        <Switch on={!!b.youtubeRestrict} onClick={() => toggle('youtubeRestrict')} />
+        <span className="chip chip-ok">{PP.t('blocking.always_on')}</span>
       </Setting>
 
       <div className="sub-label">{PP.t('blocking.sub_apps')}</div>
@@ -918,7 +901,7 @@ function BlockingPage({ s, PP }) {
       </div>
 
       <StrictnessCard s={s} PP={PP} />
-      <ProtectionsCard s={s} PP={PP} />
+      <ProtectionsCard PP={PP} />
       <MonitorSection />
       <ScheduleCard s={s} PP={PP} />
       <BlockScreenCard s={s} PP={PP} />

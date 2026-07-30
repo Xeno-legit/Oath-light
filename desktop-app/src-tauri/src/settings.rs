@@ -201,6 +201,11 @@ pub struct SettingsV1 {
     /// The "uninstall guard" / reinstall-enforcement switch. Mirrors
     /// `AppState.guard_enabled`; this is the persisted copy that survives a
     /// restart, `AppState`'s is the live one the monitor thread reads.
+    ///
+    /// **Not user-controllable.** Kept as a field because the monitor, the
+    /// uninstall flow and the extension protocol all read it, but `load`
+    /// forces it true and the command that used to clear it now refuses —
+    /// see `force_mandatory`.
     #[serde(default = "default_true")]
     pub guard_enabled: bool,
     /// Whether the AI screen monitor should auto-start with the app.
@@ -215,12 +220,19 @@ pub struct SettingsV1 {
     /// leaving it unenforced. Also wired up by plan item 1.3.
     #[serde(default = "default_false")]
     pub block_unknown_browsers: bool,
-    /// System-level DNS filtering (plan item 1.1). Opt-in for v1 — default
-    /// **false**: it takes over every adapter's DNS + needs admin, so it is
-    /// never turned on without an explicit user action. Enabling is a
-    /// strengthening (instant); disabling is a friction-gated weakening
-    /// (`dns.disable`), same asymmetry as every other protection here.
-    #[serde(default = "default_false")]
+    /// System-level DNS filtering (plan item 1.1). **On, and not
+    /// user-controllable** — it is the only layer that reaches past the
+    /// browser, and a blocker that ships its whole-machine coverage switched
+    /// off ships mostly-off.
+    ///
+    /// This was opt-in through v1 on the reasoning that taking over adapter
+    /// DNS needs admin and shouldn't happen unasked. That traded a protection
+    /// for a permission prompt: the takeover half is the only part that needs
+    /// elevation, it fails cleanly and reversibly when refused, and the
+    /// resolver keeps running either way. So the intent is always on; whether
+    /// the machine currently *lets* it take over is a status the UI reports
+    /// (`DnsStatus::taken_over`), not a setting.
+    #[serde(default = "default_true")]
     pub dns_filter_enabled: bool,
     /// Refuse to let a browser that **cannot be force-installed** run without the
     /// extension: it is killed on sight, and the way back is a supervised restore
@@ -229,12 +241,14 @@ pub struct SettingsV1 {
     /// a consumer PC — leaving it as the one browser where staying protected is
     /// entirely voluntary.
     ///
-    /// Opt-in, default **false**, for the same reason `block_unknown_browsers`
-    /// is: it kills a process the user may be in the middle of using, and
-    /// nothing in this app turns that on for someone without being asked. On is
-    /// a strengthening (instant); off is a friction-gated weakening
-    /// (`browser_lock.disable`).
-    #[serde(default = "default_false")]
+    /// **On, and not user-controllable.** It shipped opt-in and default-false
+    /// because it kills a process the user may be mid-sentence in. That was the
+    /// wrong call: a browser running without the extension is half this app's
+    /// coverage gone, and "would you like your blocker to keep working?" is not
+    /// a question worth asking someone at 2am. The recovery path (a 20s restore
+    /// window, asked for as many times as it takes) is what makes the lock
+    /// survivable — not an off switch.
+    #[serde(default = "default_true")]
     pub lock_unverified_browsers: bool,
     /// Lockdown Mode (4.4) display-only view — see `LockdownV1`'s doc
     /// comment. The clock-tamper-immune source of truth lives in
@@ -279,8 +293,8 @@ impl Default for SettingsV1 {
             monitor_enabled: false,
             blocked_processes: Vec::new(),
             block_unknown_browsers: false,
-            dns_filter_enabled: false,
-            lock_unverified_browsers: false,
+            dns_filter_enabled: true,
+            lock_unverified_browsers: true,
             lockdown: LockdownV1::default(),
             trusted_contact: None,
             serious_mode: false,
@@ -297,15 +311,34 @@ pub struct SettingsState {
     inner: Mutex<SettingsV1>,
 }
 
+/// Re-assert every protection that is no longer the user's to switch off.
+///
+/// Three fields used to be toggles and are now floors: the uninstall guard, the
+/// browser lock and the system DNS filter. Making the *commands* refuse to clear
+/// them is not enough on its own — `settings.json` is a plain file in the user's
+/// own profile, and a build that only defended the UI path would be defeated by
+/// Notepad. Every load re-applies the floor, so an old file written when these
+/// were opt-in (or an edited one) comes up protected rather than carrying its
+/// old answer forward.
+///
+/// Deliberately silent: this is not a migration the user needs told about, and
+/// "your setting was overridden" is an invitation to go looking for where.
+fn force_mandatory(s: &mut SettingsV1) {
+    s.guard_enabled = true;
+    s.lock_unverified_browsers = true;
+    s.dns_filter_enabled = true;
+}
+
 impl SettingsState {
     /// Load `<app_data_dir>/settings.json` (defaults on absence or a parse
     /// failure — never blocks startup on a corrupt file).
     pub fn load(app_data_dir: &std::path::Path) -> Self {
         let path = app_data_dir.join("settings.json");
-        let inner = std::fs::read_to_string(&path)
+        let mut inner = std::fs::read_to_string(&path)
             .ok()
             .and_then(|s| serde_json::from_str::<SettingsV1>(&s).ok())
             .unwrap_or_default();
+        force_mandatory(&mut inner);
         Self {
             path,
             inner: Mutex::new(inner),
@@ -327,9 +360,18 @@ impl SettingsState {
 
     /// Mutate the settings and persist the result. `f` runs under the lock,
     /// so keep it cheap — no I/O, no blocking, inside the closure.
+    ///
+    /// The mandatory floor is re-applied after `f`, so no caller anywhere can
+    /// clear a protection that is no longer optional — including a future one
+    /// written by someone who never read `force_mandatory`. Teardown paths that
+    /// genuinely must stop the DNS resolver (uninstall, the update window) act
+    /// on `DnsFilterState` directly and do not go through here, which is the
+    /// distinction that makes this safe: this flag is the *intent*, not the
+    /// running state.
     pub fn update(&self, f: impl FnOnce(&mut SettingsV1)) {
         let mut s = self.inner.lock().unwrap();
         f(&mut s);
+        force_mandatory(&mut s);
         self.save(&s);
     }
 }

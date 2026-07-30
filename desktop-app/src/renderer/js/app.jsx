@@ -103,16 +103,15 @@ function App() {
     if (window.PPNative && PPNative.available) PPNative.setCustomDomains(customSiteUrls);
   }, [JSON.stringify(customSiteUrls)]);
 
-  // push the uninstall-guard toggle down to the backend so it actually (dis)arms
-  // the reinstall-enforcement monitor, not just the UI switch. This is pure
-  // reconciliation (mirroring the store's current value down to the backend,
-  // not a user-initiated toggle), so it deliberately passes no master-
-  // password token (4.2) — a rejected weakening here is the CORRECT outcome
-  // when a password is set: it means the actual toggle-off click already
-  // went through the gated path in pages-blocking.jsx, and if that path
-  // itself was cancelled, the store's own value never changed, so this
-  // effect wouldn't even fire. The catch just keeps a rejected weakening
-  // from surfacing as an unhandled promise rejection.
+  // Arm the reinstall-enforcement monitor on the backend. This is now purely a
+  // re-assertion: the guard has no off switch, the store forces the value true
+  // on load, and `set_guard_enabled(false)` is refused outright. What it still
+  // buys is the first-run case — a fresh profile whose backend has never been
+  // told — and a cheap belt-and-braces re-arm after any state change.
+  //
+  // The `catch` stays: `setGuard(false)` rejects by design, and if anything ever
+  // did manage to put a false in the store, a refusal is the correct outcome and
+  // must not surface as an unhandled rejection.
   useEffect(() => {
     if (window.PPNative && PPNative.available) {
       PPNative.setGuard(!!s.blocking.uninstallGuard).catch(() => {});

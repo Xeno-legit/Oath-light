@@ -1134,9 +1134,12 @@ function PendingChangesCard({ PP }) {
     window.PPNative.cancelWeakening(p.action_id).then(() => {
       // The backend is the source of truth; this just keeps the renderer's
       // own copy from lying about the toggle/list in the meantime.
-      if (p.action_id === 'guard.disable') {
-        PP.set({ blocking: { uninstallGuard: true } });
-      } else if (p.action_id.indexOf('custom_block.remove:') === 0) {
+      //
+      // (There was a `guard.disable` branch here. The uninstall guard has no
+      // off switch any more, so that weakening can no longer be created — and
+      // one left pending by an older build is cancelled at startup, before this
+      // card ever renders.)
+      if (p.action_id.indexOf('custom_block.remove:') === 0) {
         const domain = p.action_id.slice('custom_block.remove:'.length);
         const bl = PP.get().blocklist;
         if (!bl.customSites.some((x) => x.url === domain)) {

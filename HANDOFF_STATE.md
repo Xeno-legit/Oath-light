@@ -1,6 +1,104 @@
 # Handoff — Polishing pass (Polishing.md)
 
-Updated 2026-07-30. Branch `pre-alpha/release`.
+Updated 2026-07-31. Branch `pre-alpha/release`.
+
+---
+
+## Session 6 (2026-07-31) — the protections stop being optional
+
+Owner review of the Protection section, and it was blunt: the core protections
+were switches, the settings page read as a list of ways to end up unprotected,
+and one browser row told the reader in as many words that the extension there
+was *removable*. Four changes, and they all pull the same direction.
+
+**1. Five protections lost their off switch.** The uninstall guard, SafeSearch
+(already there), YouTube Restricted Mode, the browser lock and the system DNS
+filter are now "Always on" chips with no control. This is enforced in three
+places on purpose, because any one of them alone is defeatable:
+
+* the commands refuse — `set_guard_enabled(false)`, `set_browser_lock_enabled(
+  false)` and `set_dns_filter_enabled(false)` return `NOT_OPTIONAL` instead of
+  filing a weakening;
+* `settings::force_mandatory` re-applies the floor on every `load` **and** every
+  `update`, so `settings.json` is not a bypass (it is a plain file in the user's
+  own profile — a build that only defended the UI would lose to Notepad);
+* `store.js` does the same for its two renderer-owned values on load, because
+  `deepMerge` would otherwise carry an old profile's answer forward forever and
+  `localStorage` is a devtools edit away from anything.
+
+The `guard.disable` / `browser_lock.disable` / `dns.disable` friction actions are
+retired: cancelled at startup for anyone upgrading with one pending, and dropped
+rather than applied if one ripens first. The asymmetric-friction system itself is
+untouched — it still governs everything that is genuinely a choice.
+
+**2. The browser lock's `sole_browser` exemption is gone.** It was the largest
+hole in the app: uninstalling every other browser turned the one browser we
+cannot pin into an unenforced one, which made the protection weakest on exactly
+the stock consumer PC it exists for. `BrowserFacts` no longer has an input
+describing the machine's browser inventory, and `browsers::has_alternative_
+browser` was deleted rather than left lying around. The "no way out" worry is
+answered by the grace window instead: 20 seconds, on demand, from the app, as
+many times as it takes — there is no attempt counter and no escalating delay,
+and a new test pins that.
+
+**3. The row copy stopped publishing the lock's weak points.**
+`enforcementNote` used to end lines with `(user-level)` and `installed — not
+locked (removable)`. Both were accurate; accuracy is not the standard, because a
+note ending "(removable)" is an instruction handed to the one person looking for
+it. Lock *scope* is no longer reported at all — machine-hive and user-hive both
+read "locked", and the Grant-admin action still upgrades the weak one. What
+survives is only the states with something to do.
+
+**4. The DNS filter's real bug: it never tried again.** Two paths left it off
+and nothing ever retried, which is most of what "the system DNS doesn't work"
+meant in practice:
+
+* the fail-open teardown (correctly) restores real DNS when the resolver stops
+  answering — and then left it off *for the rest of the session*, switch showing
+  off, nothing saying why. A blip at 3pm meant no whole-machine filtering until
+  the next restart.
+* `enable` at startup runs while Windows is still bringing the network up. One
+  failed attempt and, again, it stayed off.
+
+Now: `tick_retry` re-attempts on a 15s→300s backoff whenever the filter isn't
+running, `tick_retry_takeover` re-attempts the *adapter* half on the ~30s deep
+cadence (the "granted admin, still not covering" case, which previously needed a
+logon to fix), and the elevated one-shot performs the takeover itself —
+`request_elevated_setup` now hands it `--app-data-dir` so `dns.json` lands where
+every restore path looks for it, and it refuses to redirect anything unless the
+resolver is answering on 127.0.0.1:53 first. `disable` resets the schedule, so
+uninstall and the update window still tear down cleanly.
+
+**5. Edge Add-ons is off the table, and the companions repair themselves.**
+Owner's call: Oath Light is **not** being published to Microsoft Edge Add-ons —
+the verification process is not worth it for a store that will not distribute it
+anyway. `EDGE_STORE_EXTENSION_ID` therefore stays empty *by decision, not by
+backlog*, and the browser lock is the permanent mechanism on Edge rather than a
+stopgap. The alternate path is left intact and costs nothing if that is ever
+revisited.
+
+Separately: `oathlightguard.exe` and `oath-light-host.exe` could survive an
+upgrade as stale binaries, because both are normally running and Windows will
+not let an installer overwrite a locked executable — a new app driving two old
+companions, silently, across a protocol nothing versions. `update.rs`'s
+stand-down and `kill_native_hosts` made that less likely; nothing made it
+impossible. Now `build.rs` embeds both binaries into the app and `sidecars.rs`
+compares and rewrites them at startup, before `watchdog::init_main` spawns
+anything. Deliberately **not** a download: the correct bytes were already on the
+machine, inside the one file an installer can always replace, and fetching them
+instead would need signing, key rotation, an anti-rollback floor and an offline
+story to solve a problem with no network in it. A locked file is renamed aside
+(`.old-N`, swept later) rather than fought; a per-machine install without
+elevation reports honestly and is fixed by the same `--elevated-setup` pass as
+everything else.
+
+**Still not runtime-verified**, and this is the part that needs a real machine
+rather than more code: that the retry loop actually recovers a killed resolver,
+that the elevated pass's takeover lands, and that a locked-out Edge with no other
+browser on the machine is genuinely recoverable through repeated 20s windows —
+that last one is the change with the most downside if the recovery path has a
+gap, because there is no exemption behind it any more. `cargo test --lib` is 103
+green and clippy is clean, but none of that touches Windows system behaviour.
 
 Five sessions have worked through [`../Polishing.md`](../Polishing.md) — the
 owner's review notes covering the extension, desktop app, features and website.
@@ -597,8 +695,9 @@ Nothing from Polishing.md. Still open from ROADMAP's "Before Alpha":
 
 | # | Item |
 |---|---|
-| 1 | **Publish to Microsoft Edge Add-ons, then set `EDGE_STORE_EXTENSION_ID`** — the only thing still blocking Edge force-install (session 3) |
-| 2 | **Runtime-verify the DNS filter** (see the top of this file) |
+| 1 | **Runtime-verify the DNS filter** (see the top of this file) — now including the session-6 retry loop and the elevated takeover |
+| 1b | **Runtime-verify browser-lock recovery on a one-browser machine** — the `sole_browser` exemption is gone (session 6), so repeated 20s windows are the only way back in |
+| 1c | **Runtime-verify the sidecar repair** (session 6) — install v0.4.0 over an older build with a browser open and confirm both companions come out matching |
 | 3 | Arabic review — `locales/ar.js` is a 100%-complete **unreviewed machine draft**; the Companion/Coach split does not survive literal translation |
 | 4 | OTA production keys |
 | 5 | Pre-Alpha full-scale test |
