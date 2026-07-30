@@ -7,7 +7,12 @@
 //
 // This gate makes drift a build failure instead of a discovery six months
 // later: every listed copy must be BYTE-identical to its source in
-// design-system/. To change a token or a string, edit the source and re-copy.
+// design-system/. To change a token or a string, edit the source and run
+// scripts/sync-design-system.mjs — never hand-edit a copy.
+//
+// The copy manifest itself lives in scripts/design-system-copies.mjs, shared
+// with the sync script so the thing that performs the copy and the thing that
+// polices it can never disagree about what gets copied where.
 //
 // Run by .github/workflows/ci.yml; safe locally:
 //   node scripts/ci/check-design-system-sync.mjs
@@ -15,36 +20,9 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { COPIES, SYNC_COMMAND } from '../design-system-copies.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-
-// source (relative to design-system/) -> every surface copy that must match it.
-const COPIES = {
-  'tokens.css': [
-    'desktop-app/src/renderer/tokens.css',
-    'extension/popup_assets/tokens.css',
-    'extension/blocklist_assets/tokens.css',
-  ],
-  'strings.js': [
-    'desktop-app/src/renderer/strings.js',
-    'extension/strings.js',
-  ],
-  // Locale tables. Same copy-verbatim rule as strings.js — they load as
-  // plain sibling scripts because the MV3 service worker can only take
-  // them via importScripts (no build step, no modules). Their *contents*
-  // are checked separately by check-locales.mjs; this gate only proves
-  // no surface has drifted from design-system/.
-  'locales/ar.js': [
-    'desktop-app/src/renderer/locales/ar.js',
-    'extension/locales/ar.js',
-  ],
-  // The token METADATA manifest (names/groups/control types, no values). The
-  // renderer's Themes page builds its custom-color editor from it, so it must
-  // describe exactly the same tokens the shipped tokens.css declares.
-  'tokens.js': [
-    'desktop-app/src/renderer/tokens.js',
-  ],
-};
 
 const errors = [];
 let checked = 0;
@@ -64,7 +42,7 @@ for (const [sourceName, targets] of Object.entries(COPIES)) {
     }
     checked++;
     if (!source.equals(readFileSync(target))) {
-      errors.push(`${rel} has drifted from design-system/${sourceName} — copy the source over it (do not hand-edit the copy)`);
+      errors.push(`${rel} has drifted from design-system/${sourceName} — run \`${SYNC_COMMAND}\` (do not hand-edit the copy)`);
     }
   }
 }
@@ -72,6 +50,7 @@ for (const [sourceName, targets] of Object.entries(COPIES)) {
 if (errors.length) {
   for (const e of errors) console.error(`✗ ${e}`);
   console.error(`\ndesign-system sync FAILED: ${errors.length} problem(s)`);
+  console.error(`Fix: edit the source in design-system/, then run \`${SYNC_COMMAND}\`.`);
   process.exit(1);
 }
 

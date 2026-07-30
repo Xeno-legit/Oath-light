@@ -114,7 +114,7 @@ const HUB_CARDS = [
   { id: 'blocking', icon: IconSliders, title: 'Blocking Settings', desc: 'Strictness, schedules and tamper protection.', stat: (s) => 'Manage settings' },
   { id: 'mentor', icon: IconChat, title: 'Recovery Program', desc: 'Guided CBT/ACT exercises for the hard moments. Always here.', stat: () => '4 exercises' },
   { id: 'tips', icon: IconSpark, title: 'Tips & Questions', desc: 'Questions you might encounter, and tips to guide you.', stat: () => '15 items' },
-  { id: 'themes', icon: IconPalette, title: 'Themes', desc: 'Make the space yours — light, dark and atmosphere.', stat: (s) => s.display.style }];
+  { id: 'themes', icon: IconPalette, title: 'Themes', desc: 'Light, dark, the look behind the app, and your own colours.', stat: (s) => (s.display.theme === 'light' ? 'Light' : 'Dark') }];
 
 
 function HubMenu({ s, go }) {

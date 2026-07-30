@@ -343,7 +343,7 @@ desktop renderer, website, store assets):
   `[data-theme="light"]`, Serious Mode hook in `[data-serious]`.
 - `tokens.js` — the metadata manifest the Themes colour editor builds from.
 - `strings.js` — the voice layer: every user-facing string in both voices
-  (Companion / Drill Sergeant), `t(key, params)`, Serious Mode force-override.
+  (Companion / Coach), `t(key, params)`, Serious Mode force-override.
 - `VOICE.md` — copy rules, banned language, the "status yes, map no" content rule.
 - `preview.html` — the live editor and style guide.
 

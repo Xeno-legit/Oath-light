@@ -1,4 +1,5 @@
 mod auth;
+mod browser_lock;
 mod browsers;
 mod dns_filter;
 mod evallog;
@@ -16,6 +17,7 @@ mod recovery;
 pub mod screen;
 mod settings;
 mod uninstall;
+mod update;
 mod watchdog;
 
 use oathlight_core::eventlog::{self, EventLog};
@@ -27,7 +29,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
@@ -163,6 +165,22 @@ pub struct BrowserStatus {
     pub enforcement: String,
     /// Every profile of this browser currently connected.
     pub profiles: Vec<ProfileStatus>,
+    /// This browser is kill-on-sight until it carries the extension
+    /// (`browser_lock`) — i.e. the setting is on and it is one of the browsers
+    /// that cannot be force-installed. Says nothing about whether it is being
+    /// killed *right now*; that is `lock_grace_secs` and `installed`.
+    #[serde(default)]
+    pub locked_out: bool,
+    /// Seconds left on an open restore window, 0 when there is none. Drives the
+    /// countdown the UI shows while the user completes the install.
+    #[serde(default)]
+    pub lock_grace_secs: u64,
+    /// The extension is downloaded and unpacked in some profile but switched
+    /// off — the user is one click from protected. Distinct from `installed`
+    /// being false for the ordinary reason (nothing there at all), and the only
+    /// state that buys more time from `browser_lock`.
+    #[serde(default)]
+    pub pending_approval: bool,
 }
 
 /// A browser not in the built-in table, learned from a native-host connection.
@@ -1245,6 +1263,15 @@ fn enforce_str(outcome: EnforceOutcome) -> &'static str {
         // the UI must not claim it's un-removable — the user can delete it.
         EnforceOutcome::EnforcedUser => "enforced_user",
         EnforceOutcome::Failed => "failed",
+        // Registered for auto-install via the external-extensions registry (the
+        // Edge path). The browser fetches it on its own, then waits for the user
+        // to approve it once — so the UI asks for that click, not for admin.
+        EnforceOutcome::AutoInstallPendingApproval => "needs_approval",
+        // No store will force-install us in this browser on this machine (Edge,
+        // unmanaged, no Edge Add-ons listing) and auto-install couldn't be
+        // registered either. Admin does not fix it, so the UI must offer a
+        // manual install rather than a UAC prompt.
+        EnforceOutcome::StoreUnavailable => "store_unavailable",
         EnforceOutcome::Unsupported => "unsupported",
     }
 }
@@ -1349,6 +1376,9 @@ fn build_status(
                     };
 
                     BrowserStatus {
+                        pending_approval: list.iter().any(|p| p.pending_approval),
+                        locked_out: false,   // filled in by the monitor (needs settings)
+                        lock_grace_secs: 0,  // …and the live BrowserLockState
                         key: def.key.to_string(),
                         name: def.name.to_string(),
                         engine: engine_str(def.engine).to_string(),
@@ -1384,6 +1414,12 @@ fn build_status(
                         "not_installed"
                     };
                     BrowserStatus {
+                        // No prefs to read, so no evidence either way — and this
+                        // branch is Firefox/unknown, which `browser_lock` never
+                        // touches anyway.
+                        pending_approval: false,
+                        locked_out: false,
+                        lock_grace_secs: 0,
                         key: def.key.to_string(),
                         name: def.name.to_string(),
                         engine: engine_str(def.engine).to_string(),
@@ -1419,6 +1455,12 @@ fn build_status(
             "idle"
         };
         out.push(BrowserStatus {
+            // A custom browser is only known to us *because* its extension
+            // connected over the native host, so it is protected by definition
+            // and never a browser-lock candidate.
+            pending_approval: false,
+            locked_out: false,
+            lock_grace_secs: 0,
             key,
             name: cb.name,
             engine: "custom".to_string(),
@@ -1626,10 +1668,11 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
     std::thread::spawn(move || {
         // Browsers we've already enforced this session, remembering the outcome
         // (which hive/scope the write landed in) so each tick can report it
-        // without touching the registry again. Write-once: once the policy is
-        // present, the browser reinstalls a removed extension on its own next
-        // launch, so there's nothing to re-do until the guard is toggled off.
-        // (Re-asserting a *deleted* policy key is Stage 2, the SYSTEM service.)
+        // without touching the registry again. Not write-once: it is re-checked
+        // against the registry on the ~30s deep cadence below and dropped for
+        // any browser whose policy has gone or weakened, which is what makes it
+        // an optimisation rather than an assumption that the policy is still
+        // there. See `browsers::enforcement_still_present`.
         let mut enforced: HashMap<String, EnforceOutcome> = HashMap::new();
         // Browsers currently seen in the `extension_missing` state, so the
         // event log (4.5) records the EDGE (entering/leaving) rather than one
@@ -1682,14 +1725,33 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
 
             // System DNS filter (1.1/1.2): while it's active, (a) health-check
             // the resolver every tick and fail open if it dies (the failsafe),
-            // (b) revert adapter-DNS drift on a throttled cadence (~30s), and
-            // (c) keep the DoH-disable policy written for every browser. When
-            // it's off, drop the DoH memo so a later enable re-writes it.
+            // (b) re-pick upstreams if the pair chosen at enable time has gone
+            // unreachable (cheap atomic guard, so every tick), (c) revert
+            // adapter-DNS drift and check whether anything is answering DNS
+            // instead of us, both on a throttled cadence (~30s), and (d) keep
+            // the DoH-disable policy written for every browser. When it's off,
+            // drop the DoH memo so a later enable re-writes it.
             if let Some(dns) = app.try_state::<Arc<dns_filter::DnsFilterState>>() {
                 if dns.is_active() {
                     dns.tick_health_check();
+                    if dns.tick_recheck_upstreams() {
+                        log_event(&app, "dns_upstreams_repicked", serde_json::json!({}));
+                    }
                     if enforce_tick % 10 == 1 {
-                        dns.tick_revert_drift();
+                        let reverted = dns.tick_revert_drift();
+                        if reverted > 0 {
+                            log_event(&app, "dns_changed", serde_json::json!({ "adapters_reverted": reverted }));
+                        }
+                        // Event only, never content (4.5): counts and flags, not
+                        // adapter names — the status card carries those for the
+                        // user, the log only needs the transition.
+                        if let Some(ex) = dns.tick_detect_exposure() {
+                            log_event(&app, "dns_exposure", serde_json::json!({
+                                "clear": ex.is_clear(),
+                                "adapters": ex.adapters.len(),
+                                "nrpt_catch_all": ex.nrpt_catch_all,
+                            }));
+                        }
                     }
                     if RE_ENFORCE_REQUESTED.load(Ordering::SeqCst) {
                         dns_doh_enforced.clear();
@@ -1771,6 +1833,27 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
                 enforced.clear();
             }
 
+            // …and on the same ~30s deep cadence the DNS drift check uses, verify
+            // that what we think we enforced is still really there, dropping the
+            // memo for anything that has gone or weakened so the write below
+            // re-runs. Polishing.md asks the app to "constantly make sure the
+            // extension is installed regardless if it was before"; the browser's
+            // own policy-driven reinstall covers the extension being removed, but
+            // nothing covered the POLICY being removed — and the HKCU fallback
+            // that most unelevated installs land on can be deleted without so
+            // much as a prompt. Until this ran, that left the row reporting a
+            // lock it no longer held for the rest of the session.
+            //
+            // Costs at most two `reg query` spawns per already-enforced browser
+            // every ~30s (outcomes that wrote nothing are free), which is the
+            // same order as the `is_installed_cached` probe on the tick above.
+            if guard_enabled && enforce_tick % 10 == 1 {
+                enforced.retain(|key, outcome| {
+                    browsers::browser_by_key(key)
+                        .is_some_and(|def| browsers::enforcement_still_present(def, *outcome))
+                });
+            }
+
             // Proactive force-install: lock every supported browser present on
             // this machine while the guard is on — not only ones whose extension
             // already went missing — so a fresh, healthy install is pinned
@@ -1791,7 +1874,15 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
                     st.enforcement = "dormant".to_string();
                     continue;
                 }
-                if !(st.installed || st.running) {
+                // "Is this browser on the machine", which is NOT `st.installed`.
+                // For a Chromium browser whose profiles we can read, `installed`
+                // means *the extension* is present in some profile — so gating
+                // enforcement on it made the policy conditional on the extension
+                // already being there, and a browser that never had it (the only
+                // case that needs pinning) was skipped unless it happened to be
+                // running at that moment. That is why a fresh install left Chrome
+                // unpinned until the user opened it with the app already up.
+                if !(st.running || st.installed || browsers::is_installed_cached(def)) {
                     // Not present on this machine — nothing to pin.
                     st.enforcement = "off".to_string();
                     continue;
@@ -1821,20 +1912,204 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
                 // policy with no real install is "pending" (the browser may still
                 // be fetching the extension from the Web Store), never a green
                 // "locked".
+                //
+                // Machine and user scope stay distinguishable while pending,
+                // because the useful next action differs: a user-scope policy can
+                // still be upgraded to the machine-wide lock with one UAC prompt,
+                // and offering that upgrade is the whole point of the button.
+                // Collapsing both into a single "pending" is what left the UI with
+                // nothing to offer but a re-apply that changed nothing.
                 st.enforcement = match outcome {
-                    EnforceOutcome::EnforcedMachine | EnforceOutcome::EnforcedUser
-                        if !st.installed =>
-                    {
-                        "pending".to_string()
+                    EnforceOutcome::EnforcedMachine if !st.installed => "pending".to_string(),
+                    EnforceOutcome::EnforcedUser if !st.installed => "pending_user".to_string(),
+                    // Auto-install landed and the user has approved it — the
+                    // extension is genuinely running. Report that plainly and
+                    // stop nagging, but never as "locked": nothing pins it.
+                    EnforceOutcome::AutoInstallPendingApproval if st.installed => {
+                        "auto_installed".to_string()
                     }
                     other => enforce_str(other).to_string(),
                 };
             }
 
+            // Browser lock: a browser that can't be force-installed doesn't get
+            // to run without the extension. Runs after the loop above so it sees
+            // this tick's freshly-written policy rather than last tick's.
+            enforce_browser_lock(&app, &cfg, guard_enabled, &mut statuses);
+
             let _ = app.emit("browsers-status", &statuses);
             std::thread::sleep(MONITOR_TICK);
         }
     });
+}
+
+/// How long a "killed <browser>" browser-lock event stays suppressed after the
+/// last one. The kill itself is never throttled — only the log/event noise.
+///
+/// This needs to be generous because Edge does not stay dead politely: startup
+/// boost and background mode respawn `msedge.exe` on their own, so a locked-out
+/// Edge produces a kill every few seconds indefinitely. That is the feature
+/// working, but it must not also mean an event-log entry every few seconds
+/// forever.
+const BROWSER_LOCK_EMIT_THROTTLE: Duration = Duration::from_secs(60);
+
+/// Kill any browser that cannot be force-installed and is running without the
+/// extension, unless it holds a restore window (see `browser_lock`).
+///
+/// **Why killing is the only lever here.** For every other browser the app pins
+/// the extension with a policy and the browser itself puts it back. Edge on a
+/// consumer machine refuses that policy outright, so "protected" there is
+/// whatever the user last chose — which on a machine running this app is exactly
+/// the thing that shouldn't be up to the user at 2am. Making the browser
+/// unusable until the extension is on is the remaining lever.
+///
+/// Three guards keep this from being a browser that randomly dies:
+///   * it does nothing unless the user turned it on AND the guard is on;
+///   * it only ever touches `browsers::requires_manual_install` browsers, so a
+///     force-installable one is never killed (killing one would *prevent* the
+///     launch during which its policy reinstalls the extension); and
+///   * it needs real ground truth from the profile scan. Unreadable prefs are
+///     not evidence, and must never be able to brick a browser.
+fn enforce_browser_lock(
+    app: &AppHandle,
+    cfg: &settings::SettingsV1,
+    guard_enabled: bool,
+    statuses: &mut [BrowserStatus],
+) {
+    let Some(locks) = app.try_state::<Arc<browser_lock::BrowserLockState>>() else { return };
+    if !cfg.lock_unverified_browsers || !guard_enabled {
+        // Turning it off (or the guard off) must not leave a stale window that
+        // would grant a free pass the moment it comes back on.
+        locks.clear_all();
+        return;
+    }
+
+    // Which browsers need killing this tick, decided before any process work —
+    // the enumeration below is only worth paying for if something is actually
+    // going to be killed, and in the steady state nothing is.
+    let mut condemned: Vec<&'static browsers::BrowserDef> = Vec::new();
+    for st in statuses.iter_mut() {
+        let Some(def) = browsers::browser_by_key(&st.key) else { continue };
+        if !browsers::requires_manual_install(def) {
+            continue;
+        }
+        // The only exemption: this is the machine's one browser, so bricking it
+        // would leave no way to reach anything — including a second browser.
+        let sole_browser = !browsers::has_alternative_browser(def);
+        st.locked_out = !sole_browser;
+
+        // …and record it when it engages. The exemption is a real hole — a user
+        // who uninstalls every other browser gets an unenforced one back — and
+        // the standing rule here is that the app never silently stops delivering
+        // protection it is configured for. Deliberately an event-log entry and
+        // NOT UI copy: writing "your only browser is exempt" on screen would be
+        // publishing the recipe (VOICE.md, "status yes, map no"). One entry per
+        // transition, not one per tick.
+        {
+            let mut seen = browser_lock_exempt_memo().lock().unwrap();
+            if seen.insert(def.key, sole_browser) != Some(sole_browser) {
+                if sole_browser {
+                    log::warn!(
+                        "browser_lock: [{}] exempt — it is the only browser on this machine, so \
+                         locking it would leave no way to browse at all",
+                        def.key
+                    );
+                }
+                log_event(
+                    app,
+                    "browser_lock_exempt",
+                    serde_json::json!({ "browser": def.key, "exempt": sole_browser }),
+                );
+            }
+        }
+
+        // Read the profiles directly rather than leaning on `st.installed`: the
+        // decision needs "every profile has it" (a second profile without the
+        // extension is a fully usable unprotected browser), plus whether we
+        // could read them at all — neither of which `installed` distinguishes.
+        let facts = match profiles::cached_profiles(def) {
+            Some(list) => browser_lock::BrowserFacts {
+                protected: !list.is_empty() && list.iter().all(|p| p.installed),
+                ground_truth: true,
+                sole_browser,
+            },
+            None => browser_lock::BrowserFacts {
+                protected: false,
+                ground_truth: false,
+                sole_browser,
+            },
+        };
+        if locks.decide(&st.key, facts) == browser_lock::LockDecision::Kill && st.running {
+            condemned.push(def);
+        }
+        st.lock_grace_secs = locks.remaining_secs(&st.key);
+    }
+    if condemned.is_empty() {
+        return;
+    }
+
+    let names: HashSet<String> =
+        condemned.iter().flat_map(|d| d.process_names.iter().map(|n| n.to_string())).collect();
+    use sysinfo::{ProcessRefreshKind, System};
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(ProcessRefreshKind::new());
+    let mut killed: HashMap<&'static str, usize> = HashMap::new();
+    for proc in sys.processes().values() {
+        let name = proc.name().to_lowercase();
+        if !names.contains(&name) {
+            continue;
+        }
+        let Some(def) = browsers::match_browser_process(&name) else { continue };
+        if !condemned.iter().any(|d| d.key == def.key) {
+            continue;
+        }
+        proc.kill();
+        *killed.entry(def.key).or_default() += 1;
+    }
+
+    let now = Instant::now();
+    let mut memo = browser_lock_emit_memo().lock().unwrap();
+    for (key, count) in killed {
+        if count == 0 {
+            continue;
+        }
+        let stale = memo
+            .get(key)
+            .map(|t| now.duration_since(*t) >= BROWSER_LOCK_EMIT_THROTTLE)
+            .unwrap_or(true);
+        if !stale {
+            continue;
+        }
+        memo.insert(key, now);
+        log::warn!(
+            "browser_lock: killed {count} '{key}' process(es) — the extension is not installed \
+             and no restore window is open"
+        );
+        let _ = app.emit(
+            "browser-locked-out",
+            serde_json::json!({ "browser": key, "processes": count }),
+        );
+        log_event(app, "browser_locked_out", serde_json::json!({ "browser": key }));
+    }
+}
+
+/// Last browser-lock emit per browser, for `BROWSER_LOCK_EMIT_THROTTLE`.
+///
+/// A process-wide `static` rather than a monitor-loop local because
+/// `request_browser_restore` clears it: someone who has just deliberately asked
+/// for a window deserves to see the outcome of *that* attempt, not silence
+/// because an identical kill happened to be logged 40s ago. Same `OnceLock<
+/// Mutex<HashMap<…>>>` shape as `browsers::is_installed_cached`.
+fn browser_lock_emit_memo() -> &'static Mutex<HashMap<&'static str, Instant>> {
+    static MEMO: OnceLock<Mutex<HashMap<&'static str, Instant>>> = OnceLock::new();
+    MEMO.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Last known "is this browser exempt from the lock" per browser, so the
+/// transition is logged once rather than every 3s tick for as long as it holds.
+fn browser_lock_exempt_memo() -> &'static Mutex<HashMap<&'static str, bool>> {
+    static MEMO: OnceLock<Mutex<HashMap<&'static str, bool>>> = OnceLock::new();
+    MEMO.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 // ============================================================================
@@ -2198,7 +2473,9 @@ fn set_guard_enabled(
 // ============================================================================
 
 /// Live status the renderer's "System DNS filter" card reads:
-/// `{ running, taken_over, last_error, upstreams }`.
+/// `{ running, taken_over, last_error, upstreams, upstream_warning,
+/// exposure_warning }` — see `DnsStatus` for why the three failure strings are
+/// separate fields rather than one message.
 #[tauri::command]
 fn get_dns_status(dns: tauri::State<'_, Arc<dns_filter::DnsFilterState>>) -> dns_filter::DnsStatus {
     dns.status()
@@ -2249,6 +2526,105 @@ fn set_dns_filter_enabled(
         view.delay_secs
     );
     Ok(WeakeningOutcome { applied: false, pending: Some(view) })
+}
+
+// ============================================================================
+// Browser lock (Edge) — commands. The state machine is `browser_lock`, the
+// killing is `enforce_browser_lock` on the monitor tick; these are the two
+// things the user can do about it.
+// ============================================================================
+
+/// Turn the browser lock on or off.
+///
+/// ON is a strengthening — instant, and it takes effect on the next monitor
+/// tick. It also cancels any pending `browser_lock.disable`.
+///
+/// OFF is a weakening: `require_auth` then a friction entry, exactly like the
+/// DNS filter and the uninstall guard. The lock stays fully on until the delay
+/// elapses. That asymmetry is the point — this is the protection most likely to
+/// be resented in the moment it is working.
+#[tauri::command]
+fn set_browser_lock_enabled(
+    app: AppHandle,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    locks: tauri::State<'_, Arc<browser_lock::BrowserLockState>>,
+    enabled: bool,
+    auth: Option<String>,
+) -> Result<WeakeningOutcome, String> {
+    if enabled {
+        settings.update(|s| s.lock_unverified_browsers = true);
+        friction.cancel("browser_lock.disable");
+        // A window opened before the lock was last turned off must not survive
+        // into the new session as a free pass.
+        locks.clear_all();
+        log::info!("browser lock enabled");
+        return Ok(WeakeningOutcome { applied: true, pending: None });
+    }
+
+    if !settings.get().lock_unverified_browsers {
+        return Ok(WeakeningOutcome { applied: true, pending: None });
+    }
+    auth::require_auth(&app, &auth)?;
+    let view =
+        friction.request("browser_lock.disable", "Turn off the browser lock", serde_json::json!({}));
+    log::warn!(
+        "browser lock disable requested — {}s cool-off started (lock stays on until it elapses)",
+        view.delay_secs
+    );
+    log_event(&app, "friction_requested", serde_json::json!({ "action": "browser_lock.disable" }));
+    Ok(WeakeningOutcome { applied: false, pending: Some(view) })
+}
+
+/// Open a restore window for one locked-out browser: re-assert the auto-install
+/// registration, launch the browser at its own extensions page, and stop killing
+/// it for `browser_lock::GRACE_WINDOW`.
+///
+/// **Not a weakening, and deliberately not friction-gated.** It grants seconds,
+/// not access: the only thing a user can do with the window is *install the
+/// extension*, which is the outcome the lock exists to produce. Putting a
+/// 24-hour cool-off in front of the one action that ends the lockout would make
+/// the lockout unrecoverable rather than strict.
+///
+/// Launching the browser ourselves is load-bearing, not a convenience. The
+/// extension can only download while the browser runs, and the approval toggle
+/// only exists inside it — so a window with no browser in it is 20 seconds of
+/// nothing. Starting it at `edge://extensions` also puts the user on the exact
+/// page holding the switch they need.
+#[tauri::command]
+fn request_browser_restore(
+    app: AppHandle,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    locks: tauri::State<'_, Arc<browser_lock::BrowserLockState>>,
+    browser_key: String,
+) -> Result<u64, String> {
+    let def = browsers::browser_by_key(&browser_key).ok_or("Unknown browser")?;
+    if !browsers::requires_manual_install(def) {
+        return Err(format!("{} isn't locked — it force-installs the extension", def.name));
+    }
+    if !settings.get().lock_unverified_browsers {
+        return Err("The browser lock is off — nothing is being blocked".to_string());
+    }
+
+    // Make sure the thing the window exists to complete is actually registered.
+    // If an earlier write failed (or the user deleted the key), the browser
+    // would launch, find nothing to install, and burn the window for nothing.
+    let outcome = browsers::enforce_policy(def);
+    log::info!("browser_lock: [{browser_key}] restore requested — registration: {}", enforce_str(outcome));
+
+    let secs = locks.grant(&browser_key);
+    // Let the next failure speak even if one was just logged.
+    browser_lock_emit_memo().lock().unwrap().remove(def.key);
+    log_event(&app, "browser_restore_granted", serde_json::json!({ "browser": def.key, "seconds": secs }));
+
+    // Best-effort: a launch failure is not fatal — the window is open either
+    // way and the user can start the browser themselves.
+    if let Some(exe) = browsers::installed_exe_path(def) {
+        if let Err(e) = std::process::Command::new(exe).arg(def.extensions_page).spawn() {
+            log::warn!("browser_lock: could not launch {} for its restore window: {e}", def.name);
+        }
+    }
+    Ok(secs)
 }
 
 // ============================================================================
@@ -3133,6 +3509,29 @@ fn enforce_extension(browser_key: Option<String>) -> Vec<(String, String)> {
             (def.key.to_string(), status)
         })
         .collect()
+}
+
+/// Open a browser at its own extensions page.
+///
+/// Only reachable from the "turn it on" action, which exists because Chromium
+/// leaves an auto-installed extension switched off until the user approves it
+/// once — and a user who dismissed that prompt has no obvious way back to the
+/// toggle. `edge://extensions` and friends are private schemes only that
+/// browser understands, so this launches the browser itself rather than going
+/// through the shell. The URL is taken from our own table, never from the
+/// caller; the frontend only picks which browser.
+#[tauri::command]
+fn open_extensions_page(browser_key: String) -> Result<(), String> {
+    let def = browsers::browser_by_key(&browser_key).ok_or("Unknown browser")?;
+    if def.extensions_page.is_empty() {
+        return Err("No extensions page known for this browser".to_string());
+    }
+    let exe = browsers::installed_exe_path(def).ok_or("Browser is not installed")?;
+    std::process::Command::new(exe)
+        .arg(def.extensions_page)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// Ask for admin once and lock the extension. Writing a browser force-install
@@ -4064,6 +4463,202 @@ fn complete_uninstall(
 }
 
 // ============================================================================
+// Update mode (see `update.rs`) — commands.
+//
+// The problem these solve is stated in full in that module's doc: every guard
+// that makes Oath Light hard to remove also makes it impossible to install a
+// new build over, because both executables are running and each resurrects the
+// other. `begin_update` opens a bounded window in which the resurrection guards
+// alone stand aside, closes the app so its files unlock, and arms a one-shot
+// task that brings everything back if the update never happens.
+//
+// Note what is NOT in here. No blocklist is unloaded, no browser policy is
+// removed, no extension enforcement is relaxed, the uninstall friction is
+// untouched, and autostart stays registered. An update window is not a way to
+// turn Oath Light off for a quarter of an hour; it is a way to let a file be
+// replaced.
+// ============================================================================
+
+/// What the Settings card renders.
+#[derive(Debug, Clone, serde::Serialize)]
+struct UpdateStateView {
+    /// Whether a window is open right now (re-validated on read — a stale or
+    /// hand-edited `update.json` reports `false`, see `update::window_active_at`).
+    active: bool,
+    /// Seconds left on it; `0` when none is open.
+    seconds_left: u64,
+    /// The full window length, so the UI can state the bound without hardcoding
+    /// its own copy of the constant.
+    window_secs: u64,
+    /// The running build, shown so the user can tell what they are updating
+    /// from before they close it.
+    app_version: String,
+    /// Whether the expiry-recovery task is armed. Reported honestly rather than
+    /// assumed: if `schtasks` failed, the user is owed the fact that nothing
+    /// will bring the app back on its own.
+    recovery_armed: bool,
+}
+
+fn update_state_view(app: &AppHandle, recovery_armed: bool) -> UpdateStateView {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let (active, seconds_left) = match app.path().app_data_dir() {
+        Ok(d) => {
+            let p = update::path_in(&d);
+            (update::window_active_at(&p), update::seconds_left_at(&p, now))
+        }
+        Err(_) => (false, 0),
+    };
+    UpdateStateView {
+        active,
+        seconds_left,
+        window_secs: update::WINDOW_SECS,
+        app_version: app.package_info().version.to_string(),
+        recovery_armed,
+    }
+}
+
+#[tauri::command]
+fn get_update_state(app: AppHandle) -> UpdateStateView {
+    // `recovery_armed` is only meaningful in the reply to `begin_update`, which
+    // is the one call that knows whether `schtasks` succeeded. A plain status
+    // poll reports it as armed exactly when a window is open, which is the
+    // state `begin_update` leaves behind on the happy path.
+    let active = app
+        .path()
+        .app_data_dir()
+        .map(|d| update::window_active_at(&update::path_in(&d)))
+        .unwrap_or(false);
+    update_state_view(&app, active)
+}
+
+/// Best-effort: end the native-messaging host processes.
+///
+/// `oath-light-host.exe` is spawned by the browsers, not by us, so it can be
+/// running (and therefore locked) with no Oath Light window open at all. The
+/// installer cannot replace a locked file, which makes this the most likely
+/// remaining way for an update to half-succeed. Killing it costs nothing — the
+/// browser respawns one on its next connection, against whichever binary is
+/// there by then.
+#[cfg(target_os = "windows")]
+fn kill_native_hosts() {
+    use std::os::windows::process::CommandExt;
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/IM", "oath-light-host.exe", "/T"])
+        .creation_flags(0x0800_0000)
+        .output();
+}
+
+#[cfg(not(target_os = "windows"))]
+fn kill_native_hosts() {}
+
+/// Open an update window and close the app so an installer can replace it.
+///
+/// Gated on the master password (4.2), same as every other command that makes
+/// the app easier to get around, and recorded in the tamper-evident event log
+/// (4.5) — the point is not that this is dangerous, it is that a window where
+/// the watchdog stands down should never be something the user's future self
+/// can't see happened.
+///
+/// Deliberately NOT friction-gated. A cool-off on updating would mean shipping
+/// a security fix that users have to wait a day to apply, and the bound that
+/// makes this safe is the window's own fifteen-minute expiry, not a delay in
+/// front of it.
+///
+/// Order matters, and mirrors `perform_uninstall`: arm the recovery FIRST,
+/// while everything is still intact, so the failure mode of a broken
+/// `schtasks` is "the update didn't start" rather than "the guards are down and
+/// nothing is coming back."
+#[tauri::command]
+fn begin_update(app: AppHandle, auth: Option<String>) -> Result<UpdateStateView, String> {
+    auth::require_auth(&app, &auth)?;
+
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Could not resolve the app data directory ({e}); nothing was changed."))?;
+
+    let version = app.package_info().version.to_string();
+    let window = update::open(&app_data_dir, &version)?;
+
+    // Arm the recovery before standing anything down. If this fails the window
+    // is still openable — an update that can't be undone by a timer is a
+    // choice the user is allowed to make — but they are told, and the UI says
+    // so rather than quietly implying a safety net that isn't there.
+    let recovery_armed = match std::env::current_exe() {
+        Ok(exe) => match update::schedule_recovery(&exe, window.expires_at) {
+            Ok(()) => true,
+            Err(e) => {
+                log::warn!("update: could not arm the expiry recovery task: {e}");
+                false
+            }
+        },
+        Err(e) => {
+            log::warn!("update: could not resolve our own exe path for recovery: {e}");
+            false
+        }
+    };
+
+    // Now stand the resurrection guards down on both sides.
+    watchdog::request_update_standdown(&update::path_in(&app_data_dir));
+
+    // Stop the in-process DNS resolver and hand the adapters back their real
+    // upstreams. Without this the machine would be pointed at a resolver that
+    // is about to exit — the same reasoning as `perform_uninstall`, and the
+    // guardian repeats it as its own last act.
+    if let Some(dns) = app.try_state::<Arc<dns_filter::DnsFilterState>>() {
+        dns.disable();
+    }
+
+    kill_native_hosts();
+
+    log::warn!(
+        "update window opened (expires in {}s, recovery {}) — watchdog standing down, app closing",
+        update::WINDOW_SECS,
+        if recovery_armed { "armed" } else { "NOT armed" }
+    );
+    log_event(
+        &app,
+        "update_started",
+        serde_json::json!({
+            "from_version": version,
+            "window_secs": update::WINDOW_SECS,
+            "recovery_armed": recovery_armed,
+        }),
+    );
+
+    let view = update_state_view(&app, recovery_armed);
+
+    // Same 2-second grace as the uninstall path: long enough for this reply to
+    // reach the webview and for the UI to say what is about to happen.
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(2000));
+        app2.exit(0);
+    });
+
+    Ok(view)
+}
+
+/// Close an open update window without updating: clear the file, drop the
+/// sentinel, disarm the recovery task. Ungated — re-arming the guards early is
+/// a strengthening, and nothing that makes protection stronger has ever needed
+/// the password (see auth.rs's module doc).
+///
+/// Mostly reachable in one narrow case, since `begin_update` closes the app:
+/// the user changed their mind in the two seconds before it did. It also runs
+/// on startup, which is the path that actually matters.
+#[tauri::command]
+fn cancel_update(app: AppHandle) -> Result<UpdateStateView, String> {
+    if let Ok(d) = app.path().app_data_dir() {
+        update::clear(&d);
+    }
+    watchdog::clear_update_standdown();
+    update::cancel_recovery();
+    log::info!("update window cancelled — guards re-armed");
+    Ok(update_state_view(&app, false))
+}
+
+// ============================================================================
 // Entry point
 // ============================================================================
 
@@ -4094,6 +4689,10 @@ pub fn run() {
         .manage(NsfwState::default())
         .manage(MonitorState::default())
         .manage(Arc::new(overlay::OverlayState::default()))
+        // Restore windows are deliberately in-memory only: a grace window is a
+        // supervised 20 seconds, and one that survived a restart would be a
+        // pass the user could bank by closing the app.
+        .manage(Arc::new(browser_lock::BrowserLockState::default()))
         .invoke_handler(tauri::generate_handler![
             get_extension_stats,
             get_extension_blocklists,
@@ -4119,6 +4718,9 @@ pub fn run() {
             open_external,
             set_app_streak,
             enforce_extension,
+            open_extensions_page,
+            set_browser_lock_enabled,
+            request_browser_restore,
             request_elevated_setup,
             request_sync,
             update_blocklist_domains,
@@ -4144,6 +4746,9 @@ pub fn run() {
             reset_uninstall_timer,
             cancel_uninstall,
             complete_uninstall,
+            get_update_state,
+            begin_update,
+            cancel_update,
             take_panic_pending,
             get_auth_status,
             verify_master_password,
@@ -4277,6 +4882,19 @@ pub fn run() {
             // so a release build can verify the cool-off before honoring the
             // shutdown sentinel, and so the guardian can be told the same path.
             watchdog::set_uninstall_json_path(udd.join("uninstall.json"));
+
+            // Consume any update window (see `update.rs`). This instance is up
+            // and holding the main mutex, so whatever the window was for is
+            // over: either the installer finished and launched this build, or
+            // it never ran and the recovery task brought the old one back.
+            // Either way the guards belong back on, and the one-shot recovery
+            // task has done its job or is no longer needed.
+            //
+            // `init_main()` already dropped the sentinel — it had to, since the
+            // guard loop starts there — so this is the other half: the window
+            // file itself, and the scheduled task.
+            update::clear(&udd);
+            update::cancel_recovery();
 
             // Generalized friction store (4.1/4.3) + backend-owned settings
             // (A.3 seed). `friction::FrictionStore::load` migrates a legacy
@@ -4423,6 +5041,14 @@ pub fn run() {
                                 state2.lock().unwrap().guard_enabled = false;
                                 settings2.update(|s| s.guard_enabled = false);
                                 log::warn!("friction: uninstall guard disabled (weakening applied)");
+                            } else if action_id == "browser_lock.disable" {
+                                settings2.update(|s| s.lock_unverified_browsers = false);
+                                if let Some(locks) =
+                                    app2.try_state::<Arc<browser_lock::BrowserLockState>>()
+                                {
+                                    locks.clear_all();
+                                }
+                                log::warn!("friction: browser lock disabled (weakening applied)");
                             } else if action_id == "monitor.disable" {
                                 if let Some(monitor) = app2.try_state::<MonitorState>() {
                                     monitor.running.store(false, Ordering::SeqCst);

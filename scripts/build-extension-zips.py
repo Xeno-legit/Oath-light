@@ -72,6 +72,33 @@ FIXED_MODE = 0o644 << 16  # -rw-r--r--, shifted into the high half of external_a
 UNIX = 3  # ZipInfo.create_system — pin it so Windows and Linux agree
 
 
+# Design-system files the extension carries as verbatim copies:
+# design-system/<source> -> extension/<copy>. The authoritative list for ALL
+# surfaces is scripts/design-system-copies.mjs; only the extension's rows are
+# repeated here so a store build can assert them without shelling out to node.
+# A stale copy here means shipping last month's copy to users — exactly the
+# class of "newer in the repo than in the zip" bug this script exists to stop.
+DESIGN_SYSTEM_COPIES = [
+    ("strings.js", "strings.js"),
+    ("locales/ar.js", "locales/ar.js"),
+    ("tokens.css", "popup_assets/tokens.css"),
+    ("tokens.css", "blocklist_assets/tokens.css"),
+]
+
+
+def stale_design_system_copies() -> list[str]:
+    """Extension copies that differ from their design-system source."""
+    stale = []
+    for source_rel, copy_rel in DESIGN_SYSTEM_COPIES:
+        source = REPO / "design-system" / source_rel
+        copy = SRC / copy_rel
+        if not source.is_file():
+            continue  # the node-side gate owns "source is missing"
+        if not copy.is_file() or copy.read_bytes() != source.read_bytes():
+            stale.append(f"extension/{copy_rel}")
+    return stale
+
+
 def included_files() -> list[pathlib.Path]:
     """Every file that belongs in a zip, in a stable sorted order."""
     out = []
@@ -170,6 +197,18 @@ def main() -> int:
 
     if not SRC.is_dir():
         print(f"error: no extension/ directory at {SRC}", file=sys.stderr)
+        return 1
+
+    stale = stale_design_system_copies()
+    if stale:
+        print("error: extension copies of the design system are stale:", file=sys.stderr)
+        for rel in stale:
+            print(f"       - {rel}", file=sys.stderr)
+        print(
+            "       run `node scripts/sync-design-system.mjs` and rebuild "
+            "(edit design-system/, never the copy)",
+            file=sys.stderr,
+        )
         return 1
 
     chrome_manifest = (SRC / "manifest.json").read_text(encoding="utf-8")

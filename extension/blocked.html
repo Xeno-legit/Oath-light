@@ -206,9 +206,16 @@
   </style>
 </head>
 <body>
-  <!-- animated background (orbs / waves / particles / stars / ripple / smoke) — built by blocked.js -->
+  <!-- Static ground. Nothing is built in JS any more and nothing animates:
+       each layer paints one --ground-* token, and a look that doesn't set a
+       given token leaves that layer resolving to `none`. See the GROUND
+       section of blocklist_assets/desktop.css. -->
   <div class="bg" aria-hidden="true">
-    <div class="bg-veil"></div>
+    <i class="bg-pattern"></i>
+    <i class="bg-field"></i>
+    <i class="bg-glow"></i>
+    <i class="bg-grain"></i>
+    <i class="bg-vignette"></i>
   </div>
 
   <div class="blocked-card">

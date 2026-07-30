@@ -7,15 +7,17 @@ body {
   overflow-y: auto;            /* override desktop styles' overflow:hidden */
   display: flex;
   flex-direction: column;
-  background: var(--desktop);  /* atmospheric gradient from the theme tokens */
+  background: var(--bg-0);
 }
 
-/* ambient background orbs */
+/* Ground. Two 500px accent orbs at blur(85px) used to sit here — the same
+   atmosphere the desktop app and the popup carried, removed everywhere for
+   the same reason. This page is a long scrolling list, which is exactly the
+   surface where a pair of blurred blobs behind the text buys nothing and
+   costs a composited layer on every scroll frame.
+   The grain comes from desktop.css, which this file is loaded after. */
 .bg-layer { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
-.bg-layer .orb { position: absolute; border-radius: 50%; filter: blur(85px); opacity: .5; }
-.bg-layer .orb.a { width: 560px; height: 560px; top: -180px; right: -120px; background: radial-gradient(circle, var(--orb-a), transparent 70%); }
-.bg-layer .orb.b { width: 480px; height: 480px; bottom: -160px; left: -140px; background: radial-gradient(circle, var(--orb-c), transparent 70%); }
-[data-theme="light"] .bg-layer .orb { opacity: .4; mix-blend-mode: multiply; }
+.bg-layer > i { position: absolute; inset: 0; display: block; }
 
 /* navbar (head) */
 .navbar {

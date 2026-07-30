@@ -8,26 +8,6 @@
    tokens.css (linked before this file in blocked.html / user_blocklist.html)
    — the previous locally-duplicated font subsets were removed from here. */
 
-/* ---------- LOGO SPIN ANIMATION ---------- */
-@keyframes logo-spin-fwd {
-  0%   { transform: rotate(0deg); }
-  100% { transform: rotate(270deg); }
-}
-@keyframes logo-spring-back {
-  0%   { transform: rotate(270deg); }
-  55%  { transform: rotate(-22deg); }
-  75%  { transform: rotate(10deg); }
-  88%  { transform: rotate(-5deg); }
-  95%  { transform: rotate(2deg); }
-  100% { transform: rotate(0deg); }
-}
-.logo-img {
-  transform-origin: center;
-  cursor: default;
-}
-.logo-spin-fwd  { animation: logo-spin-fwd    0.38s var(--ol-ease-standard) forwards; }
-.logo-spin-back { animation: logo-spring-back  0.6s  var(--ol-ease-standard) forwards; }
-
 :root {
   --font-ui: var(--ol-font-ui);
 
@@ -41,63 +21,62 @@
      renders the label invisible. */
   --accent-ink: #ffffff;
 
-  --intensity: 0.7;             /* 0..1, driven from tweak (0..10)/10 */
   --ease: var(--ol-ease-spring);     /* cubic-bezier(.22,.61,.36,1), exact match */
   --ease-soft: var(--ol-ease-standard); /* cubic-bezier(.4,0,.2,1), exact match */
 
   --sidebar-w: 248px;
 }
 
-/* ---------- NEUTRAL + ACCENT TOKENS PER THEME/STYLE ---------- */
+/* ---------- LOCAL ALIASES ONTO THE DESIGN SYSTEM ----------
+   One block per theme side. There used to be THREE rules per side, written at
+   three different times, each silently overriding the last: the palette-era
+   block, the Noir block that replaced it, and a trailing one-liner for
+   --desktop. What survived that stack was not what anyone had chosen — light
+   mode kept its aurora-era violet shadows (nothing overrode them) and a
+   --glass-brd of rgba(255,255,255,.7), i.e. a white hairline on a #fafafa
+   page, which is no border at all.
 
-/* DARK base neutrals (tinted per style hue) */
+   Everything here now aliases a tokens.css value, with two deliberate
+   exceptions kept literal because the design system does not model them:
+   --glass (a translucency, not a colour) and --orb-* (decorative background
+   hues). */
+
 [data-theme="dark"] {
+  --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1);
+  --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
+  --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
+  --accent-ink: var(--ol-accent-ink);
+
   --shadow: var(--ol-shadow-md);
   --shadow-sm: var(--ol-shadow-sm);
+  /* Panels lift off a dark page by being lighter than it. */
   --glass: rgba(255,255,255,.045);
   --glass-2: rgba(255,255,255,.07);
   --glass-brd: var(--ol-border);
   --glass-brd-strong: var(--ol-border-strong);
-  --desktop: radial-gradient(120% 120% at 80% -10%, #241b35 0%, #14101f 55%, #0c0913 100%);
+
+  --desktop: radial-gradient(120% 120% at 80% -10%, var(--ol-bg-2) 0%, #0e0e0e 55%, #050505 100%);
 }
+
 [data-theme="light"] {
-  /* shadow/glass here are aurora-era violet tints shared across every style
-     variant (not just aurora) — left hardcoded, no exact --ol- match */
-  --shadow: 0 30px 70px -30px rgba(60,40,90,.28), 0 2px 10px -4px rgba(60,40,90,.12);
-  --shadow-sm: 0 10px 28px -16px rgba(60,40,90,.22);
-  --glass: rgba(255,255,255,.55);
-  --glass-2: rgba(255,255,255,.78);
-  --glass-brd: rgba(255,255,255,.7);
-  --glass-brd-strong: rgba(120,90,160,.18);
-  --desktop: radial-gradient(120% 120% at 80% -10%, #eee7f6 0%, #e7e2f3 55%, #ddd8ee 100%);
-}
-
-
-
-
-
-
-
-/* ---- NOIR (black & white — pure monochrome) ---- */
-/* NOIR is the design system default — wired straight to tokens.css so
-   editing tokens.css (via preview.html) re-skins this preset. No
-   --ol-orb-* tokens exist, so the orb triplet maps to the accent
-   triplet, the closest conceptual equivalent. */
-[data-theme="dark"] {
-  --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1); --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
+  --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1);
+  --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
   --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
   --accent-ink: var(--ol-accent-ink);
-  --orb-a: var(--ol-accent); --orb-b: var(--ol-accent-2); --orb-c: var(--ol-accent-3);
-}
-[data-theme="light"] {
-  --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1); --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
-  --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
-  --accent-ink: var(--ol-accent-ink);
-  --orb-a: var(--ol-accent); --orb-b: var(--ol-accent-2); --orb-c: var(--ol-accent-3);
-}
 
-[data-theme="dark"]     { --desktop: radial-gradient(120% 120% at 80% -10%, #1a1a1a 0%, #0e0e0e 55%, #050505 100%); }
-[data-theme="light"]    { --desktop: radial-gradient(120% 120% at 80% -10%, #f0f0f0 0%, #e8e8e8 55%, #dedede 100%); }
+  --shadow: var(--ol-shadow-md);
+  --shadow-sm: var(--ol-shadow-sm);
+  /* And off a light page by being whiter than it — same elevation direction,
+     opposite sign of translucency. The BORDERS, though, are tokens.css's dark
+     hairlines: a white border on white was the light-mode twin of the
+     white-on-white text bug. */
+  --glass: rgba(255,255,255,.72);
+  --glass-2: rgba(255,255,255,.9);
+  --glass-brd: var(--ol-border);
+  --glass-brd-strong: var(--ol-border-strong);
+
+  --desktop: radial-gradient(120% 120% at 80% -10%, var(--ol-bg-2) 0%, var(--ol-bg-3) 55%, #dedede 100%);
+}
 
 /* ============================================================
    RESET / BASE
@@ -122,155 +101,83 @@ input, textarea { font-family: inherit; }
 .scroll::-webkit-scrollbar-thumb:hover { background: color-mix(in oklab, var(--text) 28%, transparent); background-clip: padding-box; }
 
 /* ============================================================
-   WINDOW (desktop app frame)
-   ============================================================ */
-#root { width: 100%; height: 100%; }
-.window {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  background: var(--bg-0);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  transition: background .6s var(--ease-soft);
-  animation: window-in .6s var(--ease) both;
-}
-@keyframes window-in { from { opacity: .4; } to { opacity: 1; } }
+   GROUND — the static field behind the page
+   ============================================================
+   The mirror of the desktop renderer's GROUND section (styles.css). What
+   used to be here was a copy of the desktop atmosphere — orbs, waves,
+   stars, ripples, smoke, particles — all of it removed for the same reason:
+   ambient motion carries no information and this product exists to argue
+   against idle stimulation.
 
-/* titlebar */
-.titlebar {
-  position: relative; z-index: 6;
-  height: 46px; flex: 0 0 46px;
-  display: flex; align-items: center; gap: 0;
-  padding: 0 0 0 16px;
-  border-bottom: 1px solid var(--glass-brd);
-  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
-}
-.tl-brand { display: flex; align-items: center; gap: 9px; }
-.tl-logo { display: grid; place-items: center; }
-.tl-logo img { display: block; }
-.tl-title { font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing:.01em; }
+   The blocked page in particular had no business running a hundred
+   animations. It is shown to someone at the exact moment they are trying
+   to stop, and a drifting lava lamp is precisely the wrong thing to put
+   in front of them.
 
-/* window controls (minimize / maximize / close) */
-.win-ctrls { display: flex; align-self: stretch; margin-inline-start: auto; }
-.win-btn {
-  width: 46px; align-self: stretch;
-  display: grid; place-items: center;
-  color: var(--muted);
-  transition: background .15s var(--ease), color .15s var(--ease);
-}
-.win-btn:hover { background: var(--glass-2); color: var(--text); }
-.win-btn.win-close:hover { background: #e81123; color: #fff; }
-.win-btn svg { width: 15px; height: 15px; stroke: currentColor; stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.tl-status { margin-inline-start:auto; display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:600; color: var(--text-2); padding: 5px 11px; border-radius: var(--ol-radius-pill); background: var(--glass); border:1px solid var(--glass-brd); }
-.tl-status .dot { width:8px; height:8px; border-radius:50%; background: var(--accent-2); box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent-2) 70%, transparent); animation: pulse 2.6s var(--ease-soft) infinite; }
-@keyframes pulse { 0%{ box-shadow:0 0 0 0 color-mix(in oklab, var(--accent-2) 55%, transparent);} 70%{ box-shadow:0 0 0 8px transparent;} 100%{ box-shadow:0 0 0 0 transparent;} }
-
-/* main body split */
-.body { position: relative; z-index: 2; flex: 1; display: flex; min-height: 0; }
-
-/* ============================================================
-   ANIMATED BACKGROUND (inside window)
+   `data-look` is set by blocked.js from the value the desktop app broadcasts,
+   so the block screen wears whatever look the app is wearing.
    ============================================================ */
 .bg { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
-.bg-orb { position: absolute; border-radius: 50%; filter: blur(70px); opacity: calc(.55 * var(--intensity)); mix-blend-mode: screen; }
-[data-theme="light"] .bg-orb { mix-blend-mode: multiply; opacity: calc(.5 * var(--intensity)); filter: blur(64px); }
-.bg-orb.o1 { width: 46%; aspect-ratio:1; left:-8%; top:-12%; background: radial-gradient(circle at 30% 30%, var(--orb-a), transparent 70%); animation: drift1 calc(34s / max(.35,var(--intensity))) var(--ease-soft) infinite alternate; }
-.bg-orb.o2 { width: 52%; aspect-ratio:1; right:-12%; top:6%; background: radial-gradient(circle at 60% 40%, var(--orb-b), transparent 70%); animation: drift2 calc(42s / max(.35,var(--intensity))) var(--ease-soft) infinite alternate; }
-.bg-orb.o3 { width: 40%; aspect-ratio:1; left:24%; bottom:-18%; background: radial-gradient(circle at 50% 50%, var(--orb-c), transparent 70%); animation: drift3 calc(38s / max(.35,var(--intensity))) var(--ease-soft) infinite alternate; }
-@keyframes drift1 { from{ transform: translate(0,0) scale(1);} to{ transform: translate(18%,12%) scale(1.12);} }
-@keyframes drift2 { from{ transform: translate(0,0) scale(1.05);} to{ transform: translate(-14%,16%) scale(.95);} }
-@keyframes drift3 { from{ transform: translate(0,0) scale(1);} to{ transform: translate(10%,-12%) scale(1.1);} }
+.bg > i { position: absolute; inset: 0; display: block; }
 
-/* waves */
-.bg-waves { position:absolute; left:0; right:0; bottom:0; height: 60%; opacity: calc(.5 * var(--intensity)); }
-.bg-waves svg { position:absolute; bottom:0; width: 200%; height: 100%; }
-.bg-waves .w1 { animation: wave 26s linear infinite; opacity:.55; }
-.bg-waves .w2 { animation: wave 38s linear infinite reverse; opacity:.4; }
-.bg-waves .w3 { animation: wave 52s linear infinite; opacity:.28; }
-@keyframes wave { from{ transform: translateX(0);} to{ transform: translateX(-50%);} }
-
-/* stars twinkle */
-@keyframes twinkle { 0%,100%{ opacity: var(--op, .4); transform: scale(1); } 50%{ opacity: calc(var(--op, .4) * .2); transform: scale(.6); } }
-
-/* ripple rings */
-.bg-ripple {
-  position: absolute; border-radius: 50%;
-  width: 600px; height: 600px;
-  left: 50%; top: 50%; transform: translate(-50%,-50%) scale(0);
-  border: 1.5px solid var(--accent);
-  animation: ripple-out 7.2s var(--ease-soft) infinite;
-  pointer-events: none;
+.bg-pattern { background-image: var(--ground-pattern, none); background-size: var(--ground-pattern-size, auto); }
+.bg-field   { background: var(--ground-field, none); }
+.bg-glow    { background: var(--ground-glow, none); }
+.bg-grain   {
+  background-image: var(--ground-grain, none);
+  mix-blend-mode: var(--ground-grain-blend, overlay);
+  opacity: var(--ground-grain-opacity, .5);
 }
-@keyframes ripple-out { 0%{ transform: translate(-50%,-50%) scale(0); opacity: .7; } 100%{ transform: translate(-50%,-50%) scale(3.2); opacity: 0; } }
+.bg-vignette { background: var(--ground-vignette, none); }
 
-/* smoke drift */
-@keyframes smoke-drift { 0%{ transform: translateY(0) scale(1); opacity: 0; } 15%{ opacity: 1; } 80%{ opacity: .6; } 100%{ transform: translateY(-70vh) scale(1.4); opacity: 0; } }
+[data-theme="light"] { --ground-grain-blend: multiply; --ground-grain-opacity: .34; }
 
-/* particles */
-.bg-particle { position:absolute; border-radius:50%; background: var(--accent); opacity: calc(.5 * var(--intensity)); animation: rise linear infinite; }
-@keyframes rise { 0%{ transform: translateY(0) translateX(0); opacity:0;} 12%{ opacity: calc(.5*var(--intensity)); } 100%{ transform: translateY(-120vh) translateX(20px); opacity:0;} }
+/* — Quiet — */
+[data-look="matte"], [data-look="halo"], [data-look="field"], [data-look="theatre"], [data-look="studio"] {
+  --ground-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.42'/%3E%3C/svg%3E");
+}
+[data-look="halo"]    { --ground-glow: radial-gradient(90% 62% at 50% -14%, color-mix(in oklab, var(--accent) 9%, transparent) 0%, transparent 62%); }
+[data-look="field"]   { --ground-field: linear-gradient(168deg, color-mix(in oklab, var(--ol-bg-2) 85%, transparent) 0%, transparent 58%); }
+[data-look="theatre"] { --ground-vignette: radial-gradient(122% 104% at 50% 38%, transparent 40%, var(--ol-ground-edge) 100%); }
 
-/* vignette to keep content legible over bg */
-.bg-veil { position:absolute; inset:0; background: linear-gradient(180deg, color-mix(in oklab, var(--bg-0) 30%, transparent), color-mix(in oklab, var(--bg-0) 12%, transparent)); }
+/* — Structured — */
+[data-look="slate"], [data-look="studio"], [data-look="drafting"] {
+  --card-fill: var(--ol-bg-2); --card-fill-hover: var(--ol-bg-3);
+}
+[data-look="drafting"] {
+  --ground-pattern: radial-gradient(var(--ol-ground-dot) 1px, transparent 1px);
+  --ground-pattern-size: 23px 23px;
+  --card-shadow: none; --card-radius: var(--r-sm);
+}
+[data-look="paper"] { --card-shadow: none; --card-radius: var(--r-sm); }
+
+/* — Textured — */
+[data-look="cloth"] {
+  --ground-pattern:
+    repeating-linear-gradient(45deg,  var(--ol-ground-thread) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(-45deg, var(--ol-ground-thread) 0 1px, transparent 1px 5px);
+}
+[data-look="contour"] {
+  --ground-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='420'%3E%3Cg fill='none' stroke='%23808080' stroke-width='1' opacity='.5'%3E%3Cpath d='M-40 300c80-70 150-30 220-90s150-40 260-120'/%3E%3Cpath d='M-40 350c90-70 160-28 230-92s150-44 270-124'/%3E%3Cpath d='M-40 250c70-66 140-32 210-88s150-36 250-116'/%3E%3Cpath d='M-40 200c60-60 130-34 200-86s150-32 240-112'/%3E%3Cpath d='M-40 150c50-56 120-36 190-84s150-28 230-108'/%3E%3Cpath d='M-40 100c40-50 110-38 180-82s150-24 220-104'/%3E%3Cpath d='M-40 400c100-72 170-24 240-94s150-48 280-128'/%3E%3C/g%3E%3C/svg%3E");
+  --ground-pattern-size: 420px 420px;
+}
+[data-look="engrave"] {
+  --ground-pattern: repeating-radial-gradient(circle at 50% 34%, transparent 0 6px, var(--ol-ground-thread) 6px 7px);
+}
+[data-look="halftone"] {
+  --ground-pattern:
+    radial-gradient(var(--ol-ground-dot) 1.6px, transparent 1.7px),
+    radial-gradient(var(--ol-ground-dot) .8px, transparent .9px);
+  --ground-pattern-size: 26px 26px, 13px 13px;
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .bg-orb, .bg-waves .w1, .bg-waves .w2, .bg-waves .w3, .bg-particle, .window { animation: none !important; }
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
 }
-
-/* ============================================================
-   SIDEBAR
-   ============================================================ */
-.sidebar {
-  position: relative; z-index: 3;
-  width: var(--sidebar-w); flex: 0 0 var(--sidebar-w);
-  display: flex; flex-direction: column;
-  padding: 18px 14px;
-  border-inline-end: 1px solid var(--glass-brd);
-  background: var(--glass);
-  -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
-}
-.brand { display:flex; align-items:center; gap:11px; padding: 8px 8px 18px; cursor:pointer; }
-.brand-logo {
-  width: 42px; height: 42px; border-radius: 12px; flex:0 0 42px;
-  display:grid; place-items:center;
-  background: transparent;
-  position: relative; overflow:hidden;
-  transition: background 0.2s var(--ease);
-}
-[data-theme="light"] .brand-logo {
-  background: #1e1830;
-  box-shadow: 0 2px 8px -2px rgba(30,24,48,.28);
-}
-.brand-logo svg { width:21px; height:21px; }
-.brand-name { font-size: 17px; font-weight: 800; letter-spacing:-.02em; line-height:1; white-space: nowrap; }
-.brand-name span { font-family: var(--font-ui); font-weight: 800; font-style: normal; font-size: 18px; }
-.brand-sub { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing:.04em; text-transform: uppercase; margin-top:3px; }
-
-.nav { display:flex; flex-direction:column; gap:3px; margin-top: 4px; }
-.nav-label { font-size:10.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color: var(--muted); padding: 14px 12px 7px; }
-.nav-item {
-  display:flex; align-items:center; gap:12px;
-  padding: 10px 12px; border-radius: 12px;
-  font-size: 14px; font-weight: 600; color: var(--text-2);
-  position: relative; transition: background .18s, color .18s, transform .12s;
-  width:100%; text-align:start;
-}
-.nav-item svg { width:19px; height:19px; opacity:.85; flex:0 0 19px; }
-.nav-item:hover { background: var(--glass-2); color: var(--text); }
-.nav-item.active { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--text); }
-.nav-item.active::before { content:''; position:absolute; inset-inline-start:-14px; top:50%; transform: translateY(-50%); width:4px; height: 20px; border-start-end-radius: 4px; border-end-end-radius: 4px; background: linear-gradient(var(--accent), var(--accent-2)); }
-.nav-item.active svg { opacity:1; color: var(--accent); }
-.nav-badge { margin-inline-start:auto; font-size:11px; font-weight:700; background: var(--glass-2); padding: 2px 8px; border-radius:var(--ol-radius-pill); color: var(--text-2); }
-
-.sidebar-foot { margin-top:auto; }
-.user-card { display:flex; align-items:center; gap:11px; padding:9px 10px; border-radius:14px; cursor:pointer; transition: background .18s; border:1px solid transparent; }
-.user-card:hover { background: var(--glass-2); border-color: var(--glass-brd); }
-.avatar { width:34px; height:34px; border-radius:50%; flex:0 0 34px; background: linear-gradient(135deg, var(--accent-3), var(--accent-2)); display:grid; place-items:center; font-weight:800; font-size:13px; color: var(--accent-ink); }
-.user-meta { line-height:1.2; min-width:0; }
-.user-meta b { font-size:13px; font-weight:700; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.user-meta span { font-size:11.5px; color: var(--muted); }
 
 /* ============================================================
    CONTENT AREA
@@ -285,16 +192,20 @@ input, textarea { font-family: inherit; }
 .page-sub { font-size: 15.5px; color: var(--muted); margin-top: 9px; max-width: 56ch; line-height:1.55; }
 
 /* ============================================================
-   GLASS PRIMITIVES
+   SURFACE PRIMITIVES
+   (was "GLASS PRIMITIVES" — there is no glass on this page any more)
    ============================================================ */
+/* Opaque. The backdrop-filter here blurred the orbs behind it, which is
+   where a card's edge came from; with the orbs gone it would have been
+   blurring a flat colour at full cost for nothing. The lift comes from
+   --card-shadow, whose default carries the 1px lit top edge inside it. */
 .card {
-  background: var(--glass); border: 1px solid var(--glass-brd);
-  border-radius: var(--r-lg); padding: 22px;
-  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
-  box-shadow: var(--shadow-sm);
+  background: var(--card-fill, var(--bg-1)); border: 1px solid var(--glass-brd);
+  border-radius: var(--card-radius, var(--r-lg)); padding: 22px;
+  box-shadow: var(--card-shadow, var(--shadow-sm), inset 0 1px 0 var(--ol-hairline));
   transition: transform .25s var(--ease), border-color .25s, background .25s;
 }
-.card.hover:hover { transform: translateY(-3px); border-color: var(--glass-brd-strong); background: var(--glass-2); }
+.card.hover:hover { transform: translateY(-3px); border-color: var(--glass-brd-strong); background: var(--card-fill-hover, var(--ol-bg-2)); }
 .grid { display:grid; gap: 18px; }
 .row { display:flex; align-items:center; gap: 14px; }
 .spread { display:flex; align-items:center; justify-content:space-between; gap:14px; }
@@ -533,84 +444,6 @@ input, textarea { font-family: inherit; }
 .stagger > *:nth-child(4){ animation-delay:.15s; }
 .stagger > *:nth-child(5){ animation-delay:.2s; }
 .stagger > *:nth-child(6){ animation-delay:.25s; }
-
-/* ============================================================
-   HUB MENU
-   ============================================================ */
-.hub { padding-top: 30px; }
-.hub-hero { text-align: center; padding: 14px 0 6px; }
-.hub-mark {
-  width: 72px; height: 72px; border-radius: 20px; margin: 0 auto;
-  display:grid; place-items:center;
-  background: transparent;
-  animation: float 5s var(--ease-soft) infinite;
-  transition: background 0.2s var(--ease), box-shadow 0.2s var(--ease);
-}
-[data-theme="light"] .hub-mark {
-  background: #1e1830;
-  box-shadow: 0 4px 16px -4px rgba(30,24,48,.32);
-}
-@keyframes float { 0%,100%{ transform: translateY(0);} 50%{ transform: translateY(-7px);} }
-.hub-title { font-size: 42px; font-weight: 800; letter-spacing:-.03em; line-height:1.05; margin: 6px 0 14px; }
-
-.hub-card { text-align: start; display:flex; flex-direction:column; align-items:flex-start; min-height: 188px; padding: 22px; }
-.hub-card-ico { width:46px; height:46px; border-radius:14px; display:grid; place-items:center; background: color-mix(in oklab, var(--accent) 15%, transparent); color: var(--accent); margin-bottom: 16px; transition: transform .25s var(--ease); }
-.hub-card:hover .hub-card-ico { transform: scale(1.08) rotate(-3deg); }
-.hub-card-title { font-size: 18px; font-weight: 800; letter-spacing:-.02em; }
-.hub-card-desc { font-size: 13.5px; color: var(--muted); line-height:1.5; margin-top: 6px; flex:1; }
-.hub-card-foot { display:flex; align-items:center; justify-content:space-between; width:100%; margin-top: 16px; }
-.hub-card-foot .chip { text-transform: capitalize; }
-.hub-arrow { color: var(--muted); transition: transform .22s var(--ease), color .22s; }
-.hub-card:hover .hub-arrow { transform: translateX(4px); color: var(--accent); }
-
-/* ============================================================
-   MENTOR CHAT
-   ============================================================ */
-.chat-card { flex: 1; display: flex; flex-direction: column; padding: 0; overflow: hidden; min-height: 0; }
-.chat-head { display:flex; align-items:center; gap: 11px; padding: 16px 20px; border-bottom: 1px solid var(--glass-brd); }
-.chat-head .avatar { width: 38px; height: 38px; flex:0 0 38px; color: var(--accent-ink); }
-.chat-scroll { flex: 1; overflow-y: auto; padding: 22px 20px 8px; display:flex; flex-direction:column; gap: 16px; min-height: 0; }
-.msg { display:flex; gap: 10px; max-width: 82%; animation: msg-in .4s var(--ease) both; }
-@keyframes msg-in { from { transform: translateY(8px); } to { transform:none; } }
-.msg.user { margin-inline-start:auto; flex-direction: row-reverse; }
-.msg-ava { width:28px; height:28px; flex:0 0 28px; border-radius:50%; display:grid; place-items:center; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--accent-ink); margin-top: 2px; }
-.bubble { padding: 13px 16px; border-radius: 18px; font-size: 14.5px; line-height: 1.55; }
-.msg.mentor .bubble { background: var(--glass-2); border: 1px solid var(--glass-brd); border-top-left-radius: 6px; color: var(--text); }
-.msg.user .bubble { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--accent-ink); border-top-right-radius: 6px; }
-.bubble.typing { display:flex; gap:5px; align-items:center; padding: 16px; }
-.bubble.typing span { width:7px; height:7px; border-radius:50%; background: var(--muted); animation: blink 1.3s infinite; }
-.bubble.typing span:nth-child(2){ animation-delay:.2s; } .bubble.typing span:nth-child(3){ animation-delay:.4s; }
-@keyframes blink { 0%,60%,100%{ opacity:.25; transform: translateY(0);} 30%{ opacity:1; transform: translateY(-3px);} }
-.chat-prompts { display:flex; flex-wrap:wrap; gap: 8px; padding: 4px 20px 14px; }
-.prompt-chip { cursor:pointer; transition: border-color .18s, color .18s, background .18s; }
-.prompt-chip:hover { border-color: var(--accent); color: var(--accent); }
-.chat-input { display:flex; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--glass-brd); }
-.chat-send { padding: 0 16px; flex:0 0 auto; }
-.chat-send:disabled { opacity:.45; cursor:not-allowed; }
-
-/* ============================================================
-   TIPS / PROTOCOLS
-   ============================================================ */
-.protocol { cursor:pointer; align-self:flex-start; transition: border-color .2s, transform .2s; }
-.protocol:hover { border-color: var(--glass-brd-strong); }
-.protocol-ico { width:42px; height:42px; flex:0 0 42px; border-radius:13px; display:grid; place-items:center; }
-.protocol-body { overflow:hidden; transition: max-height .35s var(--ease); }
-.protocol-body p { font-size:14px; color: var(--text-2); line-height:1.6; padding-top: 14px; }
-
-/* ============================================================
-   THEMES PAGE
-   ============================================================ */
-.style-card, .bg-card { cursor:pointer; text-align:start; align-items:flex-start; }
-.style-card.sel, .bg-card.sel { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 35%, transparent), var(--shadow-sm); }
-.style-swatch { width:100%; height:64px; border-radius:14px; position:relative; }
-.style-check { position:absolute; top:8px; inset-inline-end:8px; width:26px; height:26px; border-radius:50%; background:#fff; color: var(--accent); display:grid; place-items:center; box-shadow: 0 3px 8px rgba(0,0,0,.25); }
-.bg-card-ico { width:40px; height:40px; flex:0 0 40px; border-radius:12px; display:grid; place-items:center; background: color-mix(in oklab, var(--accent) 14%, transparent); color: var(--accent); }
-
-/* ============================================================
-   SETTINGS — fields
-   ============================================================ */
-.field { display:flex; flex-direction:column; gap:7px; }
-.field > span { font-size:13px; font-weight:700; color: var(--text-2); }
 
 /* ==========================================================================
  * RTL — what logical properties can't express

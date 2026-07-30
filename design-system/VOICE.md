@@ -18,7 +18,7 @@ essentially the current app's voice, cleaned up: it already trends this way,
 so most `companion` entries are the real existing copy with the explanatory/
 map-revealing bits removed (see Hard Content Rules below).
 
-### Serious ("Drill Sergeant")
+### Serious ("Coach")
 
 Short, imperative, commanding. Direct address. No cushioning, no
 exclamation-point cheerleading, no insults. This is **not** a meaner version

@@ -13,9 +13,66 @@
 | :-- | :-- | :-- |
 | Chrome Web Store | **Live** (submitted 2026-07-19, approved 2026-07-22) | `oigdpcdgmldgjalfnlgekcbkmniplnad` — [listing](https://chromewebstore.google.com/detail/oigdpcdgmldgjalfnlgekcbkmniplnad) |
 | Firefox AMO | **Live** | [oath-light-content-filter](https://addons.mozilla.org/en-GB/firefox/addon/oath-light-content-filter/) |
-| Microsoft Edge Add-ons | **Deliberately skipped** | Edge users install from the Chrome Web Store; force-install targets it too |
+| Microsoft Edge Add-ons | **Required, not yet submitted** | The only way Edge can be force-installed — see below |
 | Opera Add-ons | Optional, not submitted | Same Chromium zip if ever wanted |
 | Safari | Ruled out | Cost/effort, and no `nativeMessaging` |
+
+### Edge cannot be force-installed from the Chrome Web Store
+
+This row used to read *"deliberately skipped — Edge users install from the Chrome
+Web Store; force-install targets it too."* **The second half was false**, and it
+is why the extension never appeared in Edge. Microsoft's own
+[`ExtensionInstallForcelist` documentation](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies/extensioninstallforcelist)
+says it outright:
+
+> For Windows instances not joined to a Microsoft Active Directory domain,
+> forced installation is limited to apps and extensions listed in the Microsoft
+> Edge Add-ons website.
+
+Every Oath Light user is on an unjoined consumer PC, so Edge accepts our
+forcelist entry as *policy* and then discards it. There is no error, no
+`edge://extensions` entry, and nothing in any log the user can reach — verified
+against Edge 150 with `--enable-logging --v=1`, where our ID never appears at
+all while other force-installs in the same session fetch normally. No
+combination of `ExtensionInstallSources`, `ExtensionInstallAllowlist` or
+elevation changes this; the restriction is on the *store*, not on permissions.
+
+Manual install from the Chrome Web Store still works in Edge (it prompts to
+allow other stores), so Edge users are not locked out — they just cannot be
+*locked in*, which for this app is the point.
+
+#### The fallback that does work: auto-install, not force-install
+
+The restriction is on **forced** installation only. Chromium's
+external-extensions registry — a subkey named after the extension ID under
+`HKCU\Software\Microsoft\Edge\Extensions` holding an `update_url` — is a
+different mechanism, and Edge honours it for Chrome-Web-Store extensions on an
+unmanaged machine. Verified end to end against Edge 150: it queries CWS with
+`installedby=external`, downloads `OIGDPCDGMLDGJALFNLGEKCBKMNIPLNAD_3_5_0_0.crx`,
+unpacks it, and registers Oath Light 3.5.0 in the profile. Third-party
+installers (Acrobat, Grammarly) already use this path; it needs no admin.
+
+It stops one step short of running. Chromium leaves an externally-registered
+extension **disabled** until the user acknowledges the "new extension added"
+prompt once — measured as `disable_reasons: 8192, location: 6`, **identical for
+an unrelated control extension with no policy of ours anywhere near it**, so it
+is the generic sideload protection and not something our configuration causes.
+That acknowledgement lives in HMAC-signed `Secure Preferences`; it is a browser
+security control and we do not forge it. The user can also remove the extension
+afterwards and Chromium remembers that in `external_uninstalls`.
+
+So Edge gets: automatic download, one click to enable, and no lock. Reported as
+`needs_approval` → `auto_installed`, never as "locked". `enforce_external_install`
+in `browsers.rs`. Publishing to Edge Add-ons remains the only way to make Edge a
+real lock.
+
+**To fix it: publish to Microsoft Edge Add-ons, then set
+`EDGE_STORE_EXTENSION_ID` in `browsers.rs` to the item ID.** Nothing else needs
+to change — `forcelist_target()` already prefers that ID and pairs it with
+`EDGE_UPDATE_URL` (`https://edge.microsoft.com/extensionwebstorebase/v1/crx`).
+Until then Edge reports `store_unavailable` and the UI offers a manual install
+instead of claiming a lock it doesn't have. The store zip needs no changes;
+Edge Add-ons takes the same Chromium package.
 
 ### The extension-ID trap (cost us a broken release once)
 

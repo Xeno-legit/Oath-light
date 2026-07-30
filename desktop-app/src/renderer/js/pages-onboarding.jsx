@@ -28,17 +28,17 @@ function StepShell({ step, total, title, sub, children, onBack, onNext, nextLabe
   return (
     <div className="page" style={{ maxWidth: 720, margin: '0 auto' }}>
       <div className="page-head fade-up">
-        <div className="eyebrow">Setup · step {step} of {total}</div>
+        <div className="eyebrow">{PP.t('onboarding.step_eyebrow', { step, total })}</div>
         <h1 className="page-title">{title}</h1>
         {sub && <p className="page-sub">{sub}</p>}
       </div>
       {children}
       <div className="row" style={{ gap: 12, marginTop: 26, alignItems: 'center' }}>
-        {onBack && <button className="btn btn-ghost" onClick={onBack}>Back</button>}
-        <button className="btn btn-primary" onClick={onNext}>{nextLabel || 'Continue'}</button>
+        {onBack && <button className="btn btn-ghost" onClick={onBack}>{PP.t('app.action_back')}</button>}
+        <button className="btn btn-primary" onClick={onNext}>{nextLabel || PP.t('app.action_continue')}</button>
         {onSkip &&
           <button className="btn btn-ghost" style={{ marginInlineStart: 'auto', opacity: .75 }} onClick={onSkip}>
-            Skip setup
+            {PP.t('onboarding.skip_setup')}
           </button>}
       </div>
     </div>
@@ -64,111 +64,85 @@ function OnboardingFlow({ s, PP }) {
   const finish = () => PP.set({ onboarded: true, page: 'home' });
 
   const runTest = () => {
-    if (!available) { setTestState('error'); setTestMsg('The live test needs the desktop app.'); return; }
+    if (!available) { setTestState('error'); setTestMsg(PP.t('onboarding.test_needs_desktop')); return; }
     setTestState('running');
     window.PPNative.checkDomainBlocked(ONBOARD_TEST_DOMAIN).then((res) => {
       // `checkDomainBlocked` resolves null on any failure (see tauri-bridge).
       if (res === null || res === undefined) {
         setTestState('error');
-        setTestMsg("Couldn't reach the blocklist just now. Protection is unaffected — try again from Settings later.");
+        setTestMsg(PP.t('onboarding.test_unreachable'));
         return;
       }
       const blocked = typeof res === 'object' ? !!res.blocked : !!res;
       setTestState(blocked ? 'blocked' : 'open');
     }).catch(() => {
       setTestState('error');
-      setTestMsg("Couldn't run the check just now.");
+      setTestMsg(PP.t('onboarding.test_failed'));
     });
   };
 
   const savePassword = () => {
-    if (!window.PPAuth || pw.length < 6) { setPwMsg('Use at least 6 characters.'); return; }
+    if (!window.PPAuth || pw.length < 6) { setPwMsg(PP.t('onboarding.password_too_short')); return; }
     window.PPAuth.setPassword(null, pw)
-      .then(() => { setPwMsg('Password set.'); setPw(''); })
+      .then(() => { setPwMsg(PP.t('onboarding.password_saved')); setPw(''); })
       .catch((e) => setPwMsg(e && e.message ? e.message : String(e)));
   };
 
   const saveContact = () => {
-    if (!available) { setContactMsg('Available in the desktop app.'); return; }
-    if (!contactName.trim() || !contactEmail.trim()) { setContactMsg('Both a name and an email are needed.'); return; }
+    if (!available) { setContactMsg(PP.t('app.needs_desktop')); return; }
+    if (!contactName.trim() || !contactEmail.trim()) { setContactMsg(PP.t('onboarding.contact_need_both')); return; }
     window.PPNative.setTrustedContact(contactName.trim(), contactEmail.trim(), null)
-      .then(() => setContactMsg('Saved. They will only ever be told that an event happened.'))
+      .then(() => setContactMsg(PP.t('onboarding.contact_saved')))
       .catch((e) => setContactMsg(e && e.message ? e.message : String(e)));
   };
 
-  // Six screens: welcome, voice, preset, hours, extras, test. (Counted wrong
-  // as 5 at first, which showed "step 5 of 5" on two consecutive screens.)
-  const TOTAL = 6;
+  // Five screens: welcome, preset, hours, extras, test. (Counted wrong as 5
+  // when there were six, which showed "step 5 of 5" on two consecutive
+  // screens — so this number is worth keeping honest.)
+  //
+  // There WAS a sixth, second from the front: a Companion/Coach voice picker.
+  // It is gone along with the one in Settings — Serious Mode is the only thing
+  // that changes the app's tone now, and a first-run wizard is the wrong place
+  // to ask about a mode that takes double the cool-off period to undo.
+  const TOTAL = 5;
 
   // ── 1. Welcome ──────────────────────────────────────────────────────────
   if (step === 0) {
     return (
       <StepShell
         step={1} total={TOTAL}
-        title={<React.Fragment>Let's set this up <em style={{ fontFamily: 'Manrope' }}>properly</em></React.Fragment>}
-        sub="Five short steps. You can skip the whole thing and change everything later — but the defaults you pick now are the ones that hold when you don't feel like picking."
+        title={tRich('onboarding.welcome_title')}
+        sub={PP.t('onboarding.welcome_sub')}
         onNext={() => setStep(1)}
         onSkip={finish}>
         <div className="card fade-up">
           <div style={{ fontSize: 13.5, lineHeight: 1.6, color: 'var(--text-2)' }}>
-            Oath Light works on a simple rule: <b style={{ color: 'var(--text)' }}>strengthening protection is
-            instant, weakening it takes time</b>. Everything you turn on here can be turned back off — just
-            not in the ten seconds where you most want to.
+            {tRich('onboarding.welcome_rule')}
           </div>
         </div>
       </StepShell>
     );
   }
 
-  // ── 2. Voice ────────────────────────────────────────────────────────────
+  // ── 2. Strictness preset ────────────────────────────────────────────────
   if (step === 1) {
-    return (
-      <StepShell
-        step={2} total={TOTAL}
-        title={PP.t('onboarding.voice_title')}
-        sub={PP.t('onboarding.voice_sub')}
-        onBack={() => setStep(0)} onNext={() => setStep(2)} onSkip={finish}>
-        <div className="card fade-up">
-          {[
-            { id: 'companion', nameKey: 'onboarding.companion_name', descKey: 'onboarding.companion_desc', icon: IconHeart },
-            { id: 'serious', nameKey: 'onboarding.serious_name', descKey: 'onboarding.serious_desc', icon: IconFlame },
-          ].map((v) => {
-            const active = (s.voice || 'companion') === v.id;
-            return (
-              <div className="setting" key={v.id}>
-                <div className="ico"><v.icon size={20} /></div>
-                <div className="txt"><b>{PP.t(v.nameKey)}</b><span>{PP.t(v.descKey)}</span></div>
-                <button className={'btn ' + (active ? 'btn-primary' : 'btn-ghost')}
-                        onClick={() => PP.set({ voice: v.id })}>
-                  {active ? 'Selected' : 'Choose'}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </StepShell>
-    );
-  }
-
-  // ── 3. Strictness preset ────────────────────────────────────────────────
-  if (step === 2) {
     const current = (s.blocking && s.blocking.strictness) || 'strict';
     return (
       <StepShell
-        step={3} total={TOTAL}
-        title="How strict should it be?"
-        sub="You can change this any time, and tune individual settings afterwards."
-        onBack={() => setStep(1)} onNext={() => setStep(3)} onSkip={finish}>
+        step={2} total={TOTAL}
+        title={PP.t('onboarding.preset_title')}
+        sub={PP.t('onboarding.preset_sub')}
+        onBack={() => setStep(0)} onNext={() => setStep(2)} onSkip={finish}>
         <div className="card fade-up">
           {(PP.PRESETS || []).map((p) => {
             const active = current === p.id;
             return (
               <div className="setting" key={p.id}>
                 <div className="ico"><IconSliders size={20} /></div>
-                <div className="txt"><b>{p.name}</b><span>{p.desc}</span></div>
+                <div className="txt"><b>{PP.t(p.nameKey)}</b><span>{PP.t(p.descKey)}</span></div>
                 <button className={'btn ' + (active ? 'btn-primary' : 'btn-ghost')}
                         onClick={() => PP.applyPreset(p.id)}>
-                  {active ? 'Selected' : 'Choose'}
+                  {active ? PP.t('onboarding.preset_selected') : PP.t('onboarding.preset_choose')}
                 </button>
               </div>
             );
@@ -178,28 +152,30 @@ function OnboardingFlow({ s, PP }) {
     );
   }
 
-  // ── 4. Vulnerable hours ─────────────────────────────────────────────────
-  if (step === 3) {
+  // ── 3. Vulnerable hours ─────────────────────────────────────────────────
+  if (step === 2) {
     const v = (s.blocking && s.blocking.vulnerable) || { on: true, start: '22:00', end: '06:00' };
     const setV = (patch) => PP.set({ blocking: { vulnerable: Object.assign({}, v, patch) } });
     return (
       <StepShell
-        step={4} total={TOTAL}
-        title="When is it hardest?"
-        sub="Late at night, for most people. Oath Light pays closer attention during these hours."
-        onBack={() => setStep(2)} onNext={() => setStep(4)} onSkip={finish}>
+        step={3} total={TOTAL}
+        title={PP.t('onboarding.hours_title')}
+        sub={PP.t('onboarding.hours_sub')}
+        onBack={() => setStep(1)} onNext={() => setStep(3)} onSkip={finish}>
         <div className="card fade-up">
           <div className="setting">
             <div className="ico"><IconClock size={20} /></div>
-            <div className="txt"><b>Vulnerable hours</b><span>Extra attention during this window.</span></div>
+            <div className="txt">
+              <b>{PP.t('blocking.vulnerable_title')}</b><span>{PP.t('blocking.vulnerable_desc')}</span>
+            </div>
             <Switch on={!!v.on} onClick={() => setV({ on: !v.on })} />
           </div>
           {v.on &&
             <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', marginTop: 10 }}>
-              <label className="field"><span>From</span>
+              <label className="field"><span>{PP.t('blocking.time_from')}</span>
                 <input className="input" type="time" value={v.start || '22:00'} onChange={(e) => setV({ start: e.target.value })} />
               </label>
-              <label className="field"><span>Until</span>
+              <label className="field"><span>{PP.t('blocking.time_until')}</span>
                 <input className="input" type="time" value={v.end || '06:00'} onChange={(e) => setV({ end: e.target.value })} />
               </label>
             </div>}
@@ -208,38 +184,40 @@ function OnboardingFlow({ s, PP }) {
     );
   }
 
-  // ── 5. Optional extras, then the live test ──────────────────────────────
-  if (step === 4) {
+  // ── 4. Optional extras, then the live test ──────────────────────────────
+  if (step === 3) {
     return (
       <StepShell
-        step={5} total={TOTAL}
-        title="Two optional extras"
-        sub="Both are genuinely optional. Oath Light is fully effective without either — skip them if they don't fit your life."
-        onBack={() => setStep(3)} onNext={() => setStep(5)} nextLabel="Continue" onSkip={finish}>
+        step={4} total={TOTAL}
+        title={PP.t('onboarding.extras_title')}
+        sub={PP.t('onboarding.extras_sub')}
+        onBack={() => setStep(2)} onNext={() => setStep(4)} nextLabel={PP.t('app.action_continue')} onSkip={finish}>
         <div className="card fade-up">
-          <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4 }}>Master password</div>
+          <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4 }}>{PP.t('onboarding.password_title')}</div>
           <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 10, maxWidth: '62ch' }}>
-            Asked for whenever a protection is being turned down. It can be your own, or set by someone
-            you trust so you can't unlock it yourself. Without one, the waiting periods alone still hold.
+            {PP.t('onboarding.password_desc')}
           </div>
           <div className="row" style={{ gap: 10 }}>
-            <input className="input" type="password" placeholder="Leave blank to skip"
+            <input className="input" type="password" placeholder={PP.t('onboarding.password_placeholder')}
                    value={pw} onChange={(e) => setPw(e.target.value)} style={{ maxWidth: 280 }} />
-            <button className="btn btn-ghost" onClick={savePassword} disabled={!pw}>Set password</button>
+            <button className="btn btn-ghost" onClick={savePassword} disabled={!pw}>
+              {PP.t('onboarding.password_button')}
+            </button>
           </div>
           {pwMsg && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>{pwMsg}</div>}
 
-          <div style={{ fontWeight: 800, fontSize: 15, margin: '22px 0 4px' }}>Trusted contact</div>
+          <div style={{ fontWeight: 800, fontSize: 15, margin: '22px 0 4px' }}>{PP.t('onboarding.contact_title')}</div>
           <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 10, maxWidth: '62ch' }}>
-            A parent, sibling, friend or mentor. They're told only that a discrete event happened —
-            never what was browsed, never a screenshot, never a history.
+            {PP.t('onboarding.contact_desc')}
           </div>
           <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
-            <input className="input" placeholder="Their name" value={contactName}
+            <input className="input" placeholder={PP.t('onboarding.contact_name_placeholder')} value={contactName}
                    onChange={(e) => setContactName(e.target.value)} style={{ maxWidth: 200 }} />
-            <input className="input" placeholder="Their email" value={contactEmail}
+            <input className="input" placeholder={PP.t('onboarding.contact_email_placeholder')} value={contactEmail}
                    onChange={(e) => setContactEmail(e.target.value)} style={{ maxWidth: 240 }} />
-            <button className="btn btn-ghost" onClick={saveContact} disabled={!contactName || !contactEmail}>Save contact</button>
+            <button className="btn btn-ghost" onClick={saveContact} disabled={!contactName || !contactEmail}>
+              {PP.t('onboarding.contact_button')}
+            </button>
           </div>
           {contactMsg && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>{contactMsg}</div>}
         </div>
@@ -247,29 +225,28 @@ function OnboardingFlow({ s, PP }) {
     );
   }
 
-  // ── 6. See it work ──────────────────────────────────────────────────────
+  // ── 5. See it work ──────────────────────────────────────────────────────
   return (
     <StepShell
-      step={6} total={TOTAL}
-      title="See it work"
-      sub="Trust the demonstration, not the claim. This asks the app what it would do with a known adult site."
-      onBack={() => setStep(4)} onNext={finish} nextLabel="Finish setup">
+      step={5} total={TOTAL}
+      title={PP.t('onboarding.test_title')}
+      sub={PP.t('onboarding.test_sub')}
+      onBack={() => setStep(3)} onNext={finish} nextLabel={PP.t('onboarding.finish')}>
       <div className="card fade-up">
         <div className="row" style={{ gap: 12, alignItems: 'center' }}>
           <button className="btn btn-primary" onClick={runTest} disabled={testState === 'running'}>
-            {testState === 'running' ? 'Checking…' : 'Run the test'}
+            {testState === 'running' ? PP.t('onboarding.test_running') : PP.t('onboarding.test_button')}
           </button>
           <span style={{ fontFamily: 'monospace', fontSize: 12.5, color: 'var(--muted)' }}>{ONBOARD_TEST_DOMAIN}</span>
         </div>
 
         {testState === 'blocked' &&
           <div style={{ marginTop: 14, fontSize: 14, fontWeight: 700, color: 'var(--ok, var(--accent))' }}>
-            Blocked. That's the app answering for itself.
+            {PP.t('onboarding.test_blocked')}
           </div>}
         {testState === 'open' &&
           <div style={{ marginTop: 14, fontSize: 13.5, color: '#e0564f', maxWidth: '62ch' }}>
-            Not blocked. That shouldn't happen — check that the browser extension is installed and
-            connected from the Overview page, then run this again.
+            {PP.t('onboarding.test_open')}
           </div>}
         {(testState === 'error') &&
           <div style={{ marginTop: 14, fontSize: 13, color: 'var(--muted)', maxWidth: '62ch' }}>{testMsg}</div>}

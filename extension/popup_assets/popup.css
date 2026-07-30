@@ -5,8 +5,8 @@
 /* ============================================================
    OATH LIGHT — browser extension popup
    Reuses the desktop app's visual language:
-   Manrope · glass panels · gradient orbs
-   Theming: [data-theme] (light|dark). Noir is the only palette.
+   Manrope · opaque panels · a still ground
+   Theming: [data-theme] (light|dark) × [data-look]. Noir is the only palette.
    ============================================================ */
 
 :root {
@@ -22,52 +22,49 @@
      protection pill made its own label invisible. */
   --accent-ink: #ffffff;
 
-  --intensity: 0.85;
   --ease: var(--ol-ease-spring);     /* cubic-bezier(.22,.61,.36,1), exact match */
   --ease-soft: var(--ol-ease-standard); /* cubic-bezier(.4,0,.2,1), exact match */
 }
 
-/* ---------- NEUTRAL TOKENS PER THEME ---------- */
+/* ---------- LOCAL ALIASES ONTO THE DESIGN SYSTEM ----------
+   One block per theme side. There were three per side before — the
+   palette-era block, the Noir block that superseded it, and a --desk
+   one-liner — and what survived the stack was not what anyone chose: light
+   mode kept aurora-era violet shadows and a --glass-brd of
+   rgba(255,255,255,.75), a white hairline on a near-white popup. */
+
 [data-theme="dark"] {
-  --shadow: 0 30px 70px -28px rgba(0,0,0,.7), 0 4px 14px -4px rgba(0,0,0,.5);
-  --shadow-sm: 0 10px 28px -14px rgba(0,0,0,.6);
+  --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1);
+  --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
+  --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
+  --accent-ink: var(--ol-accent-ink);
+
+  --shadow: var(--ol-shadow-md);
+  --shadow-sm: var(--ol-shadow-sm);
   --glass: rgba(255,255,255,.05);
   --glass-2: rgba(255,255,255,.08);
-  --glass-brd: rgba(255,255,255,.11);
-  --glass-brd-strong: rgba(255,255,255,.18);
+  --glass-brd: var(--ol-border);
+  --glass-brd-strong: var(--ol-border-strong);
   --logo-tile: transparent;
 }
+
 [data-theme="light"] {
-  --shadow: 0 30px 70px -30px rgba(60,40,90,.3), 0 3px 12px -4px rgba(60,40,90,.14);
-  --shadow-sm: 0 12px 30px -16px rgba(60,40,90,.24);
-  --glass: rgba(255,255,255,.6);
-  --glass-2: rgba(255,255,255,.82);
-  --glass-brd: rgba(255,255,255,.75);
-  --glass-brd-strong: rgba(120,90,160,.22);
+  --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1);
+  --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
+  --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
+  --accent-ink: var(--ol-accent-ink);
+
+  --shadow: var(--ol-shadow-md);
+  --shadow-sm: var(--ol-shadow-sm);
+  --glass: rgba(255,255,255,.72);
+  --glass-2: rgba(255,255,255,.9);
+  --glass-brd: var(--ol-border);
+  --glass-brd-strong: var(--ol-border-strong);
   --logo-tile: #1e1830;
 }
 
-/* ---- NOIR (black & white — pure monochrome) — this is the design
-   system default, so it pulls straight from tokens.css: editing
-   tokens.css (via preview.html) re-skins this preset. No --ol-orb-*
-   tokens exist, so the orb triplet maps to the accent triplet, the
-   closest conceptual equivalent. ---- */
-[data-theme="dark"] {
-  --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1); --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
-  --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
-  --accent-ink: var(--ol-accent-ink);
-  --orb-a: var(--ol-accent); --orb-b: var(--ol-accent-2); --orb-c: var(--ol-accent-3);
-}
-[data-theme="light"] {
-  --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1); --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
-  --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
-  --accent-ink: var(--ol-accent-ink);
-  --orb-a: var(--ol-accent); --orb-b: var(--ol-accent-2); --orb-c: var(--ol-accent-3);
-}
-
-/* faux desktop wallpaper — extension popup is shown on its own, no surrounding chrome */
-[data-theme="dark"]  { --desk: transparent; }
-[data-theme="light"] { --desk: transparent; }
+/* The popup floats on the browser's own chrome, so it draws no wallpaper. */
+:root { --desk: transparent; }
 
 /* ============================================================
    RESET / BASE
@@ -168,21 +165,38 @@ input { font-family: inherit; }
   transition: background .55s var(--ease-soft), border-color .3s;
 }
 
-/* animated background inside popup */
+/* ---- ground ----
+   Three drifting orbs used to live here, on 30–38s loops, inside a 380px
+   popup that is open for about four seconds at a time. They were removed
+   along with the rest of the atmosphere across every surface: ambient motion
+   carries no information, and a popup is the last place that can afford it.
+
+   The popup takes only the grain and the two-tone card fills — the patterned
+   looks (dot grid, weave, contour) are sized for a full window and turn into
+   visual noise at this scale, so `data-look` here resolves to texture-or-not
+   rather than to twelve distinct grounds. */
 .bg { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
-.bg-orb { position: absolute; border-radius: 50%; filter: blur(46px); opacity: calc(.6 * var(--intensity)); mix-blend-mode: screen; transition: opacity .5s var(--ease-soft); }
-[data-theme="light"] .bg-orb { mix-blend-mode: multiply; opacity: calc(.5 * var(--intensity)); filter: blur(42px); }
-.bg-orb.o1 { width: 70%; aspect-ratio: 1; left: -16%; top: -22%; background: radial-gradient(circle at 30% 30%, var(--orb-a), transparent 70%); animation: drift1 calc(30s / max(.4,var(--intensity))) var(--ease-soft) infinite alternate; }
-.bg-orb.o2 { width: 78%; aspect-ratio: 1; right: -24%; top: 2%;  background: radial-gradient(circle at 60% 40%, var(--orb-b), transparent 70%); animation: drift2 calc(38s / max(.4,var(--intensity))) var(--ease-soft) infinite alternate; }
-.bg-orb.o3 { width: 60%; aspect-ratio: 1; left: 20%; bottom: -30%; background: radial-gradient(circle at 50% 50%, var(--orb-c), transparent 70%); animation: drift3 calc(34s / max(.4,var(--intensity))) var(--ease-soft) infinite alternate; }
-@keyframes drift1 { from { transform: translate(0,0) scale(1); } to { transform: translate(16%,12%) scale(1.14); } }
-@keyframes drift2 { from { transform: translate(0,0) scale(1.05); } to { transform: translate(-12%,16%) scale(.92); } }
-@keyframes drift3 { from { transform: translate(0,0) scale(1); } to { transform: translate(10%,-12%) scale(1.12); } }
-.bg-veil { position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in oklab, var(--bg-0) 34%, transparent), color-mix(in oklab, var(--bg-0) 16%, transparent)); }
-.popup.is-off .bg-orb { opacity: calc(.16 * var(--intensity)); filter: blur(56px) saturate(.5); }
+.bg > i { position: absolute; inset: 0; display: block; }
+.bg-grain {
+  background-image: var(--ground-grain, none);
+  mix-blend-mode: var(--ground-grain-blend, overlay);
+  opacity: var(--ground-grain-opacity, .5);
+}
+[data-theme="light"] { --ground-grain-blend: multiply; --ground-grain-opacity: .34; }
+
+[data-look="matte"], [data-look="halo"], [data-look="field"],
+[data-look="theatre"], [data-look="studio"], [data-look="cloth"] {
+  --ground-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.42'/%3E%3C/svg%3E");
+}
+[data-look="slate"], [data-look="studio"], [data-look="drafting"] { --card-fill: var(--ol-bg-2); }
+[data-look="paper"], [data-look="drafting"] { --card-shadow: none; --card-radius: var(--r-sm); }
 
 @media (prefers-reduced-motion: reduce) {
-  .bg-orb { animation: none !important; }
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
 }
 
 .popup-inner { position: relative; z-index: 2; padding: 16px; display: flex; flex-direction: column; gap: 11px; }

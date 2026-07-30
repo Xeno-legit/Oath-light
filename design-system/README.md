@@ -14,7 +14,7 @@ hardcoded per-surface again.
 | `tokens.css` | Source of truth for every `--ol-*` token: color, type, spacing, radii, shadow, motion. Dark theme in `:root`, light in `[data-theme="light"]`, Serious Mode visual hook in `[data-serious]`. Consumption instructions are in its header comment. |
 | `fonts/` | The Manrope + Instrument Serif `.woff2` files `tokens.css` references — must travel with any copy of it. |
 | `tokens.js` | Metadata manifest (`OL_TOKENS`) the editor builds its controls from. Keep in sync with `tokens.css` when adding/removing a token. |
-| `strings.js` | The voice layer (`OL_STRINGS`): every user-facing string in both voices (Companion / Drill Sergeant), `t(key, params)` lookup, Serious Mode force-override. Loads everywhere incl. the MV3 service worker. |
+| `strings.js` | The voice layer (`OL_STRINGS`): every user-facing string in both voices (Companion / Coach), `t(key, params)` lookup, Serious Mode force-override. Loads everywhere incl. the MV3 service worker. |
 | `VOICE.md` | Copy rules: the two registers, banned language, the "status yes, map no" content rules, key conventions. |
 | `preview.html` | The live editor/style guide. **This is where the visual direction gets decided.** |
 

@@ -132,7 +132,7 @@ function BlocklistPage({ s, PP }) {
     <div className="page">
       <div className="page-head fade-up">
         <div className="eyebrow">Blocklist</div>
-        <h1 className="page-title">What gets <em style={{ fontFamily: "Manrope" }}>blocked</em></h1>
+        <h1 className="page-title">What gets <em>blocked</em></h1>
         <p className="page-sub">Search any site to see if it's blocked outright or filtered for explicit content. Changes apply instantly across every browser and app.</p>
       </div>
 

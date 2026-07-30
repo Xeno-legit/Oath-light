@@ -222,6 +222,20 @@ pub struct SettingsV1 {
     /// (`dns.disable`), same asymmetry as every other protection here.
     #[serde(default = "default_false")]
     pub dns_filter_enabled: bool,
+    /// Refuse to let a browser that **cannot be force-installed** run without the
+    /// extension: it is killed on sight, and the way back is a supervised restore
+    /// window requested from the app (see `browser_lock`). Today that is Edge
+    /// alone, because Microsoft won't force-install from the Chrome Web Store on
+    /// a consumer PC — leaving it as the one browser where staying protected is
+    /// entirely voluntary.
+    ///
+    /// Opt-in, default **false**, for the same reason `block_unknown_browsers`
+    /// is: it kills a process the user may be in the middle of using, and
+    /// nothing in this app turns that on for someone without being asked. On is
+    /// a strengthening (instant); off is a friction-gated weakening
+    /// (`browser_lock.disable`).
+    #[serde(default = "default_false")]
+    pub lock_unverified_browsers: bool,
     /// Lockdown Mode (4.4) display-only view — see `LockdownV1`'s doc
     /// comment. The clock-tamper-immune source of truth lives in
     /// `lockdown::LockdownStore` (`lockdown.json`), not here.
@@ -266,6 +280,7 @@ impl Default for SettingsV1 {
             blocked_processes: Vec::new(),
             block_unknown_browsers: false,
             dns_filter_enabled: false,
+            lock_unverified_browsers: false,
             lockdown: LockdownV1::default(),
             trusted_contact: None,
             serious_mode: false,

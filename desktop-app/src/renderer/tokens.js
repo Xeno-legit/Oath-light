@@ -86,7 +86,18 @@ globalThis.OL_TOKENS = [
   /* ---------------- shadow / elevation ---------------- */
   { name: '--ol-shadow-sm',    group: 'shadow', type: 'text',   label: 'Shadow — small' },
   { name: '--ol-shadow-md',    group: 'shadow', type: 'text',   label: 'Shadow — medium' },
-  { name: '--ol-blur-panel',   group: 'shadow', type: 'length', label: 'Panel blur' },
+  /* --ol-blur-panel is gone with the glass surfaces — see tokens.css. */
+
+  /* ---------------- ground / surface texture ----------------
+     Colors, so they are grouped as such and the app's Themes page offers
+     them a swatch like any other. They sit here rather than up in the color
+     block to match their position in tokens.css, which keeps the two files
+     readable side by side. */
+  { name: '--ol-hairline',      group: 'color', type: 'color', label: 'Surface top edge' },
+  { name: '--ol-ground-dot',    group: 'color', type: 'color', label: 'Ground — dot' },
+  { name: '--ol-ground-thread', group: 'color', type: 'color', label: 'Ground — thread' },
+  { name: '--ol-ground-edge',   group: 'color', type: 'color', label: 'Ground — edge falloff' },
+  { name: '--ol-ground-well',   group: 'color', type: 'color', label: 'Ground — recess shadow' },
 
   /* ---------------- motion ---------------- */
   { name: '--ol-duration-fast',   group: 'motion', type: 'length', label: 'Duration — fast' },

@@ -263,6 +263,58 @@ mod imp {
         std::env::temp_dir().join("oathlight.watchdog.shutdown")
     }
 
+    /// Path of the sentinel that authorizes a stand-down for an *update*
+    /// (`update.rs`). Deliberately a second file rather than a second meaning
+    /// for the shutdown sentinel: the two carry different payloads, expire on
+    /// different rules, and are cleared by different code paths, and folding
+    /// them together would make every reader guess which kind it was looking
+    /// at. Content is the full UTF-8 path to `update.json`, mirroring the
+    /// shutdown sentinel's protocol exactly so the guardian — which may have
+    /// been spawned before the app knew any paths — can locate and verify the
+    /// window itself. MUST match the guardian crate.
+    fn update_sentinel() -> PathBuf {
+        std::env::temp_dir().join("oathlight.watchdog.update")
+    }
+
+    /// Open an update stand-down: point the sentinel at `update_json` so both
+    /// processes stop resurrecting each other and both binaries unlock. The
+    /// window in that file is what actually authorizes it — this file only says
+    /// where to look, so a hand-created empty sentinel authorizes nothing.
+    pub fn request_update_standdown(update_json: &Path) {
+        let p = update_sentinel();
+        let content = update_json.to_string_lossy().into_owned();
+        if let Err(e) = std::fs::write(&p, content.as_bytes()) {
+            log::warn!("watchdog: could not write update sentinel {p:?}: {e}");
+        } else {
+            log::info!("watchdog: update stand-down authorized via {p:?}");
+        }
+    }
+
+    /// Drop the update sentinel. Called when an update is cancelled, and
+    /// unconditionally from `init_main` — see the call site for why a fresh
+    /// main starting is proof the window is over.
+    pub fn clear_update_standdown() {
+        let _ = std::fs::remove_file(update_sentinel());
+    }
+
+    /// Whether an update stand-down is currently authorized.
+    ///
+    /// Unlike the shutdown sentinel, this behaves identically in debug and
+    /// release: the file is never trusted on its own in either build, because
+    /// the thing that bounds this — the fifteen-minute window in `update.json`,
+    /// re-validated on every read by `update::window_active_at` — is the whole
+    /// safety argument. A stale sentinel left behind by an interrupted update
+    /// therefore stops authorizing anything the moment its window expires, with
+    /// no cleanup required from anyone.
+    fn update_standdown_active() -> bool {
+        match std::fs::read_to_string(update_sentinel()) {
+            Ok(content) if !content.trim().is_empty() => {
+                crate::update::window_active_at(Path::new(content.trim()))
+            }
+            _ => false,
+        }
+    }
+
     /// Authorize a legitimate shutdown: drop the sentinel so both sides stop
     /// resurrecting and let the processes exit. (Hook for the uninstall-friction
     /// flow, and the manual kill switch during testing.)
@@ -571,6 +623,15 @@ mod imp {
                 log::info!("watchdog: shutdown requested — main standing down");
                 break;
             }
+            // An update window stands the guard down too, but temporarily: keep
+            // polling rather than breaking, so if the window expires with this
+            // process somehow still alive (the user cancelled, or the installer
+            // was never run) guarding simply resumes on the next tick instead of
+            // being off for the rest of the session.
+            if update_standdown_active() {
+                std::thread::sleep(POLL);
+                continue;
+            }
 
             if !role_alive(GUARDIAN_MUTEX) && last_spawn.elapsed() >= SPAWN_COOLDOWN {
                 log::warn!("watchdog: guardian is gone — resurrecting");
@@ -669,6 +730,14 @@ mod imp {
 
         clear_stale_sentinel();
 
+        // An update stand-down is over the moment a main instance is up and
+        // holding the mutex — either the installer finished and launched the
+        // new build, or the recovery task brought the old one back. Clearing it
+        // HERE rather than in `setup()` is load-bearing: `guard_loop` starts on
+        // the next line and would otherwise spend the rest of the window
+        // declining to guard, and `setup()` runs too late to prevent that.
+        clear_update_standdown();
+
         std::thread::spawn(guard_loop);
     }
 
@@ -727,8 +796,9 @@ mod imp {
 
 #[cfg(windows)]
 pub use imp::{
-    enabled, init_main, launched_at_login, register_autostart, request_shutdown,
-    set_uninstall_json_path, start_show_listener, unregister_autostart,
+    clear_update_standdown, enabled, init_main, launched_at_login, register_autostart,
+    request_shutdown, request_update_standdown, set_uninstall_json_path, start_show_listener,
+    unregister_autostart,
 };
 
 // ---- Non-Windows: graceful no-ops (the app is Windows-first; see master plan).
@@ -741,6 +811,10 @@ pub fn enabled() -> bool {
 pub fn init_main() {}
 #[cfg(not(windows))]
 pub fn request_shutdown() {}
+#[cfg(not(windows))]
+pub fn request_update_standdown(_update_json: &std::path::Path) {}
+#[cfg(not(windows))]
+pub fn clear_update_standdown() {}
 #[cfg(not(windows))]
 pub fn set_uninstall_json_path(_path: std::path::PathBuf) {}
 #[cfg(not(windows))]

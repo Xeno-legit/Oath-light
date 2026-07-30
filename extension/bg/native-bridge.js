@@ -263,9 +263,15 @@ const NativeMessagingBridge = (function () {
     const d = (msg.display && typeof msg.display === 'object') ? msg.display : msg;
     const display = {};
     if (d.theme) display.theme = d.theme;
-    if (d.style) display.style = d.style;
-    if (d.bg) display.bg = d.bg;
-    if (typeof d.intensity !== 'undefined') display.intensity = d.intensity;
+    // No `style`: the palette axis is gone (see theme-sync.js). Forwarding a
+    // key no page reads would just keep it alive in every profile's storage.
+    // Same now goes for `bg` and `intensity`: the animated atmosphere they
+    // described no longer exists on any surface.
+    if (d.look) display.look = d.look;
+    if (d.neutral) display.neutral = d.neutral;
+    // `density` and `motion` are deliberately not forwarded — they scale the
+    // desktop window's own spacing and its interaction animations, neither of
+    // which the extension's pages share.
     if (Object.keys(display).length === 0) return;
     // Store the object plus mirrored top-level keys (blocked.js reads either).
     await chrome.storage.local.set({ display, ...display });

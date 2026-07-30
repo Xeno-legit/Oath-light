@@ -3,9 +3,10 @@ const { useState, useEffect } = React;
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "theme": "dark",
-  "style": "noir",
-  "bg": "both",
-  "intensity": 7
+  "look": "matte",
+  "neutral": "pure",
+  "density": "comfortable",
+  "motion": "on"
 }/*EDITMODE-END*/;
 
 // `monitor` is not routed any more — the AI screen monitor is a section
@@ -44,10 +45,13 @@ function App() {
   // keep store.display mirrored from tweaks (for components that read s.display)
   // and push it to the browser extensions so their pages match the app theme.
   useEffect(() => {
-    const display = { theme: t.theme, style: t.style, bg: t.bg, intensity: t.intensity };
+    const display = {
+      theme: t.theme, look: t.look, neutral: t.neutral,
+      density: t.density, motion: t.motion,
+    };
     PP.set({ display });
     if (window.PPNative && PPNative.available) PPNative.setTheme(display);
-  }, [t.theme, t.style, t.bg, t.intensity]);
+  }, [t.theme, t.look, t.neutral, t.density, t.motion]);
 
   // mirror the app's day streak down to the browser extensions
   useEffect(() => {
@@ -71,7 +75,12 @@ function App() {
     // — the backend injects it into this same payload from its own persisted
     // settings (broadcast_blocking), because a renderer-supplied value must
     // never be able to claim Serious Mode is off.
-    voice: s.voice || 'companion',
+    //
+    // Which is why this is now a constant. Serious Mode is the only thing that
+    // changes the tone, the extension already forces the hard voice from the
+    // backend's `serious` flag (voice-sync.js), and a stale 'serious' left in
+    // a saved profile by the removed voice picker must not outlive it.
+    voice: 'companion',
     // UI language, same channel and same reasoning as `voice`: the block
     // screen and the popup should not be in a different language from the
     // app that configured them. voice-sync.js reads it and also derives the
@@ -126,18 +135,67 @@ function App() {
     return () => { cancelled = true; if (unlisten) unlisten(); };
   }, []);
 
-  // apply theme/style/intensity to the document
+  // Apply theme + motion intensity to the document.
+  //
+  // `data-style` is deliberately NOT set any more. It used to carry a palette
+  // name that every stylesheet keyed its colours off, and six of the seven
+  // possible values have been gone since Noir became the only built-in theme.
+  // What was left was an attribute nothing read — while three surfaces still
+  // wrote it and one HTML file still shipped a stale `aurora` in it.
+  // Apply the display axes to the document.
+  //
+  // All five are plain attributes on <html>, because that is the cheapest
+  // possible switch: CSS keys every look, temper and density off them with
+  // no JS in the paint path and no inline styles to keep in sync. This
+  // replaced `--intensity`, a numeric custom property that existed only to
+  // scale animations that no longer exist.
+  //
+  // `pure`, `comfortable` and `on` are the defaults and are written as an
+  // ABSENT attribute rather than an explicit value, so the CSS default in
+  // :root is the thing that applies and there is exactly one source for it.
+  //
+  // `data-style` is still deliberately not set: it carried a palette name
+  // that nothing has read since Noir became the only built-in theme.
   useEffect(() => {
     const el = document.documentElement;
     el.setAttribute('data-theme', t.theme);
-    el.setAttribute('data-style', t.style);
-    el.style.setProperty('--intensity', String((t.intensity || 0) / 10));
-  }, [t.theme, t.style, t.intensity]);
+    el.setAttribute('data-look', t.look || 'matte');
+    const flag = (attr, value, dflt) => {
+      if (!value || value === dflt) el.removeAttribute(attr);
+      else el.setAttribute(attr, value);
+    };
+    flag('data-neutral', t.neutral, 'pure');
+    flag('data-density', t.density, 'comfortable');
+    flag('data-motion', t.motion === 'off' ? 'off' : null, null);
+  }, [t.theme, t.look, t.neutral, t.density, t.motion]);
+
+  // Wallpaper (UX Direction §7). The image is read from its own localStorage
+  // key rather than the store — see PP.wallpaper — and applied as a `url()`
+  // custom property that the .bg-wall layer consumes.
+  //
+  // The dim floor is enforced HERE as well as in the Themes page slider,
+  // because this is the value that actually reaches the screen: a profile
+  // hand-edited to `dim: 0` would otherwise render an interface with white
+  // text on someone's holiday photo. Legibility is not a preference.
+  const wall = s.wallpaper || {};
+  useEffect(() => {
+    const el = document.documentElement;
+    const src = wall.on ? PP.wallpaper.read() : null;
+    if (src) {
+      el.style.setProperty('--wallpaper', `url("${src}")`);
+      el.style.setProperty('--wallpaper-dim', String(Math.min(90, Math.max(25, +wall.dim || 55)) / 100));
+      el.style.setProperty('--wallpaper-blur', `${Math.min(24, Math.max(0, +wall.blur || 0))}px`);
+    } else {
+      el.style.removeProperty('--wallpaper');
+      el.style.removeProperty('--wallpaper-dim');
+      el.style.removeProperty('--wallpaper-blur');
+    }
+  }, [wall.on, wall.dim, wall.blur, wall.name]);
 
   // User-custom colors (UX Direction §7): apply the active theme side's
   // `--ol-*` overrides as inline custom properties on the root element, so
   // they win over tokens.css's defaults and cascade through styles.css's own
-  // variables (which alias the --ol-* tokens under [data-style="noir"]).
+  // variables, which alias the --ol-* tokens).
   //
   // Every managed token is written on each pass — cleared ones are explicitly
   // REMOVED rather than left behind, otherwise resetting a color in the
@@ -170,12 +228,18 @@ function App() {
       <PasswordGate />
       <TitleBar s={s} />
       <div className="body">
-        <AnimatedBG bg={t.bg} intensity={t.intensity} />
+        <AnimatedBG />
         {!isHome && !isPanic && !needsOnboarding && <Sidebar s={s} go={go} />}
+        {/* One boundary per page. `<main>` is already keyed on the page id, so
+            the boundary remounts (and the error clears) the moment the user
+            navigates away — a broken page costs them that page, not the app.
+            See ErrorBoundary in ui.jsx for why this exists at all. */}
         <main className="content scroll" key={needsOnboarding ? 'onboarding' : s.page}>
-          {needsOnboarding ?
-            <OnboardingFlow s={s} PP={PP} /> :
-            <Page s={s} PP={PP} go={go} />}
+          <ErrorBoundary onHome={() => go('home')}>
+            {needsOnboarding ?
+              <OnboardingFlow s={s} PP={PP} /> :
+              <Page s={s} PP={PP} go={go} />}
+          </ErrorBoundary>
         </main>
       </div>
 
@@ -185,15 +249,31 @@ function App() {
                     onChange={(v) => setTweak('theme', v)} />
         {/* Palette picker removed (UX Direction §7): Noir is the only built-in
             theme. Custom colors live on the Themes page as token overrides. */}
-        <TweakSection label="Atmosphere" />
-        <TweakSelect label="Background" value={t.bg}
-                     options={['both', 'orbs', 'waves', 'stars', 'ripple', 'smoke', 'off']}
-                     onChange={(v) => setTweak('bg', v)} />
-        <TweakSlider label="Motion" value={t.intensity} min={0} max={10}
-                     onChange={(v) => setTweak('intensity', v)} />
+        {/* The atmosphere pair (a seven-option background picker and a 0–10
+            motion slider) is gone with the animated background itself. What
+            replaced it is the same set of axes the Themes page exposes, so
+            the two stay in lockstep — which was the original reason these
+            controls were mirrored here at all. */}
+        <TweakSelect label="Look" value={t.look}
+                     options={['matte', 'halo', 'field', 'theatre', 'slate', 'studio',
+                               'paper', 'drafting', 'cloth', 'contour', 'engrave', 'halftone']}
+                     onChange={(v) => setTweak('look', v)} />
+        <TweakRadio label="Neutral" value={t.neutral} options={['pure', 'cool', 'warm']}
+                    onChange={(v) => setTweak('neutral', v)} />
+        <TweakSection label="Interface" />
+        <TweakRadio label="Density" value={t.density} options={['comfortable', 'compact']}
+                    onChange={(v) => setTweak('density', v)} />
+        <TweakRadio label="Motion" value={t.motion} options={['on', 'off']}
+                    onChange={(v) => setTweak('motion', v)} />
       </TweaksPanel>
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+// Last resort: catches anything thrown outside the routed page — the title
+// bar, the sidebar, the tweaks panel, or App's own body. A root-level throw
+// still costs the whole window, but it costs it as a message with a reload
+// button rather than as a black rectangle.
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <ErrorBoundary scope="app"><App /></ErrorBoundary>
+);

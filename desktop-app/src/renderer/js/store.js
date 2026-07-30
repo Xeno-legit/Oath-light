@@ -4,9 +4,33 @@
 
   const defaults = {
     page: 'home',
-    // display mirrored from the Tweaks panel (source of truth = useTweaks).
-    // `style` is pinned to 'noir' — the only built-in theme (UX Direction §7).
-    display: { theme: 'dark', style: 'noir', bg: 'both', intensity: 7 },
+    // Display, mirrored from the Tweaks panel (source of truth = useTweaks).
+    // There is no `style` key: Noir is the only built-in theme, so a palette
+    // name was a field with one legal value that nothing read. A stale one in
+    // persisted state merges in harmlessly and is never read.
+    // `bg` and `intensity` are gone with the animated atmosphere. What
+    // replaced them is four independent axes, all of which resolve to a plain
+    // attribute on <html> that CSS keys off — see the GROUND section of
+    // styles.css. A stale bg/intensity in a persisted profile merges in
+    // harmlessly and is never read, the same way the old `style` key does.
+    //   look    — the ground + surface recipe (matte, slate, cloth, …)
+    //   neutral — hue bias of the greys (pure | cool | warm)
+    //   density — outer spacing scale (comfortable | compact)
+    //   motion  — interaction/entrance animation (on | off); the OS's own
+    //             prefers-reduced-motion is honoured separately and always
+    display: { theme: 'dark', look: 'matte', neutral: 'pure', density: 'comfortable', motion: 'on' },
+
+    // Custom wallpaper. METADATA ONLY — the image itself is deliberately not
+    // in this object. The whole store is persisted as one JSON blob under one
+    // localStorage key inside a try/catch that swallows failures, so a
+    // multi-megabyte data URL in here would push the blob past quota and
+    // silently stop EVERYTHING from saving, not just the wallpaper. The image
+    // lives under its own key (see PP.wallpaper below) where a quota failure
+    // can only ever cost the wallpaper.
+    //   dim  — 25..90, the scrim over the image. Clamped away from 0 on
+    //          purpose: an unreadable interface is not a valid preference.
+    //   blur — 0..24px
+    wallpaper: { on: false, dim: 55, blur: 0, name: '', fit: 'cover' },
 
     // User-custom theme (UX Direction §7). Not a palette PRESET — presets are
     // gone. These are runtime overrides of the design system's own color
@@ -144,9 +168,14 @@
       // makes the entry a link. Empty by default: a generic suggestion is
       // worse than none, because the whole point is that the user wrote it.
       alternatives: [],
+      // Nudges offered during the vulnerable-hours window. `labelKey`/`descKey`
+      // are catalog keys resolved at render (see PP.t); state persisted by an
+      // older build still carries literal `label`/`desc`, which the two render
+      // sites fall back to — so an existing install keeps readable rows instead
+      // of blank ones until this array is next written.
       alerts: [
-        { id: 'checkin', label: 'Gentle check-in', desc: 'A soft “still with me?” prompt to keep you company.', on: true },
-        { id: 'quote', label: 'Motivational reminder', desc: 'A short line to reconnect you with your why.', on: false },
+        { id: 'checkin', labelKey: 'blocking.alert_checkin_label', descKey: 'blocking.alert_checkin_desc', on: true },
+        { id: 'quote', labelKey: 'blocking.alert_quote_label', descKey: 'blocking.alert_quote_desc', on: false },
       ],
     },
 
@@ -154,19 +183,28 @@
     // (5.3) keeps reflections ephemeral. A stale `chat` key in old persisted
     // state merges in harmlessly and is simply never read.
 
+    // `partner`, `member` and the whole `notif` block are gone — same audit as
+    // the dead `blocking` fields above. Every one was written by the old
+    // Settings page and read by nothing: no backend command, no extension
+    // payload, no other renderer file. The real reminder switches are
+    // `blocking.alerts` (the extension genuinely fires those); the three rows
+    // `notif` appeared to back were the "Coming soon" stubs, two of which were
+    // already built on Overview and the third of which now is. A stale copy in
+    // a persisted profile merges in harmlessly and is never read.
     profile: {
       name: 'You',
       email: '',
-      partner: '',
-      member: '',
       tz: '',
     },
-    notif: { daily: true, milestone: true, partner: true, urge: false, weekly: true },
 
-    // Voice layer (UX Direction §2). The user's tone choice, picked at
-    // onboarding and changeable in Settings — 'companion' | 'serious'. This is
-    // a plain preference and lives here; Serious Mode (below) is NOT, and
-    // overrides it whenever it's on.
+    // Voice layer (UX Direction §2) — DERIVED, not chosen. It used to be a
+    // preference with its own Companion/Coach picker in Settings and its own
+    // onboarding step, which gave the app's tone two owners: the picker, and
+    // Serious Mode overriding the picker. There is one owner now — Serious
+    // Mode — and syncVoice() computes this from it. The field stays because
+    // saved profiles carry it and the extension payload has a slot for it; it
+    // is deliberately NOT read back (a profile saved with 'serious' would
+    // otherwise leave someone in the hard voice with no control left to undo).
     voice: 'companion',
 
     // UI language. A plain presentation preference like `voice`, and resolved
@@ -207,11 +245,17 @@
   // exposed as PP.TRIGGERS. Consumed by the panic flow's exit tags, the
   // overview's quick-log and the slip dialog; ids are what analytics buckets
   // on, so a new trigger only ever needs adding here.
+  //
+  // The visible word is a KEY, not the word itself: this list is built once at
+  // load, and baking the resolved string in would freeze whatever voice and
+  // locale happened to be active at that moment. Callers resolve with
+  // `PP.t(trigger.labelKey)` at render, so a voice or language change repaints
+  // the chips like everything else.
   const TRIGGERS = [
-    { id: 'bored', label: 'Bored' },
-    { id: 'stressed', label: 'Stressed' },
-    { id: 'late', label: 'Late night' },
-    { id: 'lonely', label: 'Lonely' },
+    { id: 'bored', labelKey: 'streak.trigger_bored' },
+    { id: 'stressed', labelKey: 'streak.trigger_stressed' },
+    { id: 'late', labelKey: 'streak.trigger_late' },
+    { id: 'lonely', labelKey: 'streak.trigger_lonely' },
   ];
   // ── Strictness presets (plan 6.4) ────────────────────────────────────────
   // Three named starting points, offered in the first-run wizard and on the
@@ -226,23 +270,24 @@
   // `backendOn` lists protections a preset asks to turn ON — a strengthening,
   // always instant and safe. Nothing here ever turns one off.
   // Strict is the FLOOR, not the middle option — there is no weaker tier to
-  // drop to. `desc` is the one-line summary shown on the control; `info` is
-  // the longer explanation, revealed from an info dot instead of sitting on
-  // the page as a wall of text.
+  // drop to. `descKey` is the one-line summary shown on the control; `infoKey`
+  // is the longer explanation, revealed from an info dot instead of sitting on
+  // the page as a wall of text. Both are catalog keys resolved at render, for
+  // the same reason TRIGGERS carries keys rather than words.
   const PRESETS = [
     {
       id: 'strict',
-      name: 'Strict',
-      desc: 'The default. Blocks the most it can without guessing.',
-      info: 'The full blocklist, graylist filtering and SafeSearch, plus YouTube Restricted Mode and URL-pattern matching on sites that aren\'t listed. Occasionally catches something innocent — report it and it gets fixed.',
+      nameKey: 'blocking.preset_strict_name',
+      descKey: 'blocking.preset_strict_desc',
+      infoKey: 'blocking.preset_strict_info',
       settings: { youtubeRestrict: true },
       backendOn: [],
     },
     {
       id: 'lockdown',
-      name: 'Lockdown',
-      desc: 'Strict, plus your vulnerable hours go allowlist-only.',
-      info: 'Everything in Strict. On top of that, when your vulnerable-hours window starts, browsing automatically narrows to the allowlist until it ends.',
+      nameKey: 'blocking.preset_lockdown_name',
+      descKey: 'blocking.preset_lockdown_desc',
+      infoKey: 'blocking.preset_lockdown_info',
       settings: { youtubeRestrict: true, vulnerable: { on: true } },
       backendOn: ['lockdownEscalation'],
     },
@@ -321,7 +366,11 @@
       const el = document.documentElement;
       if (S) {
         S.setLocale(state.locale || S.defaultLocale);
-        S.setVoice(state.voice || S.defaultVoice);
+        // Voice follows Serious Mode and nothing else — `state.voice` is not
+        // consulted, on purpose (see its declaration above). setSeriousMode
+        // would force the hard voice on its own; setting both keeps
+        // `activeVoice` honest for anything that reads it directly.
+        S.setVoice(state.serious ? 'serious' : S.defaultVoice);
         S.setSeriousMode(!!state.serious);
         el.setAttribute('dir', S.dir());
         el.setAttribute('lang', S.locale().code);
@@ -377,6 +426,73 @@
     put(key, value) {
       state = Object.assign({}, state, { [key]: value });
       syncVoice(); persist(); notify();
+    },
+
+    /* ── Wallpaper image ──────────────────────────────────────────────────
+     * Its own localStorage key, for the reason given on `defaults.wallpaper`:
+     * the main state blob must never be the thing that runs out of quota.
+     *
+     * `read` is synchronous and safe to call during render. `write` takes a
+     * File, downscales it, and returns a promise that rejects with a message
+     * fit to show the user — an image is the one input here that can plausibly
+     * be too big, so it is the one that gets a real error rather than a
+     * silent catch.
+     */
+    wallpaper: {
+      KEY: 'oathlight_wallpaper_v1',
+      read() {
+        try { return localStorage.getItem(this.KEY) || null; } catch (e) { return null; }
+      },
+      clear() {
+        try { localStorage.removeItem(this.KEY); } catch (e) {}
+      },
+      // Downscale before storing. A modern phone photo is 4000px+ and 6MB;
+      // the largest window this ever fills is ~2560px, and it sits behind a
+      // scrim at 55% opacity, so anything past that is pure quota cost. JPEG
+      // rather than PNG for the same reason — a photograph behind a dimmed
+      // scrim has no use for lossless.
+      write(file, maxW = 2560, quality = .82) {
+        return new Promise((resolve, reject) => {
+          if (!file || !/^image\//.test(file.type)) {
+            reject(new Error('That file is not an image.')); return;
+          }
+          const url = URL.createObjectURL(file);
+          const img = new Image();
+          img.onload = () => {
+            URL.revokeObjectURL(url);
+            try {
+              const scale = Math.min(1, maxW / img.naturalWidth);
+              const c = document.createElement('canvas');
+              c.width = Math.round(img.naturalWidth * scale);
+              c.height = Math.round(img.naturalHeight * scale);
+              c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+              const data = c.toDataURL('image/jpeg', quality);
+              try {
+                localStorage.setItem(this.KEY, data);
+              } catch (e) {
+                // Quota. Retry once, smaller — most images clear it easily at
+                // 1600px, and a second failure is worth telling the user about
+                // rather than leaving them with a wallpaper that silently
+                // vanishes on the next launch.
+                const c2 = document.createElement('canvas');
+                const s2 = Math.min(1, 1600 / img.naturalWidth);
+                c2.width = Math.round(img.naturalWidth * s2);
+                c2.height = Math.round(img.naturalHeight * s2);
+                c2.getContext('2d').drawImage(img, 0, 0, c2.width, c2.height);
+                localStorage.setItem(this.KEY, c2.toDataURL('image/jpeg', .7));
+              }
+              resolve(localStorage.getItem(this.KEY));
+            } catch (e) {
+              reject(new Error("That image is too large to store. Try one under about 4 megapixels."));
+            }
+          };
+          img.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error("That image couldn't be read. It may be corrupt or an unsupported format."));
+          };
+          img.src = url;
+        });
+      },
     },
 
     // The renderer's one string lookup (UX Direction §2). Delegates to the

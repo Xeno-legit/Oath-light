@@ -25,6 +25,17 @@ pub struct ProfileExt {
     pub profile_dir: String,
     pub name: String,
     pub installed: bool, // present AND enabled
+    /// Present with a real payload but switched off — the browser downloaded and
+    /// unpacked the extension and is holding it disabled. For an auto-installed
+    /// (external-registry) extension this is Chromium's sideload protection
+    /// waiting for the user to acknowledge the "new extension added" prompt once,
+    /// which is the difference between "nothing is happening" and "the user is
+    /// one click from being protected".
+    ///
+    /// Strictly narrower than `!installed`: a profile with no entry at all is not
+    /// pending anything. `browser_lock` relies on that distinction to decide
+    /// whether extending a grace window could plausibly accomplish anything.
+    pub pending_approval: bool,
     pub version: String,
 }
 
@@ -151,7 +162,7 @@ fn read_profile_ext(profile_dir: &Path, name: &str) -> Option<ProfileExt> {
     // Dev/external extensions live in "Secure Preferences"; store ones in
     // "Preferences". Check both; remember whether we read anything at all.
     let mut read_any = false;
-    let mut found: Option<(bool, String)> = None;
+    let mut found: Option<(bool, bool, String)> = None; // (installed, pending_approval, version)
     for fname in ["Secure Preferences", "Preferences"] {
         let v = match read_json(&profile_dir.join(fname)) {
             Some(v) => v,
@@ -196,18 +207,20 @@ fn read_profile_ext(profile_dir: &Path, name: &str) -> Option<ProfileExt> {
                 .or_else(|| entry.get("version").and_then(|x| x.as_str()))
                 .unwrap_or("")
                 .to_string();
-            found = Some((has_real_payload && !disabled_by_state && reasons_empty, version));
+            let enabled = !disabled_by_state && reasons_empty;
+            found = Some((has_real_payload && enabled, has_real_payload && !enabled, version));
             break;
         }
     }
     if !read_any {
         return None;
     }
-    let (installed, version) = found.unwrap_or((false, String::new()));
+    let (installed, pending_approval, version) = found.unwrap_or((false, false, String::new()));
     Some(ProfileExt {
         profile_dir: profile_dir.to_string_lossy().to_string(),
         name: name.to_string(),
         installed,
+        pending_approval,
         version,
     })
 }

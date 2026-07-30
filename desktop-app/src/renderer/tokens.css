@@ -333,9 +333,9 @@
 
 /* ============================================================
    DARK THEME (default) — app is dark-first, so :root carries these.
-   Values below are the "Noir" palette currently shipping in
-   desktop-app/src/renderer/styles.css ([data-style="noir"][data-theme="dark"]),
-   promoted from a style variant to the baseline default. bg-2/bg-3
+   Values below are the "Noir" palette, promoted from one style variant
+   among seven to the single baseline default (the other six, and the
+   `data-style` attribute that selected between them, are gone). bg-2/bg-3
    (raised surface tiers) and the semantic ok/warn/danger colors are
    new — Noir only defined two background tiers and borrowed
    ok/warn/danger ad hoc from inline hex codes scattered through
@@ -426,7 +426,28 @@
   /* ---- shadows / elevation ---- */
   --ol-shadow-sm: 0 8px 24px -12px rgba(0, 0, 0, 0.5);
   --ol-shadow-md: 0 24px 60px -24px rgba(0, 0, 0, 0.65), 0 2px 8px -2px rgba(0, 0, 0, 0.4);
-  --ol-blur-panel: 16px;  /* backdrop-filter blur amount for glass surfaces */
+
+  /* --ol-blur-panel is gone. It sized the backdrop-filter on glass surfaces,
+     and glass only ever read as glass because animated colour blobs sat
+     behind it. Those are gone (see the GROUND section of each surface's
+     stylesheet), so cards are opaque and take their lift from a shadow plus
+     the hairline below. */
+
+  /* Top-edge highlight. A 1px lit line along the top of a raised surface is
+     what makes it read as a physical panel rather than a lighter rectangle.
+     Near-white in light mode, i.e. invisible on a white card — correct, since
+     light surfaces get their lift from the shadow instead. */
+  --ol-hairline: rgba(255, 255, 255, 0.07);
+
+  /* ---- ground: the static field behind the interface ----
+     Decorative, the way --orb-* was, with the difference that nothing here
+     ever moves. Each is used by one or two looks: a dot for grid grounds, a
+     thread for woven and engraved ones, an edge for vignettes, and a well
+     for the recessed content pane. */
+  --ol-ground-dot: rgba(255, 255, 255, 0.10);
+  --ol-ground-thread: rgba(255, 255, 255, 0.038);
+  --ol-ground-edge: rgba(0, 0, 0, 0.62);
+  --ol-ground-well: rgba(0, 0, 0, 0.85);
 
   /* ---- motion: durations + easings ---- */
   --ol-duration-fast: 120ms;
@@ -468,6 +489,55 @@
 
   --ol-shadow-sm: 0 10px 28px -16px rgba(20, 20, 20, 0.18);
   --ol-shadow-md: 0 30px 70px -30px rgba(20, 20, 20, 0.24), 0 2px 10px -4px rgba(20, 20, 20, 0.10);
+
+  --ol-hairline: rgba(255, 255, 255, 0.95);
+  --ol-ground-dot: rgba(0, 0, 0, 0.09);
+  --ol-ground-thread: rgba(0, 0, 0, 0.030);
+  --ol-ground-edge: rgba(0, 0, 0, 0.11);
+  --ol-ground-well: rgba(20, 20, 20, 0.22);
+}
+
+/* ============================================================
+   NEUTRAL TEMPER
+   Noir's greys are pure achromatic. A grey carrying a slight hue
+   bias reads as chosen; a pure one reads as inherited — and this
+   is the largest perceptual change available at zero runtime cost,
+   because it is four hex values rather than a layer, a filter or
+   an animation.
+
+   Only the background tiers move. Text, accent, status and border
+   tokens are untouched, so every contrast ratio in the system is
+   exactly what it was and no temper can make the interface
+   unreadable. `pure` is the default and declares nothing.
+
+   Specificity note: these carry the same weight as [data-theme],
+   so the light-mode pairs below are written as two-attribute
+   selectors to beat the single-attribute [data-theme="light"]
+   block above regardless of source order.
+   ============================================================ */
+[data-neutral="cool"] {
+  --ol-bg-0: #080a0c;
+  --ol-bg-1: #101317;
+  --ol-bg-2: #171b20;
+  --ol-bg-3: #20262c;
+}
+[data-neutral="warm"] {
+  --ol-bg-0: #0b0a08;
+  --ol-bg-1: #141210;
+  --ol-bg-2: #1c1917;
+  --ol-bg-3: #25211d;
+}
+[data-theme="light"][data-neutral="cool"] {
+  --ol-bg-0: #f5f7f9;
+  --ol-bg-1: #ffffff;
+  --ol-bg-2: #eaeef2;
+  --ol-bg-3: #e0e6ec;
+}
+[data-theme="light"][data-neutral="warm"] {
+  --ol-bg-0: #faf8f4;
+  --ol-bg-1: #ffffff;
+  --ol-bg-2: #f2efe9;
+  --ol-bg-3: #e9e3da;
 }
 
 /* ============================================================

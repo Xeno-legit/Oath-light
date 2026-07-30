@@ -209,15 +209,18 @@ function browserLogo(key) {
   );
 }
 
-// Maps the backend's per-browser `state` to how the row reads.
+// Maps the backend's per-browser `state` to how the row reads. The words are
+// catalog keys (status.*), resolved at render — this table is built once at
+// load, so storing the resolved text would pin the row to whichever voice and
+// language happened to be active then.
 const BROWSER_STATE = {
-  running_connected: { label: 'Protected', color: 'var(--accent-2)', dot: 'var(--accent-2)', off: false },
-  running_partial:   { label: 'Partially protected', color: '#d9a441', dot: '#d9a441', off: false },
-  running_unknown:   { label: 'Running · extension not detected', color: '#d9a441', dot: '#d9a441', off: false },
-  connecting:        { label: 'Connecting…', color: '#d9a441', dot: '#d9a441', off: false },
-  extension_missing: { label: 'Extension missing', color: '#e5544b', dot: '#e5544b', off: false },
-  idle:              { label: 'Installed · not running', color: 'var(--muted)', dot: 'color-mix(in oklab, var(--muted) 70%, transparent)', off: true },
-  not_installed:     { label: 'Not installed', color: 'var(--muted)', dot: 'color-mix(in oklab, var(--muted) 70%, transparent)', off: true },
+  running_connected: { labelKey: 'status.browser_protected', color: 'var(--accent-2)', dot: 'var(--accent-2)', off: false },
+  running_partial:   { labelKey: 'status.browser_partial', color: '#d9a441', dot: '#d9a441', off: false },
+  running_unknown:   { labelKey: 'status.browser_running_unknown', color: '#d9a441', dot: '#d9a441', off: false },
+  connecting:        { labelKey: 'status.connecting', color: '#d9a441', dot: '#d9a441', off: false },
+  extension_missing: { labelKey: 'status.browser_ext_missing', color: '#e5544b', dot: '#e5544b', off: false },
+  idle:              { labelKey: 'status.browser_idle', color: 'var(--muted)', dot: 'color-mix(in oklab, var(--muted) 70%, transparent)', off: true },
+  not_installed:     { labelKey: 'status.not_installed', color: 'var(--muted)', dot: 'color-mix(in oklab, var(--muted) 70%, transparent)', off: true },
 };
 
 // Secondary note describing the force-install lock and — critically — its
@@ -225,6 +228,13 @@ const BROWSER_STATE = {
 // "user-level" rather than implying it's un-removable. Machine-scope (HKLM,
 // elevated) is the hard lock. Shown on healthy rows too, so the tamper-lock's
 // presence and strength are always visible, not only when the extension is gone.
+//
+// Deliberately NOT in strings.js, unlike every other string on this page:
+// these lines say where the lock is weak and what it would take to defeat it,
+// which is the one thing the shared catalog refuses to carry (VOICE.md,
+// "status yes, map no" — this function is named there as the example). Cutting
+// them down to a flat status is a copy decision for the owner, not something
+// to launder into the design system by moving it.
 function enforcementNote(b) {
   const missing = b.state === 'extension_missing' || b.state === 'running_partial';
   switch (b.enforcement) {
@@ -233,17 +243,140 @@ function enforcementNote(b) {
     // Policy is written but the extension isn't actually installed yet. Never
     // claim "locked" here — that conflation is the bug we fixed.
     case 'pending':       return 'policy set — waiting for the browser to install it';
-    // Writing the policy needs admin (the Software\Policies key is admin-only in
-    // both hives), so an unelevated app can't apply it — say so plainly.
+    case 'pending_user':  return 'policy set (user-level) — waiting for the browser to install it';
+    // Writing the policy needs admin on most machines (the Software\Policies key
+    // is usually admin-only in both hives), so say so plainly.
     case 'failed':        return 'needs admin to lock';
+    // Auto-installed rather than force-installed (the Edge path). The browser
+    // fetched it on its own and is holding it switched off until the user
+    // approves it once — that prompt is a browser security control, so the note
+    // asks for the click instead of implying we can skip it.
+    case 'needs_approval': return 'downloaded — turn it on in your browser';
+    // Approved and running. Real protection, but nothing pins it here, so this
+    // must never borrow the word "locked".
+    case 'auto_installed': return 'installed — not locked (removable)';
+    // Edge, on a PC that isn't domain/Entra-joined, force-installs ONLY from the
+    // Microsoft Edge Add-ons store — a Chrome Web Store entry is accepted as
+    // policy and then silently ignored. Admin does not change that, so the note
+    // must not imply it might.
+    case 'store_unavailable': return 'won’t auto-install here — add it yourself';
     case 'dormant':       return 'auto-restore on hold'; // engine not configured (defensive)
     default:              return null; // 'off' or not present
   }
 }
 
+// Where a user is sent to install the extension by hand, when no policy can put
+// it there for them. Edge accepts Chrome Web Store extensions on a manual
+// install (it prompts to allow other stores); it just will not *force*-install
+// them — which is exactly the case this covers.
+const MANUAL_INSTALL_URL = {
+  gecko: 'https://addons.mozilla.org/firefox/addon/oath-light-content-filter/',
+  chromium: 'https://chromewebstore.google.com/detail/oigdpcdgmldgjalfnlgekcbkmniplnad',
+};
+
+// The one action worth offering for this row, or null when there is nothing
+// honest to offer.
+//
+// Every branch here has to actually change something. The button this replaced
+// re-applied a policy that the backend then declined to rewrite, so it was a
+// no-op in every state it could appear in — a button that visibly does nothing
+// is worse than no button, because it teaches the user the lock is broken.
+function extensionAction(b) {
+  if (!PPNative.available) return null;
+  const missing = b.state === 'extension_missing' || b.state === 'running_partial'
+    || b.state === 'not_installed' || b.state === 'running_unknown';
+  switch (b.enforcement) {
+    // The browser downloaded it for us and is waiting on the user's approval.
+    // One click, in the browser — so send them straight to the toggle rather
+    // than leaving them to find a page they've probably never opened.
+    case 'needs_approval':
+      return { labelKey: 'status.action_turn_on', ghost: false, run: () => PPNative.openExtensionsPage(b.key) };
+    // Auto-installed and approved. Nothing to offer.
+    case 'auto_installed':
+      return null;
+    // No store will serve a forced install here, and auto-install didn't take
+    // either. Elevation is irrelevant; the only thing left is installing by hand.
+    case 'store_unavailable':
+      return {
+        labelKey: 'status.action_install_manually',
+        ghost: false,
+        run: () => PPNative.openExternal(MANUAL_INSTALL_URL[b.engine] || MANUAL_INSTALL_URL.chromium),
+      };
+    // Not locked, or locked only in the user's own hive where the user can
+    // delete it. One UAC prompt turns either into the machine-wide lock, so
+    // offer that — this is the button that used to exist and worked.
+    case 'failed':
+    case 'enforced_user':
+    case 'pending_user':
+      return { labelKey: 'status.action_grant_admin', ghost: false, run: () => PPNative.requestElevatedSetup() };
+    // Already the strong machine-wide lock. Nothing to upgrade — but if the
+    // extension still isn't there, re-asserting the policy makes the browser
+    // reload it and reinstall without waiting for a restart.
+    case 'enforced':
+    case 'pending':
+      return missing ? { labelKey: 'status.action_restore', ghost: true, run: () => PPNative.enforce(b.key) } : null;
+    default:
+      return null; // 'off', 'dormant', 'unsupported'
+  }
+}
+
+// True when every profile we can see is carrying the extension. The browser
+// lock's bar, and deliberately stricter than `b.installed` (which is "at least
+// one profile"): a second profile without the extension is a fully usable
+// unprotected browser, which is the whole thing the lock exists to stop.
+function fullyProtected(b) {
+  const profiles = b.profiles || [];
+  return profiles.length > 0 && profiles.every((p) => p.connected);
+}
+
+// Locked-out browsers are the one case where the row's action isn't about the
+// force-install policy at all — there is no policy to grant, upgrade or restore,
+// because this browser is here precisely because no policy works on it. The
+// only move is opening a restore window. Kept separate from `extensionAction`
+// rather than folded in as another case, because it outranks every branch there.
+function BrowserLockRow({ b }) {
+  const [left, setLeft] = React.useState(b.lock_grace_secs || 0);
+
+  // The backend re-states the remaining seconds every 3s monitor tick, which is
+  // too coarse to watch a 20-second window drain. Tick locally between updates
+  // and re-sync whenever a fresh status arrives.
+  React.useEffect(() => { setLeft(b.lock_grace_secs || 0); }, [b.lock_grace_secs]);
+  React.useEffect(() => {
+    if (left <= 0) return undefined;
+    const t = setInterval(() => setLeft((n) => (n > 0 ? n - 1 : 0)), 1000);
+    return () => clearInterval(t);
+  }, [left > 0]);
+
+  const open = left > 0;
+  return (
+    <div className="ext-lock">
+      <div className="ext-lock-note">
+        {open
+          // The countdown is the whole message: it does not extend for any
+          // reason, so the number on screen is the real remaining time and not
+          // an estimate the backend might quietly revise.
+          ? `${left}s — switch the extension on in ${b.name} now.`
+          : b.pending_approval
+            ? `${b.name} stays closed until the extension is switched on. It's downloaded already — one click.`
+            : `${b.name} stays closed until it's running the extension.`}
+      </div>
+      {!open &&
+        <button className="btn btn-sm" onClick={() => PPNative.requestBrowserRestore(b.key)}>
+          {PP.t('status.action_unlock', { browser: b.name })}
+        </button>
+      }
+    </div>
+  );
+}
+
 function ExtensionRow({ b }) {
   const st = BROWSER_STATE[b.state] || BROWSER_STATE.not_installed;
   const note = enforcementNote(b);
+  // While a browser is locked out and not yet covered, the restore window is the
+  // only thing worth offering — suppress the policy action so the row never
+  // shows two competing buttons.
+  const locked = b.locked_out && !fullyProtected(b);
+  const action = locked ? null : extensionAction(b);
   const profiles = b.profiles || [];
   const connProfiles = profiles.filter((p) => p.connected).length;
   const multi = profiles.length > 1;
@@ -258,8 +391,8 @@ function ExtensionRow({ b }) {
         </div>
         <div className="ext-status" style={{ color: st.color }}>
           <span className="ext-dot" style={{ background: st.dot }} />
-          {st.label}
-          {multi && <span className="ext-sync">· {connProfiles}/{profiles.length} profiles</span>}
+          {PP.t(st.labelKey)}
+          {multi && <span className="ext-sync">· {PP.t('status.profiles_connected', { connected: connProfiles, total: profiles.length })}</span>}
           {note && <span className="ext-sync">· {note}</span>}
         </div>
 
@@ -270,26 +403,31 @@ function ExtensionRow({ b }) {
             {profiles.map((p) => (
               <span key={p.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: p.connected ? 'var(--muted)' : '#d9a441' }}>
                 <span className="ext-dot" style={{ background: p.connected ? 'var(--accent-2)' : '#d9a441' }} />
-                {p.label}{p.connected ? (p.version ? ` · v${p.version}` : '') : ' · not installed'}
+                {p.label}{p.connected ? (p.version ? ` · v${p.version}` : '') : ` · ${PP.t('status.profile_not_installed')}`}
               </span>
             ))}
           </div>
         }
+
+        {locked && <BrowserLockRow b={b} />}
       </div>
-      {b.enforcement === 'failed' && PPNative.available &&
-        <button className="btn btn-sm" onClick={() => PPNative.requestElevatedSetup()}>Grant admin &amp; lock</button>
-      }
-      {b.enforcement !== 'failed' && b.state === 'extension_missing' && PPNative.available &&
-        <button className="btn btn-ghost btn-sm" onClick={() => PPNative.enforce(b.key)}>Restore</button>
+      {action &&
+        <button className={'btn btn-sm' + (action.ghost ? ' btn-ghost' : '')} onClick={action.run}>
+          {PP.t(action.labelKey)}
+        </button>
       }
     </div>
   );
 }
+// Attributed quotations, so they stay here rather than in strings.js: a quote
+// rewritten into a second voice is no longer that person's sentence, and the
+// catalog's contract is that every key has BOTH voices. The card's own label
+// ("Today's quote") is a catalog string — see overview.quote_eyebrow.
 const DAILY_MESSAGES = [
-{ q: "The urge is a wave. You don't have to fight it — just let it rise, crest, and pass. You always outlast it.", a: "Today's quote", by: "Naval Ravikant" },
-{ q: "You are not starting over. You are starting from experience, with everything the last days taught you.", a: "Today's quote", by: "James Clear" },
-{ q: "Discipline is choosing what you want most over what you want now. You've chosen well today.", a: "Today's quote", by: "Abraham Lincoln" },
-{ q: "Every clear minute rewires you a little. Quietly, you are becoming someone new.", a: "Today's quote", by: "Marcus Aurelius" }];
+{ q: "The urge is a wave. You don't have to fight it — just let it rise, crest, and pass. You always outlast it.", by: "Naval Ravikant" },
+{ q: "You are not starting over. You are starting from experience, with everything the last days taught you.", by: "James Clear" },
+{ q: "Discipline is choosing what you want most over what you want now. You've chosen well today.", by: "Abraham Lincoln" },
+{ q: "Every clear minute rewires you a little. Quietly, you are becoming someone new.", by: "Marcus Aurelius" }];
 
 
 function StatTile({ icon: I, label, value, sub }) {
@@ -387,7 +525,7 @@ function computeUrgeAnalytics(urges) {
 function riskWindowSummary(band) {
   const range = `${fmtHour(band.startHour)}–${fmtHour(band.endHour)}`;
   const days = band.topDays.length ? band.topDays.join('/') + ' ' : '';
-  return `Your risk window looks like ${days}${range}.`;
+  return PP.t('overview.risk_window_summary', { when: `${days}${range}` });
 }
 
 // --- vulnerable-hours merge (5.4's "cover this window" one-click) ----------
@@ -519,21 +657,27 @@ function UrgeQuickLog({ PP }) {
   };
 
   if (justLogged) {
-    return <span style={{ fontSize: 12.5, color: 'var(--accent-2)', fontWeight: 700 }}><IconCheck size={13} /> Logged</span>;
+    return (
+      <span style={{ fontSize: 12.5, color: 'var(--accent-2)', fontWeight: 700 }}>
+        <IconCheck size={13} /> {PP.t('overview.urge_logged')}
+      </span>
+    );
   }
   if (!open) {
     return (
       <button className="btn btn-ghost btn-sm" onClick={() => setOpen(true)}>
-        <IconSpark size={15} /> I had an urge
+        <IconSpark size={15} /> {PP.t('overview.urge_log_cta')}
       </button>
     );
   }
   return (
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-      {TRIGGER_TAGS.map((t) => (
-        <button key={t.id} className="chip" onClick={() => log(t.id)}>{t.label}</button>
+      {TRIGGER_TAGS.map((tag) => (
+        <button key={tag.id} className="chip" onClick={() => log(tag.id)}>{PP.t(tag.labelKey)}</button>
       ))}
-      <button className="chip" style={{ color: 'var(--muted)' }} onClick={() => log(null)}>Skip</button>
+      <button className="chip" style={{ color: 'var(--muted)' }} onClick={() => log(null)}>
+        {PP.t('app.action_skip')}
+      </button>
     </div>
   );
 }
@@ -558,9 +702,9 @@ function RiskAnalyticsCard({ s, PP }) {
     <div className="card fade-up" style={{ marginTop: 18 }}>
       <div className="spread" style={{ marginBottom: 4, alignItems: 'flex-start' }}>
         <div>
-          <div style={{ fontWeight: 800, fontSize: 16, letterSpacing: '-.02em' }}>Your patterns</div>
+          <div style={{ fontWeight: 800, fontSize: 16, letterSpacing: '-.02em' }}>{PP.t('overview.patterns_title')}</div>
           <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, maxWidth: '48ch' }}>
-            Built entirely from what you log here — nothing is sent anywhere, nothing is guessed.
+            {PP.t('overview.patterns_sub')}
           </div>
         </div>
         <UrgeQuickLog PP={PP} />
@@ -569,23 +713,25 @@ function RiskAnalyticsCard({ s, PP }) {
       {!hasEnough ? (
         <div style={{ fontSize: 13.5, color: 'var(--muted)', padding: '18px 2px 4px', lineHeight: 1.6 }}>
           {total === 0
-            ? 'Log an urge (or a slip) and this card starts learning your patterns — hour of day, day of week, and where your risk actually concentrates.'
-            : `${total} logged so far — a few more and a real pattern can show. Nothing meaningful yet, so nothing's drawn.`}
+            ? PP.t('overview.patterns_empty')
+            : PP.t('overview.patterns_thin', { count: total })}
         </div>
       ) : (
         <div style={{ marginTop: 14 }}>
           <div style={{ fontSize: 13.5, lineHeight: 1.6, marginBottom: 18 }}>
             {riskWindowSummary(band)}{' '}
-            <span style={{ color: 'var(--muted)' }}>({band.bandTotal} of {total} logged events)</span>
+            <span style={{ color: 'var(--muted)' }}>
+              {PP.t('overview.risk_window_events', { band: band.bandTotal, total })}
+            </span>
           </div>
 
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', marginBottom: 6 }}>By hour of day</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', marginBottom: 6 }}>{PP.t('overview.by_hour')}</div>
           <MiniBars data={hourData} highlightSet={highlightHours} />
           <div className="spread" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
             <span>12am</span><span>12pm</span><span>11pm</span>
           </div>
 
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', margin: '22px 0 6px' }}>By day of week</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', margin: '22px 0 6px' }}>{PP.t('overview.by_day')}</div>
           <MiniBars data={dayCounts} highlightSet={highlightDays} />
           <div style={{ display: 'flex', gap: 3, marginTop: 4 }}>
             {dayCounts.map((d, i) => (
@@ -596,11 +742,11 @@ function RiskAnalyticsCard({ s, PP }) {
           <div style={{ marginTop: 20 }}>
             <button className="btn btn-primary btn-sm" disabled={!band.meaningful}
               onClick={() => applyRiskWindow(PP, s.blocking, band)}>
-              <IconClock size={15} /> Cover this window with vulnerable hours
+              <IconClock size={15} /> {PP.t('overview.cover_window_cta')}
             </button>
             {!band.meaningful && (
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
-                The log doesn't show a strong enough pattern yet to suggest a window honestly — keep logging and this unlocks.
+                {PP.t('overview.cover_window_locked')}
               </div>
             )}
           </div>
@@ -634,44 +780,43 @@ function SlipDialog({ PP, go, onClose }) {
         {stage === 'confirm' ? (
           <React.Fragment>
             <div className="row" style={{ gap: 10, color: 'var(--accent-2)' }}>
-              <IconHeart size={18} /><span style={{ fontWeight: 800, fontSize: 15.5 }}>This stays between us</span>
+              <IconHeart size={18} />
+              <span style={{ fontWeight: 800, fontSize: 15.5 }}>{PP.t('streak.slip_confirm_title')}</span>
             </div>
             <p style={{ fontSize: 13.5, color: 'var(--text-2)', lineHeight: 1.6, margin: '12px 0 18px' }}>
-              A slip is not a collapse — it's a single moment, not your identity. Logging it honestly is
-              part of recovery, not a failure report. Your best streak and everything you've already
-              learned stay exactly as they are.
+              {PP.t('streak.slip_confirm_body')}
             </p>
-            <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>What was happening? (optional)</div>
+            <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>{PP.t('overview.slip_trigger_prompt')}</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 22 }}>
-              {TRIGGER_TAGS.map((t) => (
-                <button key={t.id} className="chip" onClick={() => setTrigger(t.id)}
-                  style={trigger === t.id ? { color: 'var(--accent)', borderColor: 'var(--accent)' } : undefined}>
-                  {t.label}
+              {TRIGGER_TAGS.map((tag) => (
+                <button key={tag.id} className="chip" onClick={() => setTrigger(tag.id)}
+                  style={trigger === tag.id ? { color: 'var(--accent)', borderColor: 'var(--accent)' } : undefined}>
+                  {PP.t(tag.labelKey)}
                 </button>
               ))}
             </div>
             <div className="row" style={{ gap: 10, justifyContent: 'flex-end' }}>
-              <button className="btn btn-ghost btn-sm" onClick={onClose}>Never mind</button>
-              <button className="btn btn-primary btn-sm" onClick={confirmSlip}>Log it &amp; start gentle mode</button>
+              <button className="btn btn-ghost btn-sm" onClick={onClose}>{PP.t('overview.slip_never_mind')}</button>
+              <button className="btn btn-primary btn-sm" onClick={confirmSlip}>{PP.t('overview.slip_confirm_cta')}</button>
             </div>
           </React.Fragment>
         ) : (
           <React.Fragment>
             <div className="row" style={{ gap: 10, color: 'var(--accent-2)' }}>
-              <IconHeart size={18} /><span style={{ fontWeight: 800, fontSize: 15.5 }}>Okay. You're still here.</span>
+              <IconHeart size={18} />
+              <span style={{ fontWeight: 800, fontSize: 15.5 }}>{PP.t('streak.slip_logged_title')}</span>
             </div>
             <p style={{ fontSize: 13.5, color: 'var(--text-2)', lineHeight: 1.6, margin: '12px 0 20px' }}>
-              Gentle mode is on for the next 24 hours. Your streak resets, but your best streak and this
-              month's progress don't disappear. What would help right now?
+              {PP.t('streak.slip_logged_body')}
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <button className="btn btn-primary btn-sm" onClick={() => { onClose(); go('mentor'); }}>
-                <IconChat size={15} /> Talk to the Mentor
+                <IconChat size={15} /> {PP.t('overview.slip_talk_mentor')}
               </button>
               <button className="btn btn-ghost btn-sm" onClick={() => { onClose(); go('panic'); }}>
-                <IconWave size={15} /> Ride out an urge instead
+                <IconWave size={15} /> {PP.t('overview.slip_ride_urge')}
               </button>
-              <button className="btn btn-ghost btn-sm" onClick={onClose}>Close</button>
+              <button className="btn btn-ghost btn-sm" onClick={onClose}>{PP.t('app.action_close')}</button>
             </div>
           </React.Fragment>
         )}
@@ -698,10 +843,109 @@ function MilestoneBanner({ milestone, onClose }) {
     }}>
       <div style={{ color: 'var(--accent-2)' }}><IconFlame size={26} /></div>
       <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 800, fontSize: 15.5 }}>{milestone} days clean — that's a real milestone.</div>
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 2 }}>Every one of those days was a choice. Well earned.</div>
+        <div style={{ fontWeight: 800, fontSize: 15.5 }}>{PP.t('streak.milestone_banner', { days: milestone })}</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 2 }}>{PP.t('streak.milestone_sub')}</div>
       </div>
       <button className="btn btn-ghost btn-sm" onClick={onClose}><IconX size={14} /></button>
+    </div>
+  );
+}
+
+// --- Weekly recap ------------------------------------------------------------
+
+// Settings used to list "Weekly progress recap" as a Coming-soon stub. Audited
+// against the code, the other two stubs beside it were already built (the daily
+// message and the milestone celebration are both on this page) — this one
+// genuinely wasn't, so here it is, in the same in-app channel as its two
+// siblings rather than as an OS notification the app has no plugin for.
+//
+// Rolling seven days, not "every Sunday": a recap that only exists one day a
+// week is a recap you mostly can't read. It reports only what the app actually
+// knows — logged urges and logged slips — and never infers anything from their
+// absence beyond "nothing was logged", because a day with no entry is a day the
+// user didn't tell us about, which is not the same as a day we watched.
+const RECAP_DAYS = 7;
+
+function computeWeeklyRecap(s) {
+  const now = Date.now();
+  const cutoff = now - RECAP_DAYS * 86400000;
+  const prevCutoff = now - 2 * RECAP_DAYS * 86400000;
+  const at = (x) => new Date(typeof x === 'string' ? x : (x && x.ts)).getTime();
+  const inRange = (t, from, to) => isFinite(t) && t >= from && t < to;
+
+  const urges = s.urges || [];
+  const slips = s.slips || [];
+
+  // A slip is mirrored into `urges` with source:'slip', so counting every urge
+  // would double-count it. "Rode out" is the honest name for the rest.
+  const rodeOut = urges.filter((u) => u && u.source !== 'slip' && inRange(at(u), cutoff, now)).length;
+  const prevRodeOut = urges.filter((u) => u && u.source !== 'slip' && inRange(at(u), prevCutoff, cutoff)).length;
+  const slipDays = new Set(
+    slips.filter((x) => inRange(at(x), cutoff, now)).map((x) => new Date(at(x)).toDateString())
+  );
+
+  return {
+    cleanDays: Math.max(0, RECAP_DAYS - slipDays.size),
+    slips: slipDays.size,
+    rodeOut,
+    // null when there's nothing to compare against yet, so the card can stay
+    // silent instead of announcing a meaningless "+0".
+    trend: (rodeOut === 0 && prevRodeOut === 0) ? null : rodeOut - prevRodeOut,
+  };
+}
+
+function WeeklyRecapCard({ s }) {
+  const r = computeWeeklyRecap(s);
+  // English pluralises by suffixing an s; most languages don't, so the count
+  // picks between two whole keys rather than having the code splice a letter
+  // onto a translated noun.
+  const plural = (n, key) => PP.t(`overview.${key}_${n === 1 ? 'one' : 'other'}`, { count: n });
+
+  // One plain sentence, chosen by what the week actually was — not a template
+  // with numbers dropped into it.
+  let line;
+  if (r.slips === 0 && r.rodeOut === 0) {
+    line = PP.t('overview.recap_quiet');
+  } else if (r.slips === 0) {
+    line = PP.t(`overview.recap_held_${r.rodeOut === 1 ? 'one' : 'other'}`, { count: r.rodeOut });
+  } else if (r.rodeOut > r.slips) {
+    line = PP.t('overview.recap_mostly_held', {
+      urges: plural(r.rodeOut, 'recap_urge'),
+      slips: plural(r.slips, 'recap_slip'),
+    });
+  } else {
+    line = PP.t('overview.recap_hard');
+  }
+
+  return (
+    <div className="card fade-up" style={{ marginTop: 18 }}>
+      <div className="spread" style={{ marginBottom: 4 }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 16, letterSpacing: '-.02em' }}>{PP.t('overview.recap_title')}</div>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3 }}>{line}</div>
+        </div>
+        {r.trend != null && r.trend !== 0 &&
+          <span className="chip" style={{ color: r.trend < 0 ? 'var(--accent-2)' : 'var(--muted)' }}>
+            {r.trend < 0 ? '↓' : '↑'} {PP.t('overview.recap_trend', { delta: Math.abs(r.trend) })}
+          </span>}
+      </div>
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 14 }}>
+        <RecapStat label={PP.t('overview.recap_clean_days')} value={`${r.cleanDays}/${RECAP_DAYS}`} />
+        <RecapStat label={PP.t('overview.recap_ridden_out')} value={r.rodeOut} />
+        <RecapStat label={PP.t('overview.recap_slips')} value={r.slips} />
+      </div>
+    </div>
+  );
+}
+
+function RecapStat({ label, value }) {
+  return (
+    <div style={{
+      padding: '12px 14px', borderRadius: 12,
+      background: 'var(--glass-2)', border: '1px solid var(--glass-brd)',
+    }}>
+      <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-.03em', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>{label}</div>
     </div>
   );
 }
@@ -769,9 +1013,9 @@ function OverviewPage({ s, PP, go }) {
   return (
     <div className="page">
       <div className="page-head fade-up">
-        <div className="eyebrow">Overview</div>
-        <h1 className="page-title">Your <em style={{ fontFamily: "Manrope" }}>progress</em></h1>
-        <p className="page-sub">A calm look at how far you've come. Small, steady steps — that's the whole game.</p>
+        <div className="eyebrow">{PP.t('overview.eyebrow')}</div>
+        <h1 className="page-title">{tRich('overview.title')}</h1>
+        <p className="page-sub">{PP.t('overview.sub')}</p>
       </div>
 
       {celebrating && <MilestoneBanner milestone={celebrating} onClose={() => setCelebrating(null)} />}
@@ -783,13 +1027,19 @@ function OverviewPage({ s, PP, go }) {
             <div>
               {gentle ? (
                 <React.Fragment>
-                  <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.2, letterSpacing: '-.02em' }}>Be gentle</div>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--muted)', marginTop: 4 }}>with yourself today</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.2, letterSpacing: '-.02em' }}>
+                    {PP.t('streak.gentle_title')}
+                  </div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--muted)', marginTop: 4 }}>
+                    {PP.t('streak.gentle_sub')}
+                  </div>
                 </React.Fragment>
               ) : (
                 <React.Fragment>
                   <div style={{ fontSize: 46, fontWeight: 800, lineHeight: 1, letterSpacing: '-.04em' }}>{s.streak}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--muted)', marginTop: 4 }}>days clean</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--muted)', marginTop: 4 }}>
+                    {PP.t('overview.days_clean_label')}
+                  </div>
                 </React.Fragment>
               )}
             </div>
@@ -797,19 +1047,21 @@ function OverviewPage({ s, PP, go }) {
           <div style={{ flex: 1 }}>
             <div className="row" style={{ gap: 8, color: gentle ? 'var(--muted)' : 'var(--accent-2)' }}>
               {gentle ? <IconHeart size={19} /> : <IconFlame size={19} />}
-              <span style={{ fontWeight: 800, fontSize: 15 }}>{gentle ? 'Starting again, gently' : 'On a roll'}</span>
+              <span style={{ fontWeight: 800, fontSize: 15 }}>
+                {PP.t(gentle ? 'overview.hero_gentle_label' : 'overview.hero_on_a_roll')}
+              </span>
             </div>
             <p style={{ fontSize: 14, color: 'var(--text-2)', lineHeight: 1.55, margin: '10px 0 14px' }}>
               {gentle
-                ? "A slip is a moment, not your identity. Today isn't about the number — it's about showing up again."
-                : (<React.Fragment>You're <b style={{ color: 'var(--text)' }}>{nextMilestone - s.streak} days</b> from your next milestone of {nextMilestone} days. Keep the rhythm.</React.Fragment>)}
+                ? PP.t('overview.hero_gentle_body')
+                : tRich('overview.hero_next_milestone', { days: nextMilestone - s.streak, target: nextMilestone })}
             </p>
             <div className="chip" style={{ width: 'fit-content', marginBottom: 14 }}>
-              {cleanDaysThisMonth} clean day{cleanDaysThisMonth === 1 ? '' : 's'} this month
+              {PP.t(`overview.clean_days_month_${cleanDaysThisMonth === 1 ? 'one' : 'other'}`, { count: cleanDaysThisMonth })}
             </div>
             <div>
               <button className="btn btn-ghost btn-sm" onClick={() => setSlipOpen(true)}>
-                <IconHeart size={16} /> I had a slip
+                <IconHeart size={16} /> {PP.t('streak.slip_button')}
               </button>
             </div>
           </div>
@@ -817,15 +1069,18 @@ function OverviewPage({ s, PP, go }) {
 
         {/* stat tiles */}
         <div className="grid" style={{ gridTemplateRows: '1fr 1fr', gap: 16 }}>
-          <StatTile icon={IconArrowUp} label="Best streak" value={`${s.bestStreak} days`} sub="Your personal record" />
-          <StatTile icon={IconShield} label="Sites blocked" value={totalBlocked.toLocaleString()} sub="Across all your browsers" />
+          <StatTile icon={IconArrowUp} label={PP.t('streak.best_streak_label')}
+                    value={PP.t('overview.stat_best_streak_value', { days: s.bestStreak })}
+                    sub={PP.t('overview.stat_best_streak_sub')} />
+          <StatTile icon={IconShield} label={PP.t('overview.stat_blocked_label')}
+                    value={totalBlocked.toLocaleString()} sub={PP.t('overview.stat_blocked_sub')} />
         </div>
       </div>
 
       {/* daily message */}
       <div className="card fade-up" style={{ marginTop: 18, padding: '28px 30px', position: 'relative', overflow: 'hidden' }}>
-        <div className="eyebrow" style={{ color: 'var(--muted)' }}>{msg.a}</div>
-        <blockquote style={{ fontSize: 27, lineHeight: 1.35, letterSpacing: '.005em', marginTop: 8, maxWidth: '46ch', fontFamily: "Manrope" }}>
+        <div className="eyebrow" style={{ color: 'var(--muted)' }}>{PP.t('overview.quote_eyebrow')}</div>
+        <blockquote style={{ fontSize: 27, lineHeight: 1.35, letterSpacing: '.005em', marginTop: 8, maxWidth: '46ch' }}>
           “{msg.q}”
         </blockquote>
         {msg.by && (
@@ -834,6 +1089,9 @@ function OverviewPage({ s, PP, go }) {
           </div>
         )}
       </div>
+
+      {/* weekly recap — the third of Settings' three in-app "notifications" */}
+      <WeeklyRecapCard s={s} />
 
       {/* urge log & trigger analytics (5.4) */}
       <RiskAnalyticsCard s={s} PP={PP} />
@@ -863,25 +1121,28 @@ function BrowserProtectionCard() {
     <div className="card fade-up" style={{ marginTop: 18 }}>
       <div className="spread" style={{ marginBottom: 4 }}>
         <div>
-          <div style={{ fontWeight: 800, fontSize: 16, letterSpacing: '-.02em' }}>Browser protection</div>
+          <div style={{ fontWeight: 800, fontSize: 16, letterSpacing: '-.02em' }}>
+            {PP.t('status.browser_protection_title')}
+          </div>
           <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3 }}>
-            Oath Light watches every running browser and keeps its extension in place
+            {PP.t('overview.browser_sub')}
           </div>
         </div>
         {runningBrowsers.length > 0 &&
           <span className="chip" style={{ color: allGood ? 'var(--accent-2)' : (missing ? '#e5544b' : 'var(--warn, #d9a441)') }}>
-            <IconShield size={14} /> {protectedRunning}/{runningBrowsers.length} protected
+            <IconShield size={14} />{' '}
+            {PP.t('status.browsers_protected_count', { protected: protectedRunning, total: runningBrowsers.length })}
           </span>
         }
       </div>
 
       {!PPNative.available ? (
         <div style={{ fontSize: 13.5, color: 'var(--muted)', padding: '14px 2px' }}>
-          Browser monitoring runs in the desktop app.
+          {PP.t('overview.browser_needs_desktop')}
         </div>
       ) : shown.length === 0 ? (
         <div style={{ fontSize: 13.5, color: 'var(--muted)', padding: '14px 2px' }}>
-          No browser is running right now. Open one and Oath Light will protect it automatically.
+          {PP.t('overview.browser_none_running')}
         </div>
       ) : (
         <div className="ext-grid">

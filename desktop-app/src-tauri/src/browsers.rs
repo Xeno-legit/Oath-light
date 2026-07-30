@@ -64,7 +64,40 @@ pub const HOST_NAME: &str = "com.oathlight.companion";
 /// — unlike a self-hosted update URL — is honored on ordinary *unmanaged*
 /// consumer machines, which is exactly what publishing unlocked (see the
 /// enforcement flow in lib.rs). Non-empty, so Chromium enforcement is LIVE.
+///
+/// **This URL works for Chrome/Brave/Vivaldi/Opera/Chromium but NOT for Edge on
+/// a consumer machine** — see `EDGE_STORE_EXTENSION_ID` for why, and
+/// `forcelist_target` for the per-browser choice that follows from it.
 pub const CHROMIUM_UPDATE_URL: &str = "https://clients2.google.com/service/update2/crx";
+
+/// Microsoft Edge Add-ons item ID — **empty until the extension is published
+/// there**, which is what currently blocks force-install on Edge entirely.
+///
+/// Edge is not "just another Chromium" for this one policy. Microsoft's
+/// `ExtensionInstallForcelist` documentation states it plainly:
+///
+/// > For Windows instances not joined to a Microsoft Active Directory domain,
+/// > forced installation is limited to apps and extensions listed in the
+/// > Microsoft Edge Add-ons website.
+///
+/// So on an ordinary consumer PC — exactly who this app is for — a forcelist
+/// entry pointing at the Chrome Web Store is **silently discarded**: Edge writes
+/// no error, logs nothing the user can see, and never even issues an update
+/// request for the ID (verified against Edge 150 with `--enable-logging --v=1`:
+/// our ID appears nowhere in the log, while other force-installs in the same
+/// session fetch normally). It just looks like the extension never installs.
+///
+/// Once the extension is published to Edge Add-ons, put its item ID here and
+/// Edge force-install starts working with no other change — `forcelist_target`
+/// already prefers it and pairs it with `EDGE_UPDATE_URL`. Until then Edge
+/// reports `StoreUnavailable` and the UI says so instead of pretending a
+/// written-but-inert policy is a lock.
+pub const EDGE_STORE_EXTENSION_ID: &str = "";
+
+/// Update endpoint for the Microsoft Edge Add-ons store — the only source Edge
+/// will force-install from on a machine that isn't domain/Entra-joined.
+/// Documented value, and Edge's own default when a forcelist entry omits a URL.
+pub const EDGE_UPDATE_URL: &str = "https://edge.microsoft.com/extensionwebstorebase/v1/crx";
 
 /// XPI URL used by the Firefox force-install policy (`ExtensionSettings` →
 /// `install_url`). Now that the add-on is published on AMO, this is AMO's
@@ -100,6 +133,19 @@ pub struct BrowserDef {
     /// Windows: enterprise-policy subkey (under `SOFTWARE`) that holds
     /// `ExtensionInstallForcelist` (Chromium) or `ExtensionSettings` (Gecko).
     pub policy_subkey: &'static str,
+    /// Windows: **external-extensions** subkey (under `SOFTWARE`). A subkey
+    /// named after an extension ID here, holding an `update_url`, makes the
+    /// browser download and install that extension on its own — Chromium's
+    /// `ExternalRegistryLoader`. Unlike the policy path this is not a lock (the
+    /// user can turn it off), and unlike the policy path **Edge honours it for
+    /// Chrome-Web-Store extensions on an unmanaged machine**, which makes it the
+    /// only way to get the extension into Edge today. Empty for Gecko, which has
+    /// no equivalent. See `enforce_external_install`.
+    pub ext_registry_subkey: &'static str,
+    /// The browser's own extensions page. Chromium forks each use their own
+    /// scheme, and a user who dismissed the "new extension added" prompt has no
+    /// other way to find the toggle. Empty when we have nothing to point at.
+    pub extensions_page: &'static str,
     /// Windows: `App Paths` exe name used to detect an install when not running.
     pub app_path_exe: &'static str,
     /// Unix: native-messaging-host dir relative to $HOME. (Used on macOS/Linux.)
@@ -118,6 +164,8 @@ pub const BROWSERS: &[BrowserDef] = &[
         process_names: &["chrome.exe", "chrome", "google chrome"],
         nm_registry_subkey: r"SOFTWARE\Google\Chrome\NativeMessagingHosts",
         policy_subkey: r"SOFTWARE\Policies\Google\Chrome",
+        ext_registry_subkey: r"SOFTWARE\Google\Chrome\Extensions",
+        extensions_page: "chrome://extensions",
         app_path_exe: "chrome.exe",
         nm_unix_dir: ".config/google-chrome/NativeMessagingHosts",
     },
@@ -128,6 +176,8 @@ pub const BROWSERS: &[BrowserDef] = &[
         process_names: &["msedge.exe", "msedge", "microsoft edge"],
         nm_registry_subkey: r"SOFTWARE\Microsoft\Edge\NativeMessagingHosts",
         policy_subkey: r"SOFTWARE\Policies\Microsoft\Edge",
+        ext_registry_subkey: r"SOFTWARE\Microsoft\Edge\Extensions",
+        extensions_page: "edge://extensions",
         app_path_exe: "msedge.exe",
         nm_unix_dir: ".config/microsoft-edge/NativeMessagingHosts",
     },
@@ -138,6 +188,8 @@ pub const BROWSERS: &[BrowserDef] = &[
         process_names: &["brave.exe", "brave"],
         nm_registry_subkey: r"SOFTWARE\BraveSoftware\Brave-Browser\NativeMessagingHosts",
         policy_subkey: r"SOFTWARE\Policies\BraveSoftware\Brave",
+        ext_registry_subkey: r"SOFTWARE\BraveSoftware\Brave-Browser\Extensions",
+        extensions_page: "brave://extensions",
         app_path_exe: "brave.exe",
         nm_unix_dir: ".config/BraveSoftware/Brave-Browser/NativeMessagingHosts",
     },
@@ -151,6 +203,8 @@ pub const BROWSERS: &[BrowserDef] = &[
         // also write its own below. Policy under Opera Software.
         nm_registry_subkey: r"SOFTWARE\Opera Software\NativeMessagingHosts",
         policy_subkey: r"SOFTWARE\Policies\Opera Software\Opera",
+        ext_registry_subkey: r"SOFTWARE\Opera Software\Extensions",
+        extensions_page: "opera://extensions",
         app_path_exe: "opera.exe",
         nm_unix_dir: ".config/opera/NativeMessagingHosts",
     },
@@ -161,6 +215,8 @@ pub const BROWSERS: &[BrowserDef] = &[
         process_names: &["vivaldi.exe", "vivaldi"],
         nm_registry_subkey: r"SOFTWARE\Vivaldi\NativeMessagingHosts",
         policy_subkey: r"SOFTWARE\Policies\Vivaldi",
+        ext_registry_subkey: r"SOFTWARE\Vivaldi\Extensions",
+        extensions_page: "vivaldi://extensions",
         app_path_exe: "vivaldi.exe",
         nm_unix_dir: ".config/vivaldi/NativeMessagingHosts",
     },
@@ -171,6 +227,8 @@ pub const BROWSERS: &[BrowserDef] = &[
         process_names: &["chromium.exe", "chromium", "chromium-browser"],
         nm_registry_subkey: r"SOFTWARE\Chromium\NativeMessagingHosts",
         policy_subkey: r"SOFTWARE\Policies\Chromium",
+        ext_registry_subkey: r"SOFTWARE\Chromium\Extensions",
+        extensions_page: "chrome://extensions",
         app_path_exe: "chromium.exe",
         nm_unix_dir: ".config/chromium/NativeMessagingHosts",
     },
@@ -181,6 +239,8 @@ pub const BROWSERS: &[BrowserDef] = &[
         process_names: &["firefox.exe", "firefox"],
         nm_registry_subkey: r"SOFTWARE\Mozilla\NativeMessagingHosts",
         policy_subkey: r"SOFTWARE\Policies\Mozilla\Firefox",
+        ext_registry_subkey: "",
+        extensions_page: "about:addons",
         app_path_exe: "firefox.exe",
         nm_unix_dir: ".mozilla/native-messaging-hosts",
     },
@@ -312,6 +372,56 @@ pub fn is_installed(def: &BrowserDef) -> bool {
 pub fn is_installed(_def: &BrowserDef) -> bool {
     // Non-Windows install detection is left to "running implies installed".
     false
+}
+
+/// The browser's executable path from `App Paths`, when it points at a file that
+/// is really there. Same lookup `is_installed` does, but keeping the path — used
+/// to launch the browser straight at its own extensions page (a `chrome://` /
+/// `edge://` URL only that browser can open, so the shell can't do it for us).
+#[cfg(target_os = "windows")]
+pub fn installed_exe_path(def: &BrowserDef) -> Option<PathBuf> {
+    for root in ["HKLM", "HKCU"] {
+        let key = format!(
+            r"{}\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{}",
+            root, def.app_path_exe
+        );
+        for (_, data) in read_reg_sz_values(&key) {
+            let p = data.trim().trim_matches('"');
+            if !p.is_empty() && Path::new(p).exists() {
+                return Some(PathBuf::from(p));
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn installed_exe_path(_def: &BrowserDef) -> Option<PathBuf> {
+    None
+}
+
+/// `is_installed` with a 60-second cache, for callers on the 3s monitor tick.
+///
+/// The uncached probe spawns up to two `reg query` processes per browser; the
+/// monitor asks about all seven every tick, which is 14 subprocesses every three
+/// seconds for an answer that changes only when someone installs or uninstalls a
+/// browser. A minute of staleness costs nothing here — the force-install policy
+/// this gates is written once and stays written.
+pub fn is_installed_cached(def: &BrowserDef) -> bool {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+    const TTL: Duration = Duration::from_secs(60);
+    static CACHE: OnceLock<Mutex<HashMap<&'static str, (Instant, bool)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some((t, v)) = cache.lock().unwrap().get(def.key) {
+        if t.elapsed() < TTL {
+            return *v;
+        }
+    }
+    let fresh = is_installed(def);
+    cache.lock().unwrap().insert(def.key, (Instant::now(), fresh));
+    fresh
 }
 
 // ============================================================================
@@ -454,6 +564,22 @@ pub enum EnforceOutcome {
     EnforcedUser,
     /// Attempted but neither hive accepted the write.
     Failed,
+    /// No policy can force-install here, so the extension was registered for
+    /// **automatic install** through the external-extensions registry instead
+    /// (`enforce_external_install`). The browser downloads and installs it by
+    /// itself, then leaves it switched off until the user approves it once —
+    /// that approval is a browser security control we do not try to forge. Real
+    /// protection once approved, but never a lock: the user can remove it.
+    AutoInstallPendingApproval,
+    /// There is **no store this browser will force-install us from on this
+    /// machine**, and the auto-install fallback could not be registered either.
+    /// Today this means exactly one thing: Edge on a machine that isn't
+    /// domain/Entra-joined, with no Microsoft Edge Add-ons listing published
+    /// (see `EDGE_STORE_EXTENSION_ID`). Distinct from `Failed` (we could not
+    /// write) and from `Dormant` (no URL configured for the engine at all),
+    /// because the remedy is completely different: publish to Edge Add-ons, or
+    /// have the user install it by hand. Elevation does not help.
+    StoreUnavailable,
     /// Platform/engine not supported for enforcement. (macOS/Linux.)
     #[allow(dead_code)]
     Unsupported,
@@ -465,6 +591,114 @@ pub fn enforcement_configured(engine: Engine) -> bool {
         Engine::Chromium => !CHROMIUM_UPDATE_URL.is_empty(),
         Engine::Gecko => !FIREFOX_XPI_URL.is_empty(),
     }
+}
+
+/// True when this machine is joined to an Active Directory domain, to Microsoft
+/// Entra ID, or registered with an MDM — the condition under which Edge lifts
+/// its "Edge Add-ons only" restriction and will force-install from the Chrome
+/// Web Store like every other Chromium.
+///
+/// Read once and cached: this cannot change while the process runs, and the
+/// probe spawns a subprocess (the monitor would otherwise run it every tick).
+/// `dsregcmd /status` ships with Windows 10+ and reports AD join, Entra join and
+/// hybrid/workplace join in one place; `USERDNSDOMAIN` is the fallback for the
+/// classic domain-user case if `dsregcmd` is missing or refuses to run.
+#[cfg(target_os = "windows")]
+fn is_domain_managed() -> bool {
+    use std::sync::OnceLock;
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        if let Ok(out) = std::process::Command::new("dsregcmd")
+            .arg("/status")
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+        {
+            let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
+            for line in text.lines() {
+                let l = line.trim();
+                // "AzureAdJoined : YES" / "DomainJoined : YES" / …
+                let joined_field = l.starts_with("azureadjoined")
+                    || l.starts_with("enterprisejoined")
+                    || l.starts_with("domainjoined")
+                    || l.starts_with("isdevicejoined");
+                if joined_field && l.ends_with("yes") {
+                    return true;
+                }
+            }
+        }
+        std::env::var("USERDNSDOMAIN").map(|v| !v.trim().is_empty()).unwrap_or(false)
+    })
+}
+
+/// The `(extension_id, update_url)` pair this browser can actually force-install
+/// us from **on this machine**, or `None` when no store will serve it.
+///
+/// Every Chromium except Edge installs from the Chrome Web Store. Edge prefers
+/// the Edge Add-ons listing (the only source it accepts unmanaged), falls back
+/// to the Web Store when the machine is domain/Entra-joined — where Microsoft's
+/// restriction doesn't apply — and otherwise has no usable source at all, which
+/// is reported rather than papered over. Gecko has a single source (AMO) and is
+/// handled directly in `enforce_policy`.
+pub fn forcelist_target(def: &BrowserDef) -> Option<(&'static str, &'static str)> {
+    if def.engine != Engine::Chromium {
+        return None;
+    }
+    if def.key != "edge" {
+        return Some((STORE_EXTENSION_ID, CHROMIUM_UPDATE_URL));
+    }
+    if !EDGE_STORE_EXTENSION_ID.is_empty() {
+        return Some((EDGE_STORE_EXTENSION_ID, EDGE_UPDATE_URL));
+    }
+    #[cfg(target_os = "windows")]
+    if is_domain_managed() {
+        return Some((STORE_EXTENSION_ID, CHROMIUM_UPDATE_URL));
+    }
+    None
+}
+
+/// True when this browser **cannot be force-installed on this machine** and so
+/// depends on the user leaving the auto-installed extension switched on — the
+/// class `browser_lock` exists for.
+///
+/// Today this is exactly Edge on a consumer PC, and it is derived rather than
+/// hard-coded on purpose: the day an Edge Add-ons id is published,
+/// `forcelist_target` starts returning a real pair, this returns false, and Edge
+/// stops being kill-on-sight without anyone remembering to go and change it. A
+/// browser we can pin has no business being locked out — its policy reinstalls
+/// the extension by itself, and killing it would *prevent* the launch during
+/// which that happens.
+///
+/// Gecko is excluded: Firefox force-installs from AMO through `ExtensionSettings`
+/// and has no external-registry path, so a `None` from `forcelist_target` means
+/// "wrong mechanism", not "no mechanism".
+pub fn requires_manual_install(def: &BrowserDef) -> bool {
+    def.engine == Engine::Chromium
+        && !def.ext_registry_subkey.is_empty()
+        && forcelist_target(def).is_none()
+}
+
+/// True when some browser **other than `def`** is installed and is one we can
+/// actually pin the extension into — i.e. bricking `def` still leaves the user a
+/// working, protected way onto the web.
+///
+/// The browser lock's single exemption depends on this. A machine where Edge is
+/// the only browser is a machine where bricking Edge means no browsing at all:
+/// no way to download a second browser, no way to reach a support page, no way
+/// out. That is not strictness, it is a dead end.
+///
+/// The alternative must not itself be lockable (`!requires_manual_install`), or
+/// two mutually-locked browsers could exempt each other and neither would ever
+/// be enforced. Today nothing else is lockable, but the invariant is cheap to
+/// state and expensive to rediscover.
+///
+/// Uses the 60s-cached probe: this runs on the monitor tick, and "is Chrome
+/// installed" does not change second to second.
+pub fn has_alternative_browser(def: &BrowserDef) -> bool {
+    BROWSERS
+        .iter()
+        .any(|other| other.key != def.key && !requires_manual_install(other) && is_installed_cached(other))
 }
 
 // NOTE (removed with publication): an earlier `offstore_forceinstall_supported()`
@@ -505,39 +739,49 @@ fn read_reg_sz_values(full_key: &str) -> Vec<(String, String)> {
 }
 
 /// True when `data` is a forcelist entry for *our* extension (its `id;url` form
-/// leads with one of our ids). Matches EITHER the store id (what we now write)
-/// or the legacy unpacked/dev id (what an older build may have written), so
-/// detection and cleanup stay correct across the switch to the Web-Store target.
+/// leads with one of our ids). Matches the Web-Store id (what we write for every
+/// Chromium but Edge), the Edge Add-ons id (once published), or the legacy
+/// unpacked/dev id an older build may have written — so detection and cleanup
+/// stay correct across every id we have ever targeted.
 #[cfg(target_os = "windows")]
 fn is_our_forcelist_entry(data: &str) -> bool {
-    matches!(data.split(';').next(), Some(id) if id == STORE_EXTENSION_ID || id == EXTENSION_ID)
+    match data.split(';').next() {
+        Some(id) => {
+            id == STORE_EXTENSION_ID
+                || id == EXTENSION_ID
+                || (!EDGE_STORE_EXTENSION_ID.is_empty() && id == EDGE_STORE_EXTENSION_ID)
+        }
+        None => false,
+    }
 }
 
 /// Chromium list-policies that must accompany the forcelist entry, as
-/// `(subkey_under_policy_root, value_data)`.
+/// `(subkey_under_policy_root, value_data)`, for the store `id` is being
+/// installed from.
 ///
-/// Why this exists — the Edge bug: `ExtensionInstallForcelist` alone is enough
-/// on Chrome, and Edge was being treated as "just another Chromium", so it got
-/// the forcelist and nothing else. But Edge does not trust the Chrome Web Store
-/// by default: a forcelist entry whose update URL points at CWS is accepted as
-/// *policy* and then dropped at install time because the source isn't permitted.
-/// That is the observed symptom — Chrome installs, Edge never does, and neither
-/// surfaces an error anywhere the user can see.
+/// `ExtensionInstallSources` permits that store as an install origin and
+/// `ExtensionInstallAllowlist` names our ID explicitly, which keeps us
+/// installable on a machine carrying a blocklist-everything (`*`) policy. Both
+/// are additive allow-rules — they can only ever permit our own extension, never
+/// restrict anything else — and both are no-ops on a browser that already trusts
+/// the store in question.
 ///
-/// `ExtensionInstallSources` permits CWS as an install origin and
-/// `ExtensionInstallAllowlist` names our ID explicitly, which also keeps us
-/// installable on a machine with a blocklist-everything (`*`) policy. Both are
-/// additive allow-rules — they can only ever permit our own extension, never
-/// restrict anything else — and both are no-ops on Chrome, which already trusts
-/// its own store. Written for every Chromium browser rather than special-casing
-/// Edge: the other forks inherit Edge-like store restrictions at their own pace,
-/// and an unnecessary allow-entry costs nothing.
+/// **These do not make Edge accept a Chrome-Web-Store force-install.** An
+/// earlier build shipped them believing they did; they don't, and can't. Edge's
+/// restriction is on the *store*, not on the install source permission — see
+/// `EDGE_STORE_EXTENSION_ID`. They are kept because they are genuinely load-
+/// bearing under a restrictive blocklist policy, not as an Edge workaround.
 #[cfg(target_os = "windows")]
-fn chromium_allow_list_policies() -> [(&'static str, String); 2] {
-    [
-        ("ExtensionInstallSources", "https://clients2.google.com/*".to_string()),
-        ("ExtensionInstallAllowlist", STORE_EXTENSION_ID.to_string()),
-    ]
+fn chromium_allow_list_policies(id: &str, update_url: &str) -> [(&'static str, String); 2] {
+    // Permit the origin the CRX is actually served from. Edge Add-ons and the
+    // Chrome Web Store serve the payload from a different host than the update
+    // manifest, so allow the whole scheme+host the update URL names.
+    let source = if update_url == EDGE_UPDATE_URL {
+        "https://edge.microsoft.com/*".to_string()
+    } else {
+        "https://clients2.google.com/*".to_string()
+    };
+    [("ExtensionInstallSources", source), ("ExtensionInstallAllowlist", id.to_string())]
 }
 
 /// Write the accompanying allow-policies into `root` (a hive prefix). Each is a
@@ -545,8 +789,8 @@ fn chromium_allow_list_policies() -> [(&'static str, String); 2] {
 /// don't-clobber-someone-else's-entry rule applies. Best-effort: these support
 /// the forcelist, and a failure is reported by the forcelist write itself.
 #[cfg(target_os = "windows")]
-fn write_chromium_allow_lists(root: &str, def: &BrowserDef) {
-    for (subkey, data) in chromium_allow_list_policies() {
+fn write_chromium_allow_lists(root: &str, def: &BrowserDef, id: &str, update_url: &str) {
+    for (subkey, data) in chromium_allow_list_policies(id, update_url) {
         let key = format!(r"{}\{}\{}", root, def.policy_subkey, subkey);
         let existing = read_reg_sz_values(&key);
         let value = existing
@@ -568,35 +812,183 @@ fn write_chromium_allow_lists(root: &str, def: &BrowserDef) {
     }
 }
 
-/// Create the policy key tree for `def` without writing any value into it.
+/// The three Chromium list-policy subkeys we ever write under `policy_subkey`.
+#[cfg(target_os = "windows")]
+const CHROMIUM_LIST_POLICY_SUBKEYS: [&str; 3] =
+    ["ExtensionInstallForcelist", "ExtensionInstallSources", "ExtensionInstallAllowlist"];
+
+/// True when these `reg query` values contain at least one real list entry.
 ///
-/// Why this exists — the "needs a restart" bug: Chromium watches its policy key
-/// for changes and reloads policy live, so a forcelist written while the browser
-/// is running should take effect within seconds. That only holds if the key
-/// **already existed** when the browser started. On a machine that has never had
-/// a managed browser, `Software\Policies\<vendor>` does not exist at all, so
-/// there is nothing for the browser to watch and the first value we write goes
-/// unnoticed until the next launch — precisely the "installed properly after a
-/// restart" behaviour.
+/// Chromium encodes a list policy as values named `1`, `2`, … under the policy
+/// subkey, and ignores everything else — including the empty `(Default)` REG_SZ
+/// that `reg add <key> /f` leaves behind. So the default value must not count as
+/// content: treating it as content is what would make an empty, extension-
+/// uninstalling forcelist key look occupied and survive pruning.
+#[cfg(target_os = "windows")]
+fn list_policy_has_entries(values: &[(String, String)]) -> bool {
+    values.iter().any(|(name, data)| name.parse::<u32>().is_ok() && !data.is_empty())
+}
+
+/// True when a list-policy key holds no list entry at all.
+#[cfg(target_os = "windows")]
+fn list_policy_key_is_empty(full_key: &str) -> bool {
+    !list_policy_has_entries(&read_reg_sz_values(full_key))
+}
+
+/// Delete any of our list-policy subkeys that exist but hold no entries.
 ///
-/// Creating the (empty) keys early fixes it: an empty policy key changes no
-/// behaviour, but it gives the browser something to register a change
-/// notification on, so the later forcelist write is picked up live. Called on
-/// startup for every known browser, installed or not — a stray empty policy key
-/// is inert.
+/// **This repairs a policy that actively uninstalls the extension.** A list
+/// policy in Chromium is encoded as a subkey whose values are named `1`, `2`, …
+/// — so a subkey that exists with *no* numbered values is not "no policy", it is
+/// **the policy set to an empty list**. Machine scope (`HKLM`) outranks user
+/// scope (`HKCU`) in Chromium's policy merge, and Chrome's own documentation
+/// says that removing an extension from `ExtensionInstallForcelist` uninstalls
+/// it. So an empty `HKLM` forcelist key silently overrides a perfectly good
+/// `HKCU` entry with "force-install nothing" **and tears the extension back out
+/// of every profile**.
+///
+/// The previous `ensure_policy_key` created exactly those keys, in both hives,
+/// for all seven browsers, on every startup — so any machine where this app ever
+/// ran elevated (the `OathLightElevated` logon task runs it with `/RL HIGHEST`)
+/// got empty machine-scope keys, and its Chrome quietly stopped keeping the
+/// extension. Pruning is therefore not tidy-up; it is the fix, and it has to run
+/// on machines already in that state, not just prevent new ones.
+///
+/// Only ever removes a key we would have created and that carries nothing: a
+/// real managed forcelist with another extension in it has numbered values and
+/// is left strictly alone.
+#[cfg(target_os = "windows")]
+fn prune_empty_list_policy_keys(def: &BrowserDef) {
+    if def.engine != Engine::Chromium {
+        return;
+    }
+    for root in ["HKLM", "HKCU"] {
+        prune_empty_list_policy_keys_under(root, def.policy_subkey);
+    }
+}
+
+/// The hive-and-subkey half of `prune_empty_list_policy_keys`, split out so the
+/// repair can be exercised against a real (scratch) registry key in a test —
+/// this deletes policy keys, so "it compiles" is not enough assurance.
+#[cfg(target_os = "windows")]
+fn prune_empty_list_policy_keys_under(root: &str, policy_subkey: &str) {
+    for sub in CHROMIUM_LIST_POLICY_SUBKEYS {
+        let key = format!(r"{}\{}\{}", root, policy_subkey, sub);
+        // `reg query` failing means the key isn't there — nothing to prune.
+        if reg().args(["query", &key]).output().map(|o| o.status.success()).unwrap_or(false)
+            && list_policy_key_is_empty(&key)
+        {
+            let _ = reg().args(["delete", &key, "/f"]).output();
+        }
+    }
+}
+
+/// Register the extension for **automatic install** through Chromium's
+/// external-extensions registry, and report whether the registration is there.
+///
+/// This is the Edge answer, and it is not a policy. A subkey named after the
+/// extension ID under `Software\<vendor>\<product>\Extensions`, holding an
+/// `update_url`, makes the browser fetch and install that extension by itself on
+/// its next launch. **Edge honours this for Chrome-Web-Store extensions on an
+/// ordinary unmanaged machine** — verified end to end against Edge 150: it
+/// queries CWS with `installedby=external`, downloads
+/// `OIGDPCDGMLDGJALFNLGEKCBKMNIPLNAD_3_5_0_0.crx`, unpacks it and registers it
+/// at the right version. That is the same store the *policy* path is refused
+/// from, so the restriction really is on forced installation alone.
+///
+/// **It is auto-install, not a lock, and it stops one step short of running.**
+/// Chromium disables an externally-registered extension until the user
+/// acknowledges the "new extension added" prompt once — measured as
+/// `disable_reasons: 8192, location: 6`, identical for an unrelated control
+/// extension with no policy of ours anywhere near it, so it is the generic
+/// sideload protection and nothing to do with our configuration. That
+/// acknowledgement lives in HMAC-signed Secure Preferences and is deliberately
+/// not writable from outside the browser; it is the protection working, and the
+/// UI asks the user for the click rather than pretending it isn't needed. The
+/// user can also remove the extension afterwards, and Chromium remembers that
+/// in `external_uninstalls` — so this genuinely cannot be a lock. Publishing to
+/// Edge Add-ons is still the only way to *force* it.
+///
+/// HKCU only: it needs no elevation, applies to the user we are protecting, and
+/// the HKLM twin buys nothing (same prompt, same removability).
+#[cfg(target_os = "windows")]
+fn enforce_external_install(def: &BrowserDef, id: &str, update_url: &str) -> bool {
+    if def.ext_registry_subkey.is_empty() || id.is_empty() {
+        return false;
+    }
+    let key = format!(r"HKCU\{}\{}", def.ext_registry_subkey, id);
+    reg()
+        .args(["add", &key, "/v", "update_url", "/t", "REG_SZ", "/d", update_url, "/f"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// True when the external-install registration `enforce_external_install` writes
+/// is still in the registry — the `AutoInstallPendingApproval` counterpart to
+/// `policy_present`.
+///
+/// Needed because that path is the *only* thing standing behind Edge today, and
+/// it lives in an ordinary HKCU key with no ACL protecting it: deleting it is a
+/// right-click away, and unlike a forcelist entry there is no second hive to
+/// fall back on. Without a way to notice it is gone, "we registered it once" and
+/// "it is registered" are indistinguishable for the rest of the session.
+#[cfg(target_os = "windows")]
+fn external_install_present(def: &BrowserDef) -> bool {
+    if def.ext_registry_subkey.is_empty() {
+        return false;
+    }
+    [STORE_EXTENSION_ID, EXTENSION_ID, EDGE_STORE_EXTENSION_ID].iter().any(|id| {
+        !id.is_empty()
+            && read_reg_sz_values(&format!(r"HKCU\{}\{}", def.ext_registry_subkey, id))
+                .iter()
+                .any(|(name, data)| name == "update_url" && !data.is_empty())
+    })
+}
+
+/// Drop the external-install registration (sanctioned uninstall only), so the
+/// browser stops re-adding the extension after the user removes it.
+#[cfg(target_os = "windows")]
+fn remove_external_install(def: &BrowserDef) {
+    if def.ext_registry_subkey.is_empty() {
+        return;
+    }
+    for id in [STORE_EXTENSION_ID, EXTENSION_ID, EDGE_STORE_EXTENSION_ID] {
+        if id.is_empty() {
+            continue;
+        }
+        let _ = reg()
+            .args(["delete", &format!(r"HKCU\{}\{}", def.ext_registry_subkey, id), "/f"])
+            .output();
+    }
+}
+
+/// Create the vendor policy key for `def` without writing any value into it, and
+/// prune any empty list-policy subkey left by an older build.
+///
+/// Why the vendor key exists — the "needs a restart" bug: Chromium watches its
+/// policy key for changes and reloads policy live, so a forcelist written while
+/// the browser is running should take effect within seconds. That only holds if
+/// the key **already existed** when the browser started. On a machine that has
+/// never had a managed browser, `Software\Policies\<vendor>` does not exist at
+/// all, so there is nothing for the browser to watch and the first value we
+/// write goes unnoticed until the next launch — precisely the "installed
+/// properly only after I restarted the browser" behaviour.
+///
+/// Creating the empty *vendor* key fixes that and is genuinely inert: it holds
+/// no policy value, and Chromium's watch is registered with `bWatchSubtree`, so
+/// watching the vendor key already covers every subkey created under it later.
+///
+/// What it must **not** do is pre-create the list-policy subkeys — see
+/// `prune_empty_list_policy_keys` for why that was destructive rather than
+/// merely untidy. Called on startup for every known browser, installed or not.
 #[cfg(target_os = "windows")]
 pub fn ensure_policy_key(def: &BrowserDef) {
     for root in ["HKLM", "HKCU"] {
         let base = format!(r"{}\{}", root, def.policy_subkey);
         let _ = reg().args(["add", &base, "/f"]).output();
-        if def.engine == Engine::Chromium {
-            for sub in
-                ["ExtensionInstallForcelist", "ExtensionInstallSources", "ExtensionInstallAllowlist"]
-            {
-                let _ = reg().args(["add", &format!(r"{}\{}", base, sub), "/f"]).output();
-            }
-        }
     }
+    prune_empty_list_policy_keys(def);
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -719,42 +1111,96 @@ pub fn policy_present(_def: &BrowserDef) -> Option<EnforceOutcome> {
     None
 }
 
+/// True when what `enforce_policy` last achieved for `def` is **still true right
+/// now** — i.e. the caller's memo of that outcome can be trusted for another
+/// round instead of re-running the write.
+///
+/// The monitor remembers each browser's outcome so a healthy machine doesn't
+/// spawn `reg` every 3s. That memo was write-once, which quietly turned "we
+/// wrote the policy" into "the policy is there" for the rest of the session —
+/// and those come apart the moment someone deletes the value. The HKCU fallback
+/// is the common case on an unelevated install and sits in the user's own hive,
+/// where removing it needs no prompt at all. Nothing else would ever notice:
+/// the browsers' own self-heal reinstalls an extension removed *while the policy
+/// stands*, and cannot do anything about the policy itself being removed. So the
+/// row went on reporting a lock that no longer existed, and never re-asserted
+/// it. Re-reading is what makes the memo an optimisation again rather than an
+/// assumption.
+///
+/// Scope-exact on purpose: an `EnforcedMachine` memo that now only finds `HKCU`
+/// (an elevated write that was later stripped from `HKLM`) is *not* still true,
+/// and re-running the write is how it gets either restored or honestly
+/// downgraded to `enforced_user` in the UI.
+///
+/// Outcomes that wrote nothing — `Failed`, `StoreUnavailable`, `Dormant`,
+/// `Unsupported` — have nothing that could have been deleted, so they report
+/// true and cost no registry reads. Re-trying those is the elevation path's job
+/// (`RE_ENFORCE_REQUESTED` clears the whole memo), not this poll's.
+#[cfg(target_os = "windows")]
+pub fn enforcement_still_present(def: &BrowserDef, last: EnforceOutcome) -> bool {
+    match last {
+        EnforceOutcome::EnforcedMachine | EnforceOutcome::EnforcedUser => {
+            policy_present(def) == Some(last)
+        }
+        EnforceOutcome::AutoInstallPendingApproval => external_install_present(def),
+        _ => true,
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn enforcement_still_present(_def: &BrowserDef, _last: EnforceOutcome) -> bool {
+    true
+}
+
 /// Write the force-install policy for `def` so a removed/disabled extension is
 /// reinstalled on the browser's next launch / policy refresh.
 ///
-/// **Requires elevation.** The `Software\Policies` registry subtree is
-/// ACL-protected against standard users in **both** `HKLM` *and* `HKCU` — a
-/// non-elevated process cannot write there, so this returns `Failed` unless the
-/// app is running elevated. (An earlier design assumed an unelevated HKCU write
-/// would work; it does not. Getting the policy written therefore needs either an
-/// elevated install-time write or the SYSTEM service — see the plan.) When the
-/// policy already exists this returns early via `policy_present` and writes
-/// nothing.
+/// Tries `HKLM` (machine-wide, needs elevation) and falls back to `HKCU`. Both
+/// hives live under `Software\Policies`, whose ACL denies standard users on many
+/// machines but not all — so the HKCU fallback is a real outcome on some
+/// installs and `Failed` on others, and the caller must handle either.
+///
+/// **This always writes; it never short-circuits on an existing policy.** The
+/// old early return is what made the UI's re-apply button inert: once any policy
+/// existed the function did nothing, so "Restore" could not restore, and a
+/// profile that had taken the HKCU fallback could never be upgraded to the
+/// machine-wide lock however many times admin was granted. Re-writing the same
+/// value is also the *mechanism* by which restore works — the write bumps the
+/// key's last-write time, which fires the registry change notification Chromium
+/// and Firefox watch, which reloads policy and reinstalls a missing extension
+/// without needing a browser restart.
+///
+/// The reported outcome is the strongest scope that is true afterwards, not
+/// merely the one this call wrote: an unelevated re-apply on a machine that
+/// already has the HKLM lock still reports `EnforcedMachine`.
 #[cfg(target_os = "windows")]
 pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
     if !enforcement_configured(def.engine) {
         return EnforceOutcome::Dormant;
     }
-    // Already machine-wide? That is the strongest outcome — nothing to do.
-    let existing = policy_present(def);
-    if existing == Some(EnforceOutcome::EnforcedMachine) {
-        return EnforceOutcome::EnforcedMachine;
-    }
-    // A user-level policy is NOT a reason to stop. The previous code returned
-    // early on ANY existing policy, which meant a profile that had once taken
-    // the HKCU fallback could never be upgraded to the machine-wide lock — no
-    // matter how many times the user granted admin afterwards, this saw
-    // "already enforced" and wrote nothing. Falling through re-attempts HKLM,
-    // which succeeds once elevated; if it still fails we report the user-level
-    // policy we already have rather than a spurious Failed.
-    let had_user_policy = existing.is_some();
 
     // (hive prefix, is this the strong machine-wide scope?)
     const HIVES: [(&str, bool); 2] = [("HKLM", true), ("HKCU", false)];
+    let mut wrote_machine = false;
+    let mut wrote_user = false;
 
     match def.engine {
         Engine::Chromium => {
-            let entry = format!("{};{}", STORE_EXTENSION_ID, CHROMIUM_UPDATE_URL);
+            // No store will *force*-install here, so a forcelist entry would be
+            // a policy the browser discards in silence. Fall back to the
+            // external-extensions registry, which Edge does honour for the Web
+            // Store: the extension installs on its own and then waits for the
+            // user to approve it once. Weaker than a lock, and reported as such,
+            // but it is the difference between Edge being protected and Edge
+            // being untouched.
+            let Some((id, update_url)) = forcelist_target(def) else {
+                return if enforce_external_install(def, STORE_EXTENSION_ID, CHROMIUM_UPDATE_URL) {
+                    EnforceOutcome::AutoInstallPendingApproval
+                } else {
+                    EnforceOutcome::StoreUnavailable
+                };
+            };
+            let entry = format!("{};{}", id, update_url);
             for (root, strong) in HIVES {
                 let key = format!(r"{}\{}\ExtensionInstallForcelist", root, def.policy_subkey);
                 let value = pick_forcelist_value(&key);
@@ -764,19 +1210,16 @@ pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
                     .map(|o| o.status.success())
                     .unwrap_or(false);
                 if ok {
-                    // Permit the Chrome Web Store as an install source in the
-                    // SAME hive the forcelist landed in. Without this Edge
-                    // accepts the forcelist and then declines to install from a
-                    // store it does not trust — see chromium_allow_list_policies.
-                    write_chromium_allow_lists(root, def);
-                    return if strong {
-                        EnforceOutcome::EnforcedMachine
-                    } else {
-                        EnforceOutcome::EnforcedUser
-                    };
+                    // Keep us installable under a blocklist-everything policy, in
+                    // the SAME hive the forcelist landed in.
+                    write_chromium_allow_lists(root, def, id, update_url);
+                    if strong {
+                        wrote_machine = true;
+                        break; // machine-wide is the strongest lock — done
+                    }
+                    wrote_user = true;
                 }
             }
-            if had_user_policy { EnforceOutcome::EnforcedUser } else { EnforceOutcome::Failed }
         }
         Engine::Gecko => {
             // Firefox's `ExtensionSettings` policy is ONE value holding the whole
@@ -792,15 +1235,27 @@ pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
                     .map(|o| o.status.success())
                     .unwrap_or(false);
                 if ok {
-                    return if strong {
-                        EnforceOutcome::EnforcedMachine
-                    } else {
-                        EnforceOutcome::EnforcedUser
-                    };
+                    if strong {
+                        wrote_machine = true;
+                        break;
+                    }
+                    wrote_user = true;
                 }
             }
-            if had_user_policy { EnforceOutcome::EnforcedUser } else { EnforceOutcome::Failed }
         }
+    }
+
+    // Report the strongest scope that is actually in force now — including one
+    // an earlier elevated run left behind that this unelevated call couldn't
+    // touch.
+    if wrote_machine {
+        return EnforceOutcome::EnforcedMachine;
+    }
+    match policy_present(def) {
+        Some(EnforceOutcome::EnforcedMachine) => EnforceOutcome::EnforcedMachine,
+        Some(other) => other,
+        None if wrote_user => EnforceOutcome::EnforcedUser,
+        None => EnforceOutcome::Failed,
     }
 }
 
@@ -859,6 +1314,14 @@ pub fn remove_policy(def: &BrowserDef) {
             }
         }
     }
+    // Never leave a list-policy key behind with our entry gone but the key still
+    // there: an empty key is "the policy set to an empty list", not "no policy",
+    // and at machine scope it outranks anything the user's own hive says. See
+    // `prune_empty_list_policy_keys`.
+    prune_empty_list_policy_keys(def);
+    // …and drop the auto-install registration, or the browser puts the extension
+    // straight back after a sanctioned uninstall.
+    remove_external_install(def);
     // Also drop the DoH policy (1.2) and the incognito/guest/private lockdown
     // (1.5), so a completed uninstall leaves no "managed by your organization"
     // settings behind and restores those browser modes.
@@ -1137,6 +1600,225 @@ mod tests {
             "our id present but not force_installed is not an active lock"
         );
         assert!(!gecko_force_installs_us("not json"), "garbage is not a lock");
+    }
+
+    #[test]
+    fn every_chromium_but_edge_force_installs_from_the_web_store() {
+        for def in BROWSERS.iter().filter(|d| d.engine == Engine::Chromium && d.key != "edge") {
+            assert_eq!(
+                forcelist_target(def),
+                Some((STORE_EXTENSION_ID, CHROMIUM_UPDATE_URL)),
+                "{} should force-install from the Chrome Web Store",
+                def.key
+            );
+        }
+        assert_eq!(
+            forcelist_target(browser_by_key("firefox").unwrap()),
+            None,
+            "Gecko has no Chromium forcelist target — it goes through ExtensionSettings"
+        );
+    }
+
+    /// The Edge bug, pinned. Microsoft only force-installs from the Edge Add-ons
+    /// store on a machine that isn't domain/Entra-joined, so pointing Edge at the
+    /// Chrome Web Store there produces a policy Edge silently discards. Whatever
+    /// this machine's join state, the one thing that must never happen is Edge
+    /// being handed the Web-Store pair while unmanaged and unpublished.
+    #[test]
+    fn edge_never_targets_the_web_store_unless_that_can_actually_work() {
+        let edge = browser_by_key("edge").unwrap();
+        let target = forcelist_target(edge);
+        match target {
+            None => {
+                assert!(
+                    EDGE_STORE_EXTENSION_ID.is_empty(),
+                    "with an Edge Add-ons id published there is always a usable target"
+                );
+            }
+            Some((id, url)) if url == CHROMIUM_UPDATE_URL => {
+                #[cfg(target_os = "windows")]
+                assert!(
+                    is_domain_managed(),
+                    "the Web Store is only a legal Edge force-install source on a managed machine"
+                );
+                assert_eq!(id, STORE_EXTENSION_ID);
+            }
+            Some((id, url)) => {
+                assert_eq!(url, EDGE_UPDATE_URL, "the only other legal source is Edge Add-ons");
+                assert_eq!(id, EDGE_STORE_EXTENSION_ID);
+                assert!(!id.is_empty());
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn allow_lists_permit_the_store_the_extension_is_actually_served_from() {
+        let cws = chromium_allow_list_policies(STORE_EXTENSION_ID, CHROMIUM_UPDATE_URL);
+        assert_eq!(cws[0].1, "https://clients2.google.com/*");
+        assert_eq!(cws[1].1, STORE_EXTENSION_ID);
+
+        let edge = chromium_allow_list_policies("someedgeidaaaaaaaaaaaaaaaaaaaaaa", EDGE_UPDATE_URL);
+        assert_eq!(
+            edge[0].1, "https://edge.microsoft.com/*",
+            "allow-listing Google's host does nothing for an Edge-Add-ons install"
+        );
+        assert_eq!(edge[1].1, "someedgeidaaaaaaaaaaaaaaaaaaaaaa");
+    }
+
+    /// The regression that made Chrome *lose* the extension. A list-policy subkey
+    /// that exists with no numbered values is not "no policy" — it is the policy
+    /// set to an empty list, and at machine scope that overrides the user hive and
+    /// uninstalls a force-installed extension. `reg add <key> /f` leaves an empty
+    /// `(Default)` behind, so that must not be mistaken for content.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn an_empty_default_value_does_not_make_a_list_policy_key_occupied() {
+        let bare_created_key = vec![("(Default)".to_string(), String::new())];
+        assert!(
+            !list_policy_has_entries(&bare_created_key),
+            "a key holding only the empty default is an EMPTY forcelist and must be pruned"
+        );
+        assert!(!list_policy_has_entries(&[]), "no values at all is empty");
+
+        let real = vec![
+            ("(Default)".to_string(), String::new()),
+            ("1".to_string(), format!("{};{}", STORE_EXTENSION_ID, CHROMIUM_UPDATE_URL)),
+        ];
+        assert!(list_policy_has_entries(&real), "a real entry must survive pruning");
+
+        let someone_elses = vec![("1".to_string(), "otherextensionidaaaaaaaaaaaaaaaa;https://x/".to_string())];
+        assert!(
+            list_policy_has_entries(&someone_elses),
+            "another manager's forcelist must never be deleted as 'empty'"
+        );
+
+        // A numbered value with no data is a malformed leftover, not an entry.
+        assert!(!list_policy_has_entries(&[("1".to_string(), String::new())]));
+    }
+
+    /// Every Chromium browser must have somewhere to fall back to when no store
+    /// will force-install it, and somewhere to send the user for the approval
+    /// click. A browser missing either is one that silently degrades to nothing.
+    #[test]
+    fn every_chromium_has_an_auto_install_path_and_an_extensions_page() {
+        for def in BROWSERS.iter().filter(|d| d.engine == Engine::Chromium) {
+            assert!(
+                !def.ext_registry_subkey.is_empty(),
+                "{} has no external-extensions key — auto-install can't be offered",
+                def.key
+            );
+            assert!(
+                def.ext_registry_subkey.ends_with(r"\Extensions"),
+                "{}: Chromium reads external installs from <product>\\Extensions",
+                def.key
+            );
+            assert!(!def.extensions_page.is_empty(), "{} has nowhere to send the user", def.key);
+            assert!(
+                def.extensions_page.ends_with("://extensions"),
+                "{}: expected the browser's own extensions page",
+                def.key
+            );
+        }
+        // Edge is the browser this whole fallback exists for.
+        let edge = browser_by_key("edge").unwrap();
+        assert_eq!(edge.ext_registry_subkey, r"SOFTWARE\Microsoft\Edge\Extensions");
+        assert_eq!(edge.extensions_page, "edge://extensions");
+    }
+
+    /// The repair itself, against the real registry — because this code *deletes
+    /// policy keys*, and the thing that must never happen is it eating an entry
+    /// that belongs to somebody else's managed extension.
+    ///
+    /// Uses a scratch subkey under `HKCU\SOFTWARE` (never a real vendor policy
+    /// path) and cleans up after itself.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn pruning_removes_only_the_empty_list_keys() {
+        const SCRATCH: &str = r"SOFTWARE\OathLightPruneTest";
+        let full = |sub: &str| format!(r"HKCU\{}\{}", SCRATCH, sub);
+        let exists = |sub: &str| {
+            reg().args(["query", &full(sub)]).output().map(|o| o.status.success()).unwrap_or(false)
+        };
+        // Start clean in case an earlier run died mid-test.
+        let _ = reg().args(["delete", &format!(r"HKCU\{}", SCRATCH), "/f"]).output();
+
+        // Exactly the state the old ensure_policy_key left behind: the key
+        // created, holding nothing but the empty (Default) reg add writes.
+        for sub in CHROMIUM_LIST_POLICY_SUBKEYS {
+            assert!(reg()
+                .args(["add", &full(sub), "/f"])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false));
+        }
+        // …and one key that genuinely belongs to another managed extension.
+        let _ = reg()
+            .args([
+                "add",
+                &full("ExtensionInstallAllowlist"),
+                "/v",
+                "1",
+                "/t",
+                "REG_SZ",
+                "/d",
+                "otherextensionidaaaaaaaaaaaaaaaa",
+                "/f",
+            ])
+            .output();
+
+        prune_empty_list_policy_keys_under("HKCU", SCRATCH);
+
+        assert!(
+            !exists("ExtensionInstallForcelist"),
+            "an empty forcelist key is the policy 'force-install nothing' and must be removed — \
+             leaving it at machine scope uninstalls the extension"
+        );
+        assert!(!exists("ExtensionInstallSources"), "an empty sources key is equally inert-looking");
+        assert!(
+            exists("ExtensionInstallAllowlist"),
+            "a key with a real entry must survive — pruning must never eat another manager's policy"
+        );
+
+        let _ = reg().args(["delete", &format!(r"HKCU\{}", SCRATCH), "/f"]).output();
+    }
+
+    /// The re-verification poll must cost nothing for outcomes that never wrote
+    /// anything. If `Failed` or `StoreUnavailable` were re-read from the registry
+    /// every 30s, a machine where enforcement genuinely cannot work — the exact
+    /// machine least able to spare it — would pay `reg` spawns forever to keep
+    /// learning the same answer. Retrying those is the elevation path's job.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn re_verification_short_circuits_for_outcomes_that_wrote_nothing() {
+        let chrome = browser_by_key("chrome").unwrap();
+        for outcome in [
+            EnforceOutcome::Failed,
+            EnforceOutcome::StoreUnavailable,
+            EnforceOutcome::Dormant,
+            EnforceOutcome::Unsupported,
+        ] {
+            assert!(
+                enforcement_still_present(chrome, outcome),
+                "{outcome:?} wrote nothing, so nothing can have been deleted — it must not \
+                 trigger a re-write or a registry read"
+            );
+        }
+    }
+
+    /// Gecko has no external-extensions registry, so the auto-install path can
+    /// never be "present" for Firefox. Without the empty-subkey guard this would
+    /// build the nonsense key `HKCU\\<id>` and read whatever happens to be there.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_auto_install_check_is_chromium_only() {
+        let firefox = browser_by_key("firefox").unwrap();
+        assert!(firefox.ext_registry_subkey.is_empty(), "precondition");
+        assert!(!external_install_present(firefox));
+        assert!(
+            !enforcement_still_present(firefox, EnforceOutcome::AutoInstallPendingApproval),
+            "an auto-install memo for a browser with no auto-install path must never verify"
+        );
     }
 
     #[cfg(target_os = "windows")]

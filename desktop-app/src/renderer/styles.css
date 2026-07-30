@@ -43,61 +43,110 @@
      accent is white, which is what made primary-button labels invisible. */
   --accent-ink: #ffffff;
 
-  --intensity: 0.7;             /* 0..1, driven from tweak (0..10)/10 */
   --ease: var(--ol-ease-spring);
   --ease-soft: var(--ol-ease-standard);
 
   --sidebar-w: 248px;
+
+  /* ---------- THE LOOK SYSTEM ----------
+     Every look is nothing but a set of these. The ground layers below read
+     them directly, so a look never needs a selector of its own against
+     `.bg-*` — it declares tokens and the layers resolve. A layer whose token
+     is unset paints `none` and costs nothing.
+
+     This replaced `--intensity`, a 0..1 scalar that existed only to slow down
+     and fade out animations that no longer exist. */
+  --ground-pattern: none;         /* dot grid, weave, contour, engraving */
+  --ground-pattern-size: auto;
+  --ground-grain: none;           /* fractal-noise texture over everything */
+  --ground-grain-blend: overlay;
+  --ground-grain-opacity: .5;
+  --ground-glow: none;            /* one fixed light source */
+  --ground-field: none;           /* one fixed directional wash */
+  --ground-vignette: none;        /* edge falloff */
+
+  /* Chrome. `transparent` means "let the ground show through"; a two-tone
+     look sets real tiers instead so the sidebar and content separate. */
+  --chrome-sidebar: transparent;
+  --chrome-content: transparent;
+  --chrome-inset: none;
+
+  /* Surfaces. Default is matte: opaque, shadowed, with a lit top edge.
+     The hairline lives inside --card-shadow rather than in a token of its
+     own because `box-shadow: none, inset ...` is not a valid list — a look
+     that wants no elevation has to be able to say `none` and mean it. */
+  --card-fill: var(--bg-1);
+  --card-shadow: var(--shadow-sm), inset 0 1px 0 var(--ol-hairline);
+  --card-radius: var(--r-lg);
+  --card-fill-hover: var(--ol-bg-2);
+
+  /* Wallpaper (set inline by app.jsx when the user picks an image). */
+  --wallpaper: none;
+  --wallpaper-dim: .55;
+  --wallpaper-blur: 0px;
+
+  /* Density. Compact trims the generous spacing without changing type size,
+     which is the axis people actually want on a 13" laptop. */
+  --density: 1;
 }
 
-/* ---------- NEUTRAL + ACCENT TOKENS PER THEME/STYLE ---------- */
+/* ---------- LOCAL ALIASES ONTO THE DESIGN SYSTEM ----------
+   One block per theme side. There used to be THREE rules per side, written at
+   three different times, each silently overriding the last: the palette-era
+   block, the Noir block that replaced it, and a trailing one-liner for
+   --desktop. What survived that stack was not what anyone had chosen — light
+   mode kept its aurora-era violet shadows (nothing overrode them) and a
+   --glass-brd of rgba(255,255,255,.7), i.e. a white hairline on a #fafafa
+   page, which is no border at all.
 
-/* DARK base neutrals (tinted per style hue) */
+   Everything here now aliases a tokens.css value, with two deliberate
+   exceptions kept literal because the design system does not model them:
+   --glass (a translucency, not a colour) and --orb-* (decorative background
+   hues). */
+
 [data-theme="dark"] {
+  --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1);
+  --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
+  --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
+  --accent-ink: var(--ol-accent-ink);
+
   --shadow: var(--ol-shadow-md);
   --shadow-sm: var(--ol-shadow-sm);
+  /* Panels lift off a dark page by being lighter than it. */
   --glass: rgba(255,255,255,.045);
   --glass-2: rgba(255,255,255,.07);
   --glass-brd: var(--ol-border);
   --glass-brd-strong: var(--ol-border-strong);
-  --desktop: radial-gradient(120% 120% at 80% -10%, #241b35 0%, #14101f 55%, #0c0913 100%);
+
+  --desktop: radial-gradient(120% 120% at 80% -10%, var(--ol-bg-2) 0%, #0e0e0e 55%, #050505 100%);
 }
+
 [data-theme="light"] {
-  --shadow: 0 30px 70px -30px rgba(60,40,90,.28), 0 2px 10px -4px rgba(60,40,90,.12);
-  --shadow-sm: 0 10px 28px -16px rgba(60,40,90,.22);
-  --glass: rgba(255,255,255,.55);
-  --glass-2: rgba(255,255,255,.78);
-  --glass-brd: rgba(255,255,255,.7);
-  --glass-brd-strong: rgba(120,90,160,.18);
-  --desktop: radial-gradient(120% 120% at 80% -10%, #eee7f6 0%, #e7e2f3 55%, #ddd8ee 100%);
-}
-
-
-
-
-
-
-
-/* ---- NOIR (black & white — pure monochrome) ----
-   This is the exact palette design-system/tokens.css's Noir default was
-   extracted from — bg/text/accent below are now thin var(--ol-*)
-   references. --orb-* has no --ol- equivalent (decorative bg-orb hues
-   aren't modeled as tokens) so those stay hardcoded. */
-[data-theme="dark"] {
-  --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1); --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
+  --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1);
+  --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
   --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
   --accent-ink: var(--ol-accent-ink);
-  --orb-a: #3a3a3a; --orb-b: #5c5c5c; --orb-c: #262626;
-}
-[data-theme="light"] {
-  --bg-0: var(--ol-bg-0); --bg-1: var(--ol-bg-1); --text: var(--ol-text-1); --text-2: var(--ol-text-2); --muted: var(--ol-text-3);
-  --accent: var(--ol-accent); --accent-2: var(--ol-accent-2); --accent-3: var(--ol-accent-3);
-  --accent-ink: var(--ol-accent-ink);
-  --orb-a: #d4d4d4; --orb-b: #bcbcbc; --orb-c: #e4e4e4;
-}
 
-[data-theme="dark"]     { --desktop: radial-gradient(120% 120% at 80% -10%, var(--ol-bg-2) 0%, #0e0e0e 55%, #050505 100%); }
-[data-theme="light"]    { --desktop: radial-gradient(120% 120% at 80% -10%, var(--ol-bg-2) 0%, var(--ol-bg-3) 55%, #dedede 100%); }
+  --shadow: var(--ol-shadow-md);
+  --shadow-sm: var(--ol-shadow-sm);
+  /* And off a light page by being whiter than it — same elevation direction,
+     opposite sign of translucency. The BORDERS, though, are tokens.css's dark
+     hairlines: a white border on white was the light-mode twin of the
+     white-on-white text bug. */
+  --glass: rgba(255,255,255,.72);
+  --glass-2: rgba(255,255,255,.9);
+  --glass-brd: var(--ol-border);
+  --glass-brd-strong: var(--ol-border-strong);
+
+  --desktop: radial-gradient(120% 120% at 80% -10%, var(--ol-bg-2) 0%, var(--ol-bg-3) 55%, #dedede 100%);
+
+  /* Light mode inverts one thing about the ground: grain and patterns are
+     drawn with dark ink on a bright page, so `overlay` (which lightens) has
+     to become `multiply`, and the whole texture wants to be fainter or it
+     reads as dirt rather than paper. */
+  --ground-grain-blend: multiply;
+  --ground-grain-opacity: .34;
+}
 
 /* ============================================================
    RESET / BASE
@@ -145,7 +194,10 @@ input, textarea { font-family: inherit; }
   display: flex; align-items: center; gap: 0;
   padding: 0 0 0 16px;
   border-bottom: 1px solid var(--glass-brd);
-  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  /* An opaque tier rather than a blur. It also gives the `studio` look's
+     recessed content pane something to be recessed BELOW — an inset shadow
+     under a transparent bar has no visible source. */
+  background: var(--ol-bg-1);
 }
 .tl-brand { display: flex; align-items: center; gap: 9px; }
 .tl-logo { display: grid; place-items: center; }
@@ -179,65 +231,172 @@ input, textarea { font-family: inherit; }
 .body { position: relative; z-index: 2; flex: 1; display: flex; min-height: 0; }
 
 /* ============================================================
-   ANIMATED BACKGROUND (inside window)
+   GROUND — the static field behind the app
+   ============================================================
+   What used to be here: three blurred orbs on 34–42s drift loops, three
+   translating wave paths, sixteen rising particles, up to eighty twinkling
+   stars, four expanding ripple rings and six drifting smoke clouds — roughly
+   a hundred always-running animations, none of which carried any information.
+   All of it is gone. Ambient motion is idle stimulation, which is precisely
+   the pattern this product exists to argue against.
+
+   What is here instead: five layers that never animate, each painting one
+   token. A look sets the tokens it wants and leaves the rest unset, in which
+   case the layer resolves to `none` and paints nothing at all. That is why
+   adding a look costs three lines at the bottom of this section and no
+   changes here — and why `.bg-*` has no per-look selectors.
+
+   Layer order, back to front: wallpaper, wallpaper scrim, pattern, field,
+   glow, grain, vignette.
    ============================================================ */
 .bg { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
-.bg-orb { position: absolute; border-radius: 50%; filter: blur(70px); opacity: calc(.55 * var(--intensity)); mix-blend-mode: screen; }
-[data-theme="light"] .bg-orb { mix-blend-mode: multiply; opacity: calc(.5 * var(--intensity)); filter: blur(64px); }
-.bg-orb.o1 { width: 46%; aspect-ratio:1; left:-8%; top:-12%; background: radial-gradient(circle at 30% 30%, var(--orb-a), transparent 70%); animation: drift1 calc(34s / max(.35,var(--intensity))) var(--ease-soft) infinite alternate; }
-.bg-orb.o2 { width: 52%; aspect-ratio:1; right:-12%; top:6%; background: radial-gradient(circle at 60% 40%, var(--orb-b), transparent 70%); animation: drift2 calc(42s / max(.35,var(--intensity))) var(--ease-soft) infinite alternate; }
-.bg-orb.o3 { width: 40%; aspect-ratio:1; left:24%; bottom:-18%; background: radial-gradient(circle at 50% 50%, var(--orb-c), transparent 70%); animation: drift3 calc(38s / max(.35,var(--intensity))) var(--ease-soft) infinite alternate; }
-@keyframes drift1 { from{ transform: translate(0,0) scale(1);} to{ transform: translate(18%,12%) scale(1.12);} }
-@keyframes drift2 { from{ transform: translate(0,0) scale(1.05);} to{ transform: translate(-14%,16%) scale(.95);} }
-@keyframes drift3 { from{ transform: translate(0,0) scale(1);} to{ transform: translate(10%,-12%) scale(1.1);} }
+.bg > i { position: absolute; inset: 0; display: block; }
 
-/* waves */
-.bg-waves { position:absolute; left:0; right:0; bottom:0; height: 60%; opacity: calc(.5 * var(--intensity)); }
-.bg-waves svg { position:absolute; bottom:0; width: 200%; height: 100%; }
-.bg-waves .w1 { animation: wave 26s linear infinite; opacity:.55; }
-.bg-waves .w2 { animation: wave 38s linear infinite reverse; opacity:.4; }
-.bg-waves .w3 { animation: wave 52s linear infinite; opacity:.28; }
-@keyframes wave { from{ transform: translateX(0);} to{ transform: translateX(-50%);} }
-
-/* stars twinkle */
-@keyframes twinkle { 0%,100%{ opacity: var(--op, .4); transform: scale(1); } 50%{ opacity: calc(var(--op, .4) * .2); transform: scale(.6); } }
-
-/* ripple rings */
-.bg-ripple {
-  position: absolute; border-radius: 50%;
-  width: 600px; height: 600px;
-  left: 50%; top: 50%; transform: translate(-50%,-50%) scale(0);
-  border: 1.5px solid var(--accent);
-  animation: ripple-out 7.2s var(--ease-soft) infinite;
-  pointer-events: none;
+/* The user's own image, if they set one. Scaled slightly past the frame so a
+   blur radius can't drag the window's background in at the edges. */
+.bg-wall {
+  background-image: var(--wallpaper);
+  background-size: cover; background-position: center; background-repeat: no-repeat;
+  filter: blur(var(--wallpaper-blur));
+  transform: scale(calc(1 + var(--wallpaper-blur) / 40px * .06));
 }
-@keyframes ripple-out { 0%{ transform: translate(-50%,-50%) scale(0); opacity: .7; } 100%{ transform: translate(-50%,-50%) scale(3.2); opacity: 0; } }
+/* The legibility floor. A photograph behind an interface is only ever as good
+   as the scrim over it, so this is not optional decoration — the Themes page
+   clamps the dim to a minimum rather than letting it reach zero. */
+.bg-wall-scrim { background: color-mix(in oklab, var(--bg-0) calc(var(--wallpaper-dim) * 100%), transparent); }
 
-/* smoke drift */
-@keyframes smoke-drift { 0%{ transform: translateY(0) scale(1); opacity: 0; } 15%{ opacity: 1; } 80%{ opacity: .6; } 100%{ transform: translateY(-70vh) scale(1.4); opacity: 0; } }
+.bg-pattern { background-image: var(--ground-pattern); background-size: var(--ground-pattern-size); }
+.bg-field   { background: var(--ground-field); }
+.bg-glow    { background: var(--ground-glow); }
+.bg-grain   {
+  background-image: var(--ground-grain);
+  mix-blend-mode: var(--ground-grain-blend);
+  opacity: var(--ground-grain-opacity);
+}
+.bg-vignette { background: var(--ground-vignette); }
 
-/* particles */
-.bg-particle { position:absolute; border-radius:50%; background: var(--accent); opacity: calc(.5 * var(--intensity)); animation: rise linear infinite; }
-@keyframes rise { 0%{ transform: translateY(0) translateX(0); opacity:0;} 12%{ opacity: calc(.5*var(--intensity)); } 100%{ transform: translateY(-120vh) translateX(20px); opacity:0;} }
+/* ---------- the looks ----------
+   Grouped the way the Themes page groups them: quiet, structured, textured.
+   The noise data-URI is repeated rather than aliased to a token because a
+   custom property holding a `url()` cannot be reused inside another
+   `url()`, and inlining it keeps each look readable on its own line. */
 
-/* vignette to keep content legible over bg */
-.bg-veil { position:absolute; inset:0; background: linear-gradient(180deg, color-mix(in oklab, var(--bg-0) 30%, transparent), color-mix(in oklab, var(--bg-0) 12%, transparent)); }
+/* — Quiet — */
+[data-look="matte"] {
+  --ground-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.42'/%3E%3C/svg%3E");
+}
+[data-look="halo"] {
+  --ground-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.42'/%3E%3C/svg%3E");
+  --ground-glow: radial-gradient(90% 62% at 50% -14%, color-mix(in oklab, var(--accent) 9%, transparent) 0%, transparent 62%);
+}
+[data-look="field"] {
+  --ground-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.42'/%3E%3C/svg%3E");
+  --ground-field: linear-gradient(168deg, color-mix(in oklab, var(--ol-bg-2) 85%, transparent) 0%, transparent 58%);
+}
+[data-look="theatre"] {
+  --ground-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.42'/%3E%3C/svg%3E");
+  --ground-vignette: radial-gradient(122% 104% at 50% 38%, transparent 40%, var(--ol-ground-edge) 100%);
+}
 
+/* — Structured — two-tone chrome, so depth comes from tiers rather than
+     from anything painted on the ground. Cards move up to bg-2 because the
+     content pane they sit on is now bg-1 and they still have to separate. */
+[data-look="slate"],
+[data-look="studio"],
+[data-look="drafting"] {
+  --chrome-sidebar: var(--bg-0);
+  --chrome-content: var(--ol-bg-1);
+  --card-fill: var(--ol-bg-2);
+  --card-fill-hover: var(--ol-bg-3);
+}
+[data-look="studio"] {
+  --ground-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.42'/%3E%3C/svg%3E");
+  --chrome-inset: inset 0 9px 22px -16px var(--ol-ground-well);
+}
+[data-look="drafting"] {
+  --ground-pattern: radial-gradient(var(--ol-ground-dot) 1px, transparent 1px);
+  --ground-pattern-size: 23px 23px;
+  --card-shadow: none;
+  --card-radius: var(--r-sm);
+}
+[data-look="paper"] {
+  --card-shadow: none;
+  --card-radius: var(--r-sm);
+}
+
+/* — Textured — a pattern instead of noise. Each tiles, so none of them band
+     the way a large flat field does, and none needs a grain layer on top. */
+[data-look="cloth"] {
+  --ground-pattern:
+    repeating-linear-gradient(45deg,  var(--ol-ground-thread) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(-45deg, var(--ol-ground-thread) 0 1px, transparent 1px 5px);
+}
+[data-look="contour"] {
+  /* Elevation lines. Concentric, irregular, and utterly still — the
+     vernacular of a map rather than of a screensaver. */
+  --ground-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='420'%3E%3Cg fill='none' stroke='%23808080' stroke-width='1' opacity='.5'%3E%3Cpath d='M-40 300c80-70 150-30 220-90s150-40 260-120'/%3E%3Cpath d='M-40 350c90-70 160-28 230-92s150-44 270-124'/%3E%3Cpath d='M-40 250c70-66 140-32 210-88s150-36 250-116'/%3E%3Cpath d='M-40 200c60-60 130-34 200-86s150-32 240-112'/%3E%3Cpath d='M-40 150c50-56 120-36 190-84s150-28 230-108'/%3E%3Cpath d='M-40 100c40-50 110-38 180-82s150-24 220-104'/%3E%3Cpath d='M-40 400c100-72 170-24 240-94s150-48 280-128'/%3E%3C/g%3E%3C/svg%3E");
+  --ground-pattern-size: 420px 420px;
+  --ground-grain-opacity: .22;
+}
+[data-look="engrave"] {
+  /* Fine concentric rings, the way a certificate or a banknote is guilloched.
+     An oath is a document before it is an app, and this is the only look here
+     that says so. */
+  --ground-pattern: repeating-radial-gradient(circle at 50% 34%, transparent 0 6px, var(--ol-ground-thread) 6px 7px);
+}
+[data-look="halftone"] {
+  /* A dot grid whose dots grow toward the bottom of the window — print
+     halftone, so the field has a direction without a gradient in it. */
+  --ground-pattern:
+    radial-gradient(var(--ol-ground-dot) 1.6px, transparent 1.7px),
+    radial-gradient(var(--ol-ground-dot) .8px, transparent .9px);
+  --ground-pattern-size: 26px 26px, 13px 13px;
+}
+
+/* ---------- density ----------
+   One scalar multiplying the app's outer padding. Type size, line-height and
+   control heights are deliberately NOT scaled: shrinking text is a different
+   request (and an accessibility problem), whereas what people actually run
+   out of on a 13" laptop is vertical room. Anything reading --density does so
+   through calc(), so a look never has to know about it. */
+[data-density="compact"] { --density: .68; }
+
+/* ---------- motion ----------
+   Nothing on the ground animates any more, so the only thing left to
+   suppress is interaction and entrance motion. `[data-motion="off"]` is the
+   user's own switch; the media query is the OS preference. Both must win,
+   which is why the rule lists them separately rather than nesting. */
+[data-motion="off"] *,
+[data-motion="off"] *::before,
+[data-motion="off"] *::after {
+  animation-duration: .001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: .001ms !important;
+  scroll-behavior: auto !important;
+}
 @media (prefers-reduced-motion: reduce) {
-  .bg-orb, .bg-waves .w1, .bg-waves .w2, .bg-waves .w3, .bg-particle, .window { animation: none !important; }
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
 }
 
 /* ============================================================
    SIDEBAR
    ============================================================ */
+/* `--chrome-sidebar` is `transparent` for looks that want the ground to run
+   edge to edge, and a real background tier for the two-tone looks (slate,
+   studio, drafting) where the split between navigation and content IS the
+   depth cue. Either way there is no backdrop-filter: there is nothing moving
+   behind it left to blur. */
 .sidebar {
   position: relative; z-index: 3;
   width: var(--sidebar-w); flex: 0 0 var(--sidebar-w);
   display: flex; flex-direction: column;
-  padding: 18px 14px;
+  padding: calc(18px * var(--density)) 14px;
   border-inline-end: 1px solid var(--glass-brd);
-  background: var(--glass);
-  -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+  background: var(--chrome-sidebar);
 }
 .brand { display:flex; align-items:center; gap:11px; padding: 8px 8px 18px; cursor:pointer; }
 .brand-logo {
@@ -283,8 +442,18 @@ input, textarea { font-family: inherit; }
 /* ============================================================
    CONTENT AREA
    ============================================================ */
-.content { position: relative; z-index:2; flex:1; min-width:0; overflow-y: auto; overflow-x:hidden; }
-.page { padding: 38px 44px 56px; max-width: 980px; margin: 0 auto; animation: page-in .5s var(--ease) both; }
+/* --chrome-inset is the recessed-well shadow under the title bar. It only
+   reads when --chrome-content is a real tier (the `studio` look), which is
+   why it is a token rather than something applied unconditionally. */
+.content {
+  position: relative; z-index:2; flex:1; min-width:0; overflow-y: auto; overflow-x:hidden;
+  background: var(--chrome-content);
+  box-shadow: var(--chrome-inset);
+}
+.page {
+  padding: calc(38px * var(--density)) calc(44px * var(--density)) calc(56px * var(--density));
+  max-width: 980px; margin: 0 auto; animation: page-in .5s var(--ease) both;
+}
 @keyframes page-in { from{ transform: translateY(10px);} to{ transform:none;} }
 .page-head { margin-bottom: 28px; }
 .eyebrow { font-size:12px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color: var(--accent); margin-bottom: 9px; }
@@ -293,16 +462,21 @@ input, textarea { font-family: inherit; }
 .page-sub { font-size: 15.5px; color: var(--muted); margin-top: 9px; max-width: 56ch; line-height:1.55; }
 
 /* ============================================================
-   GLASS PRIMITIVES
+   SURFACE PRIMITIVES
+   (was "GLASS PRIMITIVES" — there is no glass in the app any more)
    ============================================================ */
+/* Opaque, not glass. The backdrop-filter that used to live here blurred the
+   drifting orbs behind it, which is where a card's edge came from; with the
+   orbs gone it would have been blurring a flat colour at full cost for no
+   result. The lift now comes from --card-shadow, whose default carries the
+   1px lit top edge (--ol-hairline) inside it. */
 .card {
-  background: var(--glass); border: 1px solid var(--glass-brd);
-  border-radius: var(--r-lg); padding: 22px;
-  -webkit-backdrop-filter: blur(var(--ol-blur-panel)); backdrop-filter: blur(var(--ol-blur-panel));
-  box-shadow: var(--shadow-sm);
+  background: var(--card-fill); border: 1px solid var(--glass-brd);
+  border-radius: var(--card-radius); padding: calc(22px * var(--density));
+  box-shadow: var(--card-shadow);
   transition: transform .25s var(--ease), border-color .25s, background .25s;
 }
-.card.hover:hover { transform: translateY(-3px); border-color: var(--glass-brd-strong); background: var(--glass-2); }
+.card.hover:hover { transform: translateY(-3px); border-color: var(--glass-brd-strong); background: var(--card-fill-hover); }
 .grid { display:grid; gap: 18px; }
 .row { display:flex; align-items:center; gap: 14px; }
 .spread { display:flex; align-items:center; justify-content:space-between; gap:14px; }
@@ -323,9 +497,10 @@ input, textarea { font-family: inherit; }
 .btn-danger:hover { transform: translateY(-1px); box-shadow: 0 14px 32px -12px rgba(220,60,66,.85); }
 .btn:disabled { opacity:.5; pointer-events:none; }
 
-/* uninstall (24h request) card */
-.ut-ico { width:40px; height:40px; flex:0 0 40px; border-radius:12px; display:grid; place-items:center; background: color-mix(in oklab, var(--accent-2) 14%, transparent); color: var(--accent-2); }
-.ut-ico svg { width:20px; height:20px; }
+/* Countdown readout — the uninstall waiting period and the lockdown timer.
+   (.ut-ico is gone: those cards now take their icon from `Setting`'s own
+   .ico slot like every other row, so a second 40px icon style had nothing
+   left to style.) */
 .ut-count { font-size:30px; font-weight:800; letter-spacing:-.02em; font-variant-numeric: tabular-nums; color: var(--text); line-height:1.05; }
 .ut-sub { font-size:12.5px; color: var(--muted); margin-top:4px; }
 .ut-bar { height:6px; border-radius:var(--ol-radius-pill); background: color-mix(in oklab, var(--text) 12%, transparent); overflow:hidden; margin-top:12px; max-width:340px; }
@@ -364,11 +539,18 @@ input, textarea { font-family: inherit; }
 .setting .ico { width:40px; height:40px; flex:0 0 40px; border-radius:12px; display:grid; place-items:center; background: color-mix(in oklab, var(--accent) 14%, transparent); color: var(--accent); }
 .setting .ico svg { width:20px; height:20px; }
 .setting .txt { flex:1; min-width:0; }
-.setting .txt b { font-size:14.5px; font-weight:700; display:block; }
+/* Both of these are DIRECT-child selectors, and that is load-bearing rather
+   than tidiness. As plain descendant selectors they also matched the pieces of
+   an InfoDot dropped into the title — `.setting .txt span` outranks `.infodot`,
+   so the dot's wrapper was blockified to the full width of the row: the icon
+   dropped onto its own line under the title, and the row grew an invisible
+   full-width hover band that opened the bubble when you were only reading. Row
+   styling stops at the row's own children. */
+.setting .txt > b { font-size:14.5px; font-weight:700; display:block; }
 /* One short line, hard-capped. Anything longer belongs in an InfoDot — the
    cap is deliberate, so a wordy description is visibly wrong while writing it
    rather than quietly making the page unreadable again. */
-.setting .txt span { font-size:13px; color: var(--muted); line-height:1.45; display:block; max-width: 68ch; }
+.setting .txt > span { font-size:13px; color: var(--muted); line-height:1.45; display:block; max-width: 68ch; }
 /* The control at the end of the row never shrinks — a long title used to
    squash switches and buttons into unusable slivers. */
 .setting-ctl { flex: 0 0 auto; display:flex; align-items:center; gap:10px; }
@@ -379,21 +561,37 @@ input, textarea { font-family: inherit; }
 .sec-title { font-size: 16px; font-weight: 800; letter-spacing: -.01em; display:flex; align-items:center; }
 .sec-sub { font-size: 13px; color: var(--muted); line-height:1.5; max-width: 68ch; margin-top: 3px; }
 
-/* ---------- info dot (InfoDot in ui.jsx) ---------- */
-.infodot { position: relative; display: inline-flex; vertical-align: middle; margin-inline-start: 6px; }
+/* ---------- info dot (InfoDot in ui.jsx) ----------
+   A primitive that gets dropped inside other components' text — a settings
+   title, a choice name, a section header, a checkbox label. Two rules follow
+   from that:
+
+     * It owns its own box. `display` is guarded with !important because a
+       container rule as ordinary as `.setting .txt span` is more specific than
+       `.infodot`, and one of those blockifying it is not a cosmetic slip: a
+       full-width wrapper puts the icon on the line BELOW its own title and
+       turns the empty width beside it into a hover target. Containers style
+       their own children, not this.
+     * It opens on click of the icon only — never on hover of anything. See the
+       InfoDot comment in ui.jsx. */
+.infodot { position: relative; display: inline-flex !important; vertical-align: middle; margin-inline-start: 6px; }
 .infodot-btn {
   display: grid; place-items: center;
-  width: 18px; height: 18px; border-radius: 50%;
-  color: var(--muted); cursor: help;
+  width: 19px; height: 19px; flex: 0 0 19px; border-radius: 50%;
+  color: var(--muted); cursor: pointer;
   transition: color .15s var(--ease), background .15s var(--ease);
 }
-.infodot-btn:hover { color: var(--accent); background: var(--glass-2); }
+.infodot-btn:hover { color: var(--text-2); background: var(--glass-2); }
+.infodot-btn.on { color: var(--accent); background: color-mix(in oklab, var(--accent) 16%, transparent); }
 .infodot-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; color: var(--accent); }
 .infodot-btn svg { width: 15px; height: 15px; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; }
-.infodot-bubble {
+/* Selector is `.infodot > span.infodot-bubble` rather than `.infodot-bubble`
+   for the same reason as the display guard above: it has to at least tie with
+   a container's `… span` rule, and it is later in the file. */
+.infodot > span.infodot-bubble {
   position: absolute; z-index: 60;
-  top: calc(100% + 8px); inset-inline-end: -6px;
-  width: max-content; max-width: 300px;
+  top: calc(100% + 8px); inset-inline-start: -6px; inset-inline-end: auto;
+  width: max-content; max-width: min(320px, 62vw);
   padding: 10px 12px; border-radius: var(--r-sm);
   background: var(--bg-1); border: 1px solid var(--glass-brd-strong);
   box-shadow: var(--shadow);
@@ -403,10 +601,15 @@ input, textarea { font-family: inherit; }
   transition: opacity .16s var(--ease), transform .16s var(--ease), visibility .16s;
   pointer-events: none;
 }
-.infodot:hover .infodot-bubble,
-.infodot:focus-within .infodot-bubble { opacity: 1; visibility: visible; transform: none; }
+/* Corners, picked by measurement in ui.jsx so a dot near an edge doesn't open
+   off screen. Start-below is the default and by far the common case. */
+.infodot > span.infodot-bubble[data-align="end"] { inset-inline-start: auto; inset-inline-end: -6px; }
+.infodot > span.infodot-bubble[data-side="above"] { top: auto; bottom: calc(100% + 8px); transform: translateY(4px); }
+.infodot.open > span.infodot-bubble {
+  opacity: 1; visibility: visible; transform: none; pointer-events: auto;
+}
 @media (prefers-reduced-motion: reduce) {
-  .infodot-bubble { transition: none; }
+  .infodot > span.infodot-bubble { transition: none; }
 }
 
 /* blocklist panels (blacklist / graylist) */
@@ -516,6 +719,20 @@ input, textarea { font-family: inherit; }
 .ext-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 7px; }
 .ext-sync { color: var(--muted); font-weight: 500; }
 
+/* Browser lock (Edge): the row's own panel, because a locked-out browser is a
+   different kind of statement from the status line above it — that reports what
+   is true, this one says the browser is being held shut and what ends it. Warn,
+   not danger: nothing is broken and nothing was lost, the user just has one
+   thing to do. */
+.ext-lock {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 8px; padding: 9px 11px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ol-warn) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ol-warn) 34%, transparent);
+}
+.ext-lock-note { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--ol-warn); }
+
 /* ============================================================
    SETTINGS-PAGE BUILDING BLOCKS
    Shared by Blocking, Settings, Themes and Tips. The bespoke
@@ -595,6 +812,11 @@ input, textarea { font-family: inherit; }
   color: var(--muted); cursor: pointer; max-width: 62ch;
 }
 .check-row input { margin-top: 3px; flex: 0 0 auto; }
+/* The bold lead-in of a check-row's label (rendered from the string's own
+   **markers**, see tRich in ui.jsx). It reads as ordinary emphasis until the
+   box is ticked, then turns danger-coloured to match what was just armed. */
+.check-row b { color: var(--text-2); }
+.check-row .frozen-armed b { color: var(--ol-danger); }
 
 /* Status chips with meaning, not just colour. */
 .chip-ok { color: var(--ol-ok); border-color: color-mix(in oklab, var(--ol-ok) 40%, transparent); }
@@ -618,38 +840,50 @@ input, textarea { font-family: inherit; }
 .privacy-note span { display: block; font-size: 13px; color: var(--text-2); line-height: 1.5; margin-top: 3px; max-width: 68ch; }
 
 /* Label available to screen readers only — for controls whose visible text
-   lives in a sibling element (see .strict-choice-hit). */
+   lives in a sibling element (see .choice-hit). */
 .sr-only {
   position: absolute; width: 1px; height: 1px;
   margin: -1px; padding: 0; overflow: hidden;
   clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 
-/* ---------- strictness chooser ---------- */
-.strict-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }
-.strict-choice {
+/* ---------- pick-one chooser ----------
+   The ONE "choose exactly one of these" control in the app: strictness,
+   voice, language, atmosphere. It used to be three separate implementations
+   (.strict-choice, .style-card/.bg-card, and a row of Choose/Selected buttons
+   in Settings), which is how three pages ended up with three different ideas
+   of what a selected option looks like. Rendered by ui.jsx's <Choice>. */
+.choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }
+.choice {
   position: relative; text-align: start;
   padding: 16px 16px 14px; border-radius: var(--r-md);
   background: var(--glass-2); border: 1px solid var(--glass-brd);
   transition: border-color .18s var(--ease), background .18s var(--ease);
 }
-.strict-choice:hover { border-color: var(--glass-brd-strong); }
-.strict-choice.sel {
+.choice:hover { border-color: var(--glass-brd-strong); }
+.choice.sel {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent) inset;
 }
+.choice.locked { opacity: .55; }
 /* Card-filling pick button. Sits UNDER the info dot (z-index 1 vs 2) so the
    dot stays independently clickable without nesting one button in another. */
-.strict-choice-hit { position: absolute; inset: 0; z-index: 1; border-radius: inherit; cursor: pointer; }
-.strict-choice-hit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.strict-choice .infodot { position: relative; z-index: 2; }
-.strict-choice-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.strict-choice-name { font-size: 15px; font-weight: 800; color: var(--text); display: inline-flex; align-items: center; }
-.strict-choice-mark {
+.choice-hit { position: absolute; inset: 0; z-index: 1; border-radius: inherit; cursor: pointer; }
+.choice-hit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.choice-hit:disabled { cursor: default; }
+.choice .infodot { position: relative; z-index: 2; }
+.choice-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.choice-name { font-size: 15px; font-weight: 800; color: var(--text); display: inline-flex; align-items: center; gap: 8px; }
+/* Direct child: the option's own leading icon is accent, the InfoDot's icon
+   nested inside it is not — it is an affordance, not part of the option. */
+.choice-name > svg { color: var(--accent); flex: 0 0 auto; }
+/* The flex gap already spaces it; the dot's own margin would double it. */
+.choice-name > .infodot { margin-inline-start: 0; }
+.choice-mark {
   display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%;
   background: var(--accent); color: var(--accent-ink); flex: 0 0 20px;
 }
-.strict-choice-desc { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: 5px; }
+.choice-desc { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: 5px; }
 
 /* time picker fields */
 .time-field {
@@ -755,21 +989,37 @@ input, textarea { font-family: inherit; }
 /* ============================================================
    TIPS / PROTOCOLS — redesigned cards
    ============================================================ */
+/* Search field, sized to share a row with the actions beside it. */
+.tips-search {
+  display: flex; align-items: center; gap: 10px;
+  flex: 1 1 240px; min-width: 0;
+  color: var(--muted);
+}
+.tips-search .input { flex: 1; min-width: 0; }
+/* Chrome draws its own clear button on type=search and it lands on top of
+   the border radius. The Escape key and the empty-state link both clear it. */
+.tips-search input[type="search"]::-webkit-search-decoration,
+.tips-search input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
+
 .protocol-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* The card colour. One value per LIST, not per card: it distinguishes tips
+     from questions, which is a real difference, where the old per-card
+     rotation through three accents encoded nothing but array position. */
+  --p-color: var(--accent-2);
 }
+.protocol-list.is-questions { --p-color: var(--accent); }
 
 /* --- card shell --- */
 .protocol-card {
   position: relative;
   display: flex;
-  border-radius: var(--r-lg);
-  background: var(--glass);
+  border-radius: var(--card-radius);
+  background: var(--card-fill);
   border: 1px solid var(--glass-brd);
-  -webkit-backdrop-filter: blur(var(--ol-blur-panel)); backdrop-filter: blur(var(--ol-blur-panel));
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--card-shadow);
   cursor: pointer;
   overflow: hidden;
   transition: transform .28s var(--ease), border-color .28s, box-shadow .35s var(--ease);
@@ -805,12 +1055,25 @@ input, textarea { font-family: inherit; }
   padding: 18px 20px;
 }
 
-/* --- header row --- */
+/* --- header row ---
+   A real <button> spanning the card, so the accordion is keyboard-reachable
+   (it used to be a div with an onClick, which nothing but a mouse could open). */
 .protocol-header {
   display: flex;
   align-items: center;
   gap: 14px;
+  width: 100%;
+  text-align: start;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
 }
+.protocol-header:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 8px; }
+.protocol-title { flex: 1; min-width: 0; }
+.protocol-toggle { margin-inline-start: auto; }
 
 /* icon circle */
 .protocol-ico-wrap {
@@ -827,17 +1090,6 @@ input, textarea { font-family: inherit; }
 .protocol-card:hover .protocol-ico-wrap {
   transform: scale(1.06);
   background: color-mix(in oklab, var(--p-color) 20%, transparent);
-}
-
-/* number */
-.protocol-num {
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--p-color);
-  opacity: .5;
-  letter-spacing: .06em;
-  font-variant-numeric: tabular-nums;
-  flex: 0 0 auto;
 }
 
 /* title */
@@ -867,16 +1119,28 @@ input, textarea { font-family: inherit; }
   background: color-mix(in oklab, var(--p-color) 10%, transparent);
 }
 
-/* --- expandable body --- */
+/* --- expandable body ---
+   `grid-template-rows: 0fr -> 1fr` animates to the content's real height with
+   no number to get wrong. The old rule animated max-height to a hard-coded
+   250px, which quietly clipped the longest entry in a narrow window. */
 .protocol-expand {
-  overflow: hidden;
-  transition: max-height .4s var(--ease);
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows .35s var(--ease);
 }
+.protocol-expand[data-open="true"] { grid-template-rows: 1fr; }
+.protocol-expand-inner { overflow: hidden; min-height: 0; }
 .protocol-text {
   font-size: 14px;
   color: var(--text-2);
   line-height: 1.65;
-  padding: 14px 0 4px 54px; /* left-aligned with title (40px icon + 14px gap) */
+  /* Logical, not physical: the app ships an RTL locale, where a hard `left`
+     indent detaches the body from the title it is supposed to line up under. */
+  padding: 14px 0 4px;
+  padding-inline-start: 54px; /* 40px icon + 14px gap */
+}
+@media (prefers-reduced-motion: reduce) {
+  .protocol-expand { transition: none; }
 }
 
 /* --- stagger animation for 12 items --- */
@@ -915,12 +1179,27 @@ input, textarea { font-family: inherit; }
 
 /* ============================================================
    THEMES PAGE
+   (.style-card/.style-swatch/.style-check/.bg-card* are gone with the
+   palette grid they belonged to — the theme, atmosphere and colour-group
+   pickers all render through the shared .choice / .setting primitives now.)
    ============================================================ */
-.style-card, .bg-card { cursor:pointer; text-align:start; align-items:flex-start; }
-.style-card.sel, .bg-card.sel { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 35%, transparent), var(--shadow-sm); }
-.style-swatch { width:100%; height:64px; border-radius:14px; position:relative; }
-.style-check { position:absolute; top:8px; inset-inline-end:8px; width:26px; height:26px; border-radius:50%; background: var(--accent); color: var(--accent-ink); display:grid; place-items:center; box-shadow: 0 3px 8px rgba(0,0,0,.25); }
-.bg-card-ico { width:40px; height:40px; flex:0 0 40px; border-radius:12px; display:grid; place-items:center; background: color-mix(in oklab, var(--accent) 14%, transparent); color: var(--accent); }
+
+/* Live sample of what a colour change actually affects. Every value in here
+   is a var(), never a literal, so it is a real read of the current tokens
+   rather than a picture of them. */
+.theme-preview {
+  margin: 14px 0 4px;
+  padding: 16px 18px;
+  border-radius: var(--r-md);
+  background: var(--bg-0);
+  border: 1px solid var(--glass-brd-strong);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.theme-preview-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13.5px; }
+.theme-preview-dot { width: 12px; height: 12px; border-radius: 50%; flex: 0 0 12px; }
+/* The preview is a display, not a control — it must never steal a click or a
+   Tab stop from the pickers underneath it. */
+.theme-preview button { pointer-events: none; }
 
 /* ============================================================
    SETTINGS — fields

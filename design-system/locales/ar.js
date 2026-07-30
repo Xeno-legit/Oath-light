@@ -15,7 +15,7 @@
  * every string in context — not just check the grammar. Half of these
  * are addressed to someone in a hard moment, where a register that is
  * slightly too formal, too clinical, or too harsh does real damage.
- * The Companion/Drill Sergeant split in particular does not survive a
+ * The Companion/Coach split in particular does not survive a
  * literal translation: it has to be re-decided in Arabic.
  *
  * Rules that survive translation (see VOICE.md):

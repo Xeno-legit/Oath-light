@@ -33,14 +33,14 @@ function acquireAuth() {
 // A pending-weakening note, in the one shape every section here needs: what is
 // turning off, when, and the one-click way to call it back. Previously each
 // section hand-wrote this line and they had all drifted apart.
-function PendingNote({ pending, what, onKeep }) {
+function PendingNote({ pending, whatKey, onKeep }) {
   if (!pending) return null;
   return (
     <div className="pending-note">
-      {what} turns off in <b>{fmtDur(pending.remaining_secs)}</b> — it stays fully active until then.
+      {tRich('blocking.pending_note', { what: PP.t(whatKey), time: fmtDur(pending.remaining_secs) })}
       {onKeep &&
         <React.Fragment>{' '}
-          <a href="#" onClick={(e) => { e.preventDefault(); onKeep(); }}>Keep it on</a>
+          <a href="#" onClick={(e) => { e.preventDefault(); onKeep(); }}>{PP.t('blocking.pending_keep')}</a>
         </React.Fragment>}
     </div>
   );
@@ -53,35 +53,20 @@ function StrictnessCard({ s, PP }) {
   const presets = PP.PRESETS || [];
   return (
     <SectionCard
-      title="Strictness"
-      sub="Strict is the floor. There is no gentler setting — that is the point."
-      info="Every individual protection below stays yours to tune afterwards. Changing preset can only ever turn things ON: nothing here can quietly weaken a protection, because weakening always goes through the waiting period instead.">
-      <div className="strict-choices">
-        {presets.map((p) => {
-          const active = current === p.id;
-          return (
-            /* The whole card is the hit target, but the info dot inside it is
-               its own button — so the pick button is a sibling overlay rather
-               than a wrapper. Nesting one button inside another would both be
-               invalid markup and make opening the info bubble silently apply
-               the preset. */
-            <div key={p.id} className={'strict-choice' + (active ? ' sel' : '')}>
-              <button className="strict-choice-hit" aria-pressed={active}
-                      onClick={() => PP.applyPreset(p.id)}>
-                <span className="sr-only">{active ? `${p.name}, selected` : `Choose ${p.name}`}</span>
-              </button>
-              <div className="strict-choice-head">
-                <span className="strict-choice-name">
-                  {p.name}
-                  {p.info && <InfoDot label={`About ${p.name}`}>{p.info}</InfoDot>}
-                </span>
-                {active && <span className="strict-choice-mark"><IconCheck size={14} /></span>}
-              </div>
-              <div className="strict-choice-desc">{p.desc}</div>
-            </div>
-          );
-        })}
-      </div>
+      title={PP.t('blocking.strictness_title')}
+      sub={PP.t('blocking.strictness_sub')}
+      info={PP.t('blocking.strictness_info')}>
+      <Choices>
+        {presets.map((p) => (
+          <Choice
+            key={p.id}
+            name={PP.t(p.nameKey)}
+            desc={PP.t(p.descKey)}
+            info={PP.t(p.infoKey)}
+            selected={current === p.id}
+            onSelect={() => PP.applyPreset(p.id)} />
+        ))}
+      </Choices>
     </SectionCard>
   );
 }
@@ -107,6 +92,7 @@ function AppBlockingSection() {
   const pending = (window.usePendingWeakenings || (() => []))();
   const pendingRemovals = pending.filter((p) => p.action_id.indexOf('process_block.remove:') === 0);
   const evasionPending = pending.find((p) => p.action_id === 'evasion_kill.disable');
+  const browserLockPending = pending.find((p) => p.action_id === 'browser_lock.disable');
 
   const refresh = React.useCallback(() => {
     if (!available) return;
@@ -123,13 +109,13 @@ function AppBlockingSection() {
     if (!available) return;
     let unProc = null, unEvasion = null, cancelled = false;
     const push = (text) => setRecent((r) => [{ id: Date.now() + Math.random(), ts: Date.now(), text }, ...r].slice(0, 6));
-    window.PPNative.onProcessEnforcement((p) => push(`${p.name} — blocked list — closed`))
+    window.PPNative.onProcessEnforcement((p) => push(PP.t('blocking.event_process_closed', { name: p.name })))
       .then((fn) => { if (cancelled) fn(); else unProc = fn; });
     // UX Direction §3: report WHAT happened, not which category of evasion it
     // was — the reason codes are still logged in full to the protection
     // history and the app log, they just aren't a taxonomy on screen.
     window.PPNative.onEvasionDetected((p) => push(
-      `${p.name} — unrecognised browser — ${p.killed ? 'closed' : 'noted'}`
+      PP.t(p.killed ? 'blocking.event_evasion_closed' : 'blocking.event_evasion_noted', { name: p.name })
     )).then((fn) => { if (cancelled) fn(); else unEvasion = fn; });
     return () => { cancelled = true; if (unProc) unProc(); if (unEvasion) unEvasion(); };
   }, [available]);
@@ -172,16 +158,38 @@ function AppBlockingSection() {
       .finally(() => setBusy(false));
   }
 
+  // Same asymmetry as every other protection here: on instantly, off only
+  // through auth + a cool-off.
+  function toggleBrowserLock(enabled) {
+    setErr('');
+    if (enabled) {
+      setBusy(true);
+      window.PPNative.setBrowserLock(true, null)
+        .then(() => refresh())
+        .catch((e) => setErr(e && e.message ? e.message : String(e)))
+        .finally(() => setBusy(false));
+      return;
+    }
+    acquireAuth()
+      .then((token) => { setBusy(true); return window.PPNative.setBrowserLock(false, token); })
+      .then(() => refresh())
+      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
+      .finally(() => setBusy(false));
+  }
+
   const blockedList = (cfg && cfg.blocked_processes) || [];
   const killUnknown = !!(cfg && cfg.block_unknown_browsers);
+  const browserLock = !!(cfg && cfg.lock_unverified_browsers);
 
   return (
     <React.Fragment>
       <Setting
         icon={IconGrid}
-        title="Blocked apps"
-        desc={blockedList.length ? `${blockedList.length} blocked by process name` : 'Nothing blocked yet'}
-        info="Closes desktop apps by process name whenever they start. This is friction, not a sandbox — a renamed .exe walks straight past it. Adding one is instant; removing one goes through the waiting period.">
+        title={PP.t('blocking.apps_title')}
+        desc={blockedList.length
+          ? PP.t('blocking.apps_desc_count', { count: blockedList.length })
+          : PP.t('blocking.apps_desc_empty')}
+        info={PP.t('blocking.apps_info')}>
         <span className="chip">{blockedList.length}</span>
       </Setting>
 
@@ -189,13 +197,13 @@ function AppBlockingSection() {
         <div className="row" style={{ gap: 10 }}>
           <input
             className="input"
-            placeholder="e.g. discord.exe"
+            placeholder={PP.t('blocking.apps_placeholder')}
             value={newProc}
             onChange={(e) => setNewProc(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addProc()}
             style={{ flex: 1 }} />
           <button className="btn btn-primary btn-sm" disabled={busy || !available} onClick={addProc}>
-            <IconPlus size={15} /> Add
+            <IconPlus size={15} /> {PP.t('app.action_add')}
           </button>
         </div>
 
@@ -204,7 +212,7 @@ function AppBlockingSection() {
             {blockedList.map((name) => (
               <span key={name} className="tag">
                 {name}
-                <button className="tag-x" disabled={busy} aria-label={`Stop blocking ${name}`}
+                <button className="tag-x" disabled={busy} aria-label={PP.t('blocking.apps_stop_blocking_aria', { name })}
                         onClick={() => removeProc(name)}><IconX size={13} /></button>
               </span>
             ))}
@@ -214,16 +222,16 @@ function AppBlockingSection() {
           const name = p.action_id.slice('process_block.remove:'.length);
           return (
             <div key={p.action_id} className="pending-note">
-              <b>{name}</b> unblocks in <b>{fmtDur(p.remaining_secs)}</b>.{' '}
+              {tRich('blocking.apps_pending', { name, time: fmtDur(p.remaining_secs) })}{' '}
               <a href="#" onClick={(e) => { e.preventDefault(); window.PPNative.cancelWeakening(p.action_id).then(refresh); }}>
-                Keep blocking it
+                {PP.t('blocking.apps_keep_blocking')}
               </a>
             </div>
           );
         })}
 
         {err && <div className="err-note">{err}</div>}
-        {!available && <div className="muted-note">Available in the desktop app.</div>}
+        {!available && <div className="muted-note">{PP.t('app.needs_desktop')}</div>}
       </div>
 
       {/* UX Direction §3 — "status yes, map no": this deliberately does not
@@ -231,17 +239,30 @@ function AppBlockingSection() {
           of things to go try. */}
       <Setting
         icon={IconShieldOff}
-        title="Close unrecognised browsers"
-        desc={killUnknown ? 'Closed on sight' : 'Recorded, not closed'}
-        info="Some browsers can't be reached by the extension at all. With this on, they're closed as soon as they start. Either way, anything unrecognised is written to your protection history.">
+        title={PP.t('blocking.evasion_title')}
+        desc={PP.t(killUnknown ? 'blocking.evasion_desc_on' : 'blocking.evasion_desc_off')}
+        info={PP.t('blocking.evasion_info')}>
         <Switch on={killUnknown} onClick={() => toggleEvasionKill(!killUnknown)} disabled={busy || !available} />
       </Setting>
-      <PendingNote pending={evasionPending} what="Closing unrecognised browsers"
+      <PendingNote pending={evasionPending} whatKey="blocking.evasion_pending_what"
                    onKeep={() => window.PPNative.cancelWeakening('evasion_kill.disable').then(refresh)} />
+
+      {/* Same "status yes, map no" rule: this says a browser that won't run the
+          extension won't run, without naming which browser or why it's the one
+          that can be made to behave this way. */}
+      <Setting
+        icon={IconLock}
+        title={PP.t('blocking.browser_lock_title')}
+        desc={PP.t(browserLock ? 'blocking.browser_lock_desc_on' : 'blocking.browser_lock_desc_off')}
+        info={PP.t('blocking.browser_lock_info')}>
+        <Switch on={browserLock} onClick={() => toggleBrowserLock(!browserLock)} disabled={busy || !available} />
+      </Setting>
+      <PendingNote pending={browserLockPending} whatKey="blocking.browser_lock_pending_what"
+                   onKeep={() => window.PPNative.cancelWeakening('browser_lock.disable').then(refresh)} />
 
       {recent.length > 0 &&
         <div className="sub-block">
-          <div className="sub-label">This session</div>
+          <div className="sub-label">{PP.t('blocking.apps_session_label')}</div>
           {recent.map((r) => (
             <div key={r.id} className="muted-note" style={{ marginTop: 2 }}>
               {new Date(r.ts).toLocaleTimeString()} — {r.text}
@@ -259,7 +280,8 @@ function AppBlockingSection() {
 // plus the instant-enable / friction-gated-disable requests.
 function DnsFilterSection() {
   const available = !!(window.PPNative && window.PPNative.available);
-  const [status, setStatus] = React.useState(null); // { running, taken_over, last_error, upstreams }
+  // { running, taken_over, last_error, upstreams, upstream_warning, exposure_warning }
+  const [status, setStatus] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState('');
 
@@ -304,29 +326,44 @@ function DnsFilterSection() {
       .finally(() => setBusy(false));
   }
 
-  // Status line: off / active / active-but-not-taken-over / error.
+  // Status line: off / active / active-but-sidelined / active-but-not-taken-over
+  // / error. The 'reduced' tone is deliberately NOT 'warn': nothing is broken
+  // and there is nothing to restart, so it must not pull in the
+  // restart-as-administrator note below.
   let statusText, statusTone;
-  if (!status) { statusText = 'Loading…'; statusTone = 'muted'; }
+  if (!status) { statusText = PP.t('app.loading'); statusTone = 'muted'; }
   else if (status.last_error && !on) { statusText = status.last_error; statusTone = 'danger'; }
-  else if (on && status.taken_over) { statusText = 'Filtering every app on this computer'; statusTone = 'ok'; }
-  else if (on && !status.taken_over) { statusText = status.last_error || 'Running, but no adapter could be redirected — needs administrator rights'; statusTone = 'warn'; }
-  else { statusText = 'Off — only the browser extension is filtering'; statusTone = 'muted'; }
+  else if (on && status.taken_over && status.exposure_warning) { statusText = PP.t('blocking.dns_status_reduced'); statusTone = 'reduced'; }
+  else if (on && status.taken_over) { statusText = PP.t('blocking.dns_status_active'); statusTone = 'ok'; }
+  else if (on && !status.taken_over) { statusText = status.last_error || PP.t('blocking.dns_status_no_adapter'); statusTone = 'warn'; }
+  else { statusText = PP.t('blocking.dns_status_off'); statusTone = 'muted'; }
 
   return (
     <React.Fragment>
       <Setting
         icon={IconGlobe}
-        title="System DNS filter"
+        title={PP.t('blocking.dns_title')}
         desc={statusText}
-        info="Extends blocking past the browser to every other app on this computer. Needs administrator rights once, to take over DNS. Opt-in — turning it on is instant, turning it off goes through the waiting period.">
+        info={PP.t('blocking.dns_info')}>
         <Switch on={on} onClick={toggle} disabled={busy || !available} />
       </Setting>
       {statusTone === 'warn' &&
         <div className="warn-note">
-          {statusText}. Restart Oath Light as administrator and switch this on again.
+          {PP.t('blocking.dns_warn_restart', { status: statusText })}
         </div>}
+      {/* Separate from the status line on purpose: the filter IS working, the
+          network isn't. Merging the two would make a bad Wi-Fi day look like a
+          broken protection. */}
+      {on && status && status.upstream_warning &&
+        <div className="warn-note">{status.upstream_warning}</div>}
+      {/* Third distinct case: the filter is working AND the network is fine, but
+          the resolver is no longer in the DNS path, so it is covering less than
+          the headline claims. Rust owns the wording (dns_filter.rs's
+          `exposure_message`) because it knows which connection it found. */}
+      {on && status && status.exposure_warning &&
+        <div className="warn-note">{status.exposure_warning}</div>}
       {err && <div className="err-note">{err}</div>}
-      <PendingNote pending={disablePending} what="The DNS filter"
+      <PendingNote pending={disablePending} whatKey="blocking.dns_pending_what"
                    onKeep={() => window.PPNative.cancelWeakening('dns.disable').then(refresh)} />
     </React.Fragment>
   );
@@ -362,39 +399,39 @@ function ProtectionsCard({ s, PP }) {
 
   return (
     <SectionCard
-      title="Protection"
-      sub="What actually keeps Oath Light in place and working."
-      info="Turning any of these ON is instant. Turning one OFF files a request that waits out the delay first — during which the protection stays fully active. That asymmetry is deliberate and applies everywhere in the app.">
+      title={PP.t('blocking.protection_title')}
+      sub={PP.t('blocking.protection_sub')}
+      info={PP.t('blocking.protection_info')}>
 
       <Setting
         icon={IconShield}
-        title="Uninstall guard"
-        desc={b.uninstallGuard ? 'On — extension kept installed, private windows closed off' : 'Off'}
-        info="Keeps the extension force-installed on every supported browser and re-applies the policy if it's removed. It also closes the two surfaces the extension can't reach on its own: Incognito/Private windows and Guest profiles.">
+        title={PP.t('blocking.guard_title')}
+        desc={PP.t(b.uninstallGuard ? 'blocking.guard_desc_on' : 'app.state_off')}
+        info={PP.t('blocking.guard_info')}>
         <Switch on={b.uninstallGuard} onClick={toggleGuard} />
       </Setting>
-      <PendingNote pending={guardPending} what="The uninstall guard" />
+      <PendingNote pending={guardPending} whatKey="blocking.guard_pending_what" />
 
       <Setting
         icon={IconSearch}
-        title="SafeSearch"
-        desc="Forced on every connected browser"
-        info="Google, Bing, DuckDuckGo and Yahoo are pinned to SafeSearch and their toggle UI is hidden. There is deliberately no switch for this one — it can't be turned off.">
-        <span className="chip chip-ok">Always on</span>
+        title={PP.t('blocking.safesearch_title')}
+        desc={PP.t('blocking.safesearch_desc')}
+        info={PP.t('blocking.safesearch_info')}>
+        <span className="chip chip-ok">{PP.t('blocking.safesearch_chip')}</span>
       </Setting>
 
       <Setting
         icon={IconShield}
-        title="YouTube Restricted Mode"
-        desc={b.youtubeRestrict ? 'On' : 'Off'}
-        info="Applies YouTube's own strict Restricted Mode through a header rule — the same mechanism school networks use — so YouTube filters mature videos and comments on its side. Included in Strict.">
+        title={PP.t('blocking.youtube_title')}
+        desc={PP.t(b.youtubeRestrict ? 'app.state_on' : 'app.state_off')}
+        info={PP.t('blocking.youtube_info')}>
         <Switch on={!!b.youtubeRestrict} onClick={() => toggle('youtubeRestrict')} />
       </Setting>
 
-      <div className="sub-label">Apps and browsers</div>
+      <div className="sub-label">{PP.t('blocking.sub_apps')}</div>
       <AppBlockingSection />
 
-      <div className="sub-label">Network</div>
+      <div className="sub-label">{PP.t('blocking.sub_network')}</div>
       <DnsFilterSection />
     </SectionCard>
   );
@@ -463,19 +500,19 @@ function MonitorSection() {
 
   return (
     <SectionCard
-      title="AI screen monitor"
-      sub="Optional. Watches this device's screen on-device and covers what it shouldn't be showing."
-      info="An on-device model looks at the screen when it changes. No frame ever leaves this computer — there is no server involved and nothing is uploaded. It only reacts when something persists across several frames, never to a single reading, and all it does is cover the screen and open your own redirect.">
+      title={PP.t('blocking.monitor_title')}
+      sub={PP.t('blocking.monitor_sub')}
+      info={PP.t('blocking.monitor_info')}>
 
       <Setting
         icon={IconSearch}
-        title="Screen monitoring"
-        desc={running ? 'Running' : 'Off'}
+        title={PP.t('blocking.monitor_row_title')}
+        desc={PP.t(running ? 'blocking.monitor_running' : 'app.state_off')}
         tone={running ? 'ok' : undefined}
-        info="Turning it on is instant. Turning it off goes through the waiting period like every other protection — it keeps running until that elapses.">
+        info={PP.t('blocking.monitor_row_info')}>
         {running
-          ? <button className="btn btn-ghost btn-sm" onClick={stop} disabled={!!stopPending}>Turn off</button>
-          : <button className="btn btn-primary btn-sm" disabled={!available} onClick={() => setConfirming(true)}>Turn on</button>}
+          ? <button className="btn btn-ghost btn-sm" onClick={stop} disabled={!!stopPending}>{PP.t('blocking.monitor_turn_off')}</button>
+          : <button className="btn btn-primary btn-sm" disabled={!available} onClick={() => setConfirming(true)}>{PP.t('blocking.monitor_turn_on')}</button>}
       </Setting>
 
       {/* The warning. Deliberately a blocking step rather than fine print: this
@@ -483,22 +520,22 @@ function MonitorSection() {
           collected explicitly, once, before it ever starts. */}
       {confirming &&
         <div className="warn-panel">
-          <div className="warn-panel-title"><IconShield size={17} /> Before you turn this on</div>
+          <div className="warn-panel-title"><IconShield size={17} /> {PP.t('blocking.monitor_consent_title')}</div>
           <ul className="warn-panel-list">
-            <li>It looks at whatever is on your screen — including windows that have nothing to do with browsing.</li>
-            <li>Everything is processed on this device. No image is uploaded, stored, or sent anywhere.</li>
-            <li>When it reacts, it covers the screen and opens your redirect. It can't close apps or report to anyone.</li>
-            <li>Turning it back off takes 24 hours, like every other protection here.</li>
+            <li>{PP.t('blocking.monitor_consent_1')}</li>
+            <li>{PP.t('blocking.monitor_consent_2')}</li>
+            <li>{PP.t('blocking.monitor_consent_3')}</li>
+            <li>{PP.t('blocking.monitor_consent_4')}</li>
           </ul>
           <div className="row" style={{ gap: 10, marginTop: 14 }}>
-            <button className="btn btn-primary btn-sm" onClick={start}>I understand — turn it on</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => setConfirming(false)}>Cancel</button>
+            <button className="btn btn-primary btn-sm" onClick={start}>{PP.t('blocking.monitor_consent_cta')}</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setConfirming(false)}>{PP.t('app.action_cancel')}</button>
           </div>
         </div>}
 
-      <PendingNote pending={stopPending} what="The screen monitor" />
+      <PendingNote pending={stopPending} whatKey="blocking.monitor_pending_what" />
       {err && <div className="err-note">{err}</div>}
-      {!available && <div className="muted-note">Available in the desktop app.</div>}
+      {!available && <div className="muted-note">{PP.t('app.needs_desktop')}</div>}
 
       {/* The live readout is diagnostics, not a setting — collapsed by default
           so it stops competing with the controls above it. */}
@@ -506,21 +543,26 @@ function MonitorSection() {
         <React.Fragment>
           <button className="disclose" aria-expanded={showDetail} onClick={() => setShowDetail((v) => !v)}>
             <IconChevron size={15} className={showDetail ? 'disclose-open' : ''} />
-            {showDetail ? 'Hide live readout' : 'Show live readout'}
+            {PP.t(showDetail ? 'blocking.monitor_hide_readout' : 'blocking.monitor_show_readout')}
           </button>
           {showDetail &&
             <div className="sub-block">
               {last
                 ? <div className="row" style={{ gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                     {last.thumb &&
-                      <img src={last.thumb} alt="Most recent screen capture"
+                      <img src={last.thumb} alt={PP.t('blocking.monitor_capture_alt')}
                            style={{ width: 200, borderRadius: 10, display: 'block' }} />}
                     <div>
                       <div style={{ fontWeight: 800, fontSize: 15 }}>{last.top_label}</div>
-                      <div className="muted-note">{(last.top_score * 100).toFixed(1)}% · checked {new Date(last.ts).toLocaleTimeString()}</div>
+                      <div className="muted-note">
+                        {PP.t('blocking.monitor_reading', {
+                          score: (last.top_score * 100).toFixed(1),
+                          time: new Date(last.ts).toLocaleTimeString(),
+                        })}
+                      </div>
                     </div>
                   </div>
-                : <div className="muted-note">Waiting for the screen to change…</div>}
+                : <div className="muted-note">{PP.t('blocking.monitor_waiting')}</div>}
             </div>}
         </React.Fragment>}
     </SectionCard>
@@ -555,15 +597,15 @@ function ScheduleCard({ s, PP }) {
 
   return (
     <SectionCard
-      title="Your hard hours"
-      sub="The window you already know is the risky one, and what happens during it."
-      info="Set from your own pattern rather than a generic default. The Overview page can fill this in from your logged urges once there are enough of them to see a shape.">
+      title={PP.t('blocking.schedule_title')}
+      sub={PP.t('blocking.schedule_sub')}
+      info={PP.t('blocking.schedule_info')}>
 
       <Setting
         icon={IconClock}
-        title="Vulnerable hours"
-        desc={b.vulnerable.on ? `${b.vulnerable.start} → ${b.vulnerable.end}` : 'Off'}
-        info="Reminders, grayscale and — on the Lockdown preset — automatic allowlist-only browsing all key off this window.">
+        title={PP.t('blocking.vulnerable_title')}
+        desc={b.vulnerable.on ? `${b.vulnerable.start} → ${b.vulnerable.end}` : PP.t('app.state_off')}
+        info={PP.t('blocking.vulnerable_info')}>
         <Switch on={b.vulnerable.on} onClick={() => setVuln({ on: !b.vulnerable.on })} />
       </Setting>
 
@@ -571,13 +613,13 @@ function ScheduleCard({ s, PP }) {
         <div className="sub-block">
           <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
             <label className="time-field">
-              <span>From</span>
+              <span>{PP.t('blocking.time_from')}</span>
               <input type="time" className="time-input" value={b.vulnerable.start}
                      onChange={(e) => setVuln({ start: e.target.value })} />
             </label>
             <span style={{ color: 'var(--muted)', fontSize: 13, fontWeight: 600 }}>→</span>
             <label className="time-field">
-              <span>To</span>
+              <span>{PP.t('blocking.time_to')}</span>
               <input type="time" className="time-input" value={b.vulnerable.end}
                      onChange={(e) => setVuln({ end: e.target.value })} />
             </label>
@@ -586,16 +628,18 @@ function ScheduleCard({ s, PP }) {
 
       <Setting
         icon={IconMoon}
-        title="Grayscale the screen"
-        desc={b.grayscaleVulnerable ? 'On during your window' : 'Off'}
-        info="Drains the colour out of the whole display while your window is running, then gives it back. On some Windows builds it takes effect at the next sign-in rather than instantly. This one isn't a protection, so you can switch it off any time — no waiting period.">
+        title={PP.t('blocking.grayscale_title')}
+        desc={PP.t(b.grayscaleVulnerable ? 'blocking.grayscale_desc_on' : 'app.state_off')}
+        info={PP.t('blocking.grayscale_info')}>
         <Switch on={!!b.grayscaleVulnerable} onClick={toggleGray} disabled={!available} />
       </Setting>
       {grayErr && <div className="err-note">{grayErr}</div>}
 
-      <div className="sub-label">Nudges during the window</div>
+      <div className="sub-label">{PP.t('blocking.nudges_label')}</div>
       {b.alerts.map((a) =>
-        <Setting key={a.id} icon={IconBell} title={a.label} desc={a.desc}>
+        <Setting key={a.id} icon={IconBell}
+                 title={a.labelKey ? PP.t(a.labelKey) : a.label}
+                 desc={a.descKey ? PP.t(a.descKey) : a.desc}>
           <Switch on={a.on} onClick={() => toggleAlert(a.id)} />
         </Setting>
       )}
@@ -623,15 +667,17 @@ function BlockScreenCard({ s, PP }) {
 
   return (
     <SectionCard
-      title="What you see when it blocks"
-      sub="A wall says no. This is the part that says what to do instead."
-      info="Whatever you write here shows up on the block screen itself. Write it now, while you're thinking clearly — that's the whole trick. Leave it empty and the block screen won't invent advice of its own.">
+      title={PP.t('blocking.blockscreen_title')}
+      sub={PP.t('blocking.blockscreen_sub')}
+      info={PP.t('blocking.blockscreen_info')}>
 
       <Setting
         icon={IconCompass}
-        title="Redirect instead of the block screen"
-        desc={b.redirectLinkOn ? (b.redirectUrl || 'No link set yet') : 'Off — show the block screen'}
-        info="Sends you to a page of your choosing instead of the default block screen — a video, a note to yourself, anything that helps more than a closed door does.">
+        title={PP.t('blocking.redirect_title')}
+        desc={b.redirectLinkOn
+          ? (b.redirectUrl || PP.t('blocking.redirect_desc_unset'))
+          : PP.t('blocking.redirect_desc_off')}
+        info={PP.t('blocking.redirect_info')}>
         <Switch on={b.redirectLinkOn} onClick={() => set({ redirectLinkOn: !b.redirectLinkOn })} />
       </Setting>
 
@@ -641,32 +687,32 @@ function BlockScreenCard({ s, PP }) {
             <input
               type="url"
               className="input"
-              placeholder="https://youtube.com/watch?v=…"
+              placeholder={PP.t('blocking.redirect_placeholder')}
               value={b.redirectUrl}
               onChange={(e) => set({ redirectUrl: e.target.value })}
               style={{ flex: 1 }} />
             <button type="button" className="btn btn-ghost btn-sm" disabled={!b.redirectUrl}
-                    onClick={() => openRedirect(b.redirectUrl)}>Test ↗</button>
+                    onClick={() => openRedirect(b.redirectUrl)}>{PP.t('app.action_test')}</button>
           </div>
         </div>}
 
-      <div className="sub-label">Instead, I'd rather…</div>
+      <div className="sub-label">{PP.t('blocking.alternatives_label')}</div>
       {alts.map((a) => (
         <Setting key={a.id} icon={IconSpark} title={a.text} desc={a.url || undefined}>
-          <button className="btn btn-ghost btn-sm" onClick={() => removeAlt(a.id)}>Remove</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => removeAlt(a.id)}>{PP.t('app.action_remove')}</button>
         </Setting>
       ))}
 
       {alts.length < 6 &&
         <div className="sub-block">
           <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
-            <input className="input" placeholder="Go do 20 push-ups" value={draft}
+            <input className="input" placeholder={PP.t('blocking.alternatives_placeholder')} value={draft}
                    onChange={(e) => setDraft(e.target.value)}
                    onKeyDown={(e) => e.key === 'Enter' && addAlt()}
                    style={{ flex: '1 1 220px' }} />
-            <input className="input" placeholder="Optional link" value={draftUrl}
+            <input className="input" placeholder={PP.t('blocking.alternatives_link_placeholder')} value={draftUrl}
                    onChange={(e) => setDraftUrl(e.target.value)} style={{ flex: '1 1 160px' }} />
-            <button className="btn btn-ghost btn-sm" onClick={addAlt} disabled={!draft.trim()}>Add</button>
+            <button className="btn btn-ghost btn-sm" onClick={addAlt} disabled={!draft.trim()}>{PP.t('app.action_add')}</button>
           </div>
         </div>}
     </SectionCard>
@@ -684,12 +730,12 @@ function BlockScreenCard({ s, PP }) {
 // every other weakening; a FROZEN lockdown refuses outright, on purpose,
 // because that was the whole point of choosing frozen.
 const LOCKDOWN_DURATIONS = [
-  { value: 1800, label: '30 minutes' },
-  { value: 3600, label: '1 hour' },
-  { value: 2 * 3600, label: '2 hours' },
-  { value: 4 * 3600, label: '4 hours' },
-  { value: 8 * 3600, label: '8 hours' },
-  { value: 24 * 3600, label: '24 hours' },
+  { value: 1800, labelKey: 'lockdown.duration_30m' },
+  { value: 3600, labelKey: 'lockdown.duration_1h' },
+  { value: 2 * 3600, labelKey: 'lockdown.duration_2h' },
+  { value: 4 * 3600, labelKey: 'lockdown.duration_4h' },
+  { value: 8 * 3600, labelKey: 'lockdown.duration_8h' },
+  { value: 24 * 3600, labelKey: 'lockdown.duration_24h' },
 ];
 
 function LockdownCard() {
@@ -749,11 +795,9 @@ function LockdownCard() {
   const start = () => {
     setErr('');
     const chosen = LOCKDOWN_DURATIONS.find((o) => o.value === durationSecs);
-    const durationLabel = chosen ? chosen.label : fmtDur(durationSecs);
-    const warn = frozenChoice
-      ? '\n\nFrozen: once started, this CANNOT be cancelled early — only waited out. There is no override, no password bypass.'
-      : '';
-    if (!confirm(`Start a ${durationLabel} lockdown?\n\nOnly your allowlist stays reachable — everything else blocks, full stop, the whole time.${warn}`)) return;
+    const durationLabel = chosen ? PP.t(chosen.labelKey) : fmtDur(durationSecs);
+    const warn = frozenChoice ? PP.t('lockdown.confirm_start_frozen_note') : '';
+    if (!confirm(PP.t('lockdown.confirm_start', { duration: durationLabel }) + warn)) return;
     setBusy(true);
     window.PPNative.startLockdown(durationSecs, frozenChoice)
       .then((v) => applyView(v))
@@ -762,7 +806,7 @@ function LockdownCard() {
   };
 
   const cancel = () => {
-    if (!confirm('End the lockdown early?\n\nThis goes through the same waiting period as any other protection change — the lockdown stays fully active until it elapses.')) return;
+    if (!confirm(PP.t('lockdown.confirm_cancel'))) return;
     setErr('');
     acquireAuth()
       .then((token) => { setBusy(true); return window.PPNative.cancelLockdown(token); })
@@ -791,34 +835,33 @@ function LockdownCard() {
 
   return (
     <SectionCard
-      title="Lockdown"
-      sub="Only your allowlist stays reachable. Everything else blocks, for exactly as long as you set."
-      info="Meant for a genuinely hard day, not a daily habit. Starting one is instant and can always be extended. Ending one early goes through the waiting period — unless you chose Frozen, which cannot be ended early at all.">
+      title={PP.t('lockdown.section_title')}
+      sub={PP.t('lockdown.section_sub')}
+      info={PP.t('lockdown.section_info')}>
 
-      {!available && <div className="muted-note">Available in the desktop app.</div>}
-      {available && !view && <div className="muted-note">Loading…</div>}
+      {!available && <div className="muted-note">{PP.t('app.needs_desktop')}</div>}
+      {available && !view && <div className="muted-note">{PP.t('app.loading')}</div>}
 
       {/* inactive → start */}
       {available && view && !view.active &&
         <div className="sub-block">
           <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
             <label className="field" style={{ flex: '0 0 180px' }}>
-              <span>Duration</span>
+              <span>{PP.t('lockdown.duration_label')}</span>
               <select className="input" value={durationSecs} onChange={(e) => setDurationSecs(Number(e.target.value))}>
-                {LOCKDOWN_DURATIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                {LOCKDOWN_DURATIONS.map((o) => <option key={o.value} value={o.value}>{PP.t(o.labelKey)}</option>)}
               </select>
             </label>
             <button className="btn btn-danger btn-sm" style={{ alignSelf: 'flex-end' }} disabled={busy} onClick={start}>
-              {busy ? 'Starting…' : 'Start lockdown'}
+              {PP.t(busy ? 'lockdown.starting' : 'lockdown.start_button')}
             </button>
           </div>
           <label className="check-row">
             <input type="checkbox" checked={frozenChoice} onChange={(e) => setFrozenChoice(e.target.checked)} />
-            <span>
-              <b style={{ color: frozenChoice ? 'var(--ol-danger)' : 'var(--text-2)' }}>Frozen</b> — cannot be
-              cancelled once started, only waited out.
-              <InfoDot label="About frozen lockdown">
-                No password, no override, no support request. Only choose this if that is exactly what you want.
+            <span className={frozenChoice ? 'frozen-armed' : undefined}>
+              {tRich('lockdown.frozen_choice')}
+              <InfoDot label={PP.t('lockdown.frozen_choice_info_label')}>
+                {PP.t('lockdown.frozen_choice_info')}
               </InfoDot>
             </span>
           </label>
@@ -827,37 +870,37 @@ function LockdownCard() {
 
       {/* active */}
       {available && view && view.active &&
-        <div className="ut-pending" style={{ marginTop: 4 }}>
+        <div className="sub-block" style={{ marginTop: 4 }}>
           <div className="ut-count">{fmtDur(liveRemaining)}</div>
           <div className="ut-sub">
-            {view.frozen ? 'remaining · frozen — can only be waited out' : 'remaining · lockdown active'}
+            {PP.t(view.frozen ? 'lockdown.remaining_note_frozen' : 'lockdown.remaining_note')}
           </div>
           {err && <div className="err-note">{err}</div>}
           {!view.frozen &&
             <button className="btn btn-ghost btn-sm" disabled={busy || !!cancelPending} onClick={cancel} style={{ marginTop: 14 }}>
-              End early
+              {PP.t('lockdown.end_early_short')}
             </button>}
           {view.frozen &&
             <div className="muted-note" style={{ marginTop: 12 }}>
-              There is genuinely no way to cancel this one. That was the point when it started.
+              {PP.t('lockdown.frozen_note')}
             </div>}
           {cancelPending &&
             <div className="pending-note">
-              Ending in <b>{fmtDur(cancelPending.remaining_secs)}</b> — lockdown stays active until then.{' '}
+              {tRich('lockdown.cancel_pending', { time: fmtDur(cancelPending.remaining_secs) })}{' '}
               <a href="#" onClick={(e) => { e.preventDefault(); window.PPNative.cancelWeakening('lockdown.cancel').then(refresh); }}>
-                Keep it locked
+                {PP.t('lockdown.keep_locked')}
               </a>
             </div>}
         </div>}
 
       <Setting
         icon={IconLock}
-        title="Auto-lockdown during vulnerable hours"
-        desc={escalate ? 'On' : 'Off'}
-        info="When your vulnerable-hours window starts, begin a lockdown automatically instead of only showing nudges. Never frozen — always cancellable through the normal delay.">
+        title={PP.t('lockdown.escalation_title')}
+        desc={PP.t(escalate ? 'app.state_on' : 'app.state_off')}
+        info={PP.t('lockdown.escalation_info')}>
         <Switch on={!!escalate} onClick={toggleEscalation} disabled={escBusy || escalate === null || !available} />
       </Setting>
-      <PendingNote pending={escalationPending} what="Auto-lockdown"
+      <PendingNote pending={escalationPending} whatKey="lockdown.escalation_pending_what"
                    onKeep={() => window.PPNative.cancelWeakening('lockdown.escalation_disable').then(refresh)} />
     </SectionCard>
   );
@@ -869,9 +912,9 @@ function BlockingPage({ s, PP }) {
   return (
     <div className="page">
       <div className="page-head fade-up">
-        <div className="eyebrow">Blocking Settings</div>
-        <h1 className="page-title">How firmly to <em>hold the line</em></h1>
-        <p className="page-sub">Strict is already on. Everything below tunes it.</p>
+        <div className="eyebrow">{PP.t('blocking.eyebrow')}</div>
+        <h1 className="page-title">{tRich('blocking.title')}</h1>
+        <p className="page-sub">{PP.t('blocking.sub')}</p>
       </div>
 
       <StrictnessCard s={s} PP={PP} />

@@ -276,14 +276,14 @@
                                     radial-gradient(circle at 48% 78%, var(--ol-danger) 0 13px, transparent 15px),
                                     var(--ol-bg-2);">
               <div style="position:absolute; inset:14px; border-radius: calc(var(--ol-radius-md) - 6px);
-                          background: color-mix(in oklab, var(--ol-bg-1) 45%, transparent);
-                          backdrop-filter: blur(var(--ol-blur-panel));
+                          background: var(--ol-bg-1);
+                          box-shadow: var(--ol-shadow-sm), inset 0 1px 0 var(--ol-hairline);
                           border:1px solid var(--ol-border);
                           display:grid; place-items:center; font-size: var(--ol-size-sm); font-weight: var(--ol-weight-bold);">
-                glass panel
+                opaque panel
               </div>
             </div>
-            <div class="ds-spec-label">blur-panel — glass surfaces</div>
+            <div class="ds-spec-label">hairline — the lit top edge that lifts a surface</div>
           </div>
         </div>
       </section>

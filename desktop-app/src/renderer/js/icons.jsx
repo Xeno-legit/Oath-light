@@ -54,20 +54,46 @@ const IconPalette = (p) => <Ico {...p}><circle cx="13.5" cy="6.5" r="1.5" fill="
 /* ── Misc ── */
 const IconBook = (p) => <Ico {...p}><path d="M4 19.5A2.5 2.5 0 016.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" /></Ico>;
 const IconWave = (p) => <Ico {...p}><path d="M2 12c2-2 4-2 6 0s4 2 6 0 4-2 6 0" /><path d="M2 17c2-2 4-2 6 0s4 2 6 0 4-2 6 0" /></Ico>;
+/* Two rising plumes. The mentor page's "Understand the habit" exercise leans on
+   one image — "the behavior is the smoke; the fire is what's really burning
+   underneath" — so this draws smoke, not a generic cloud. */
+const IconSmoke = (p) => <Ico {...p}><path d="M9 21c0-2 2-2.6 2-4.5S9 14.4 9 12.5 11 9.9 11 8" /><path d="M15.4 21c0-1.7 1.6-2.2 1.6-3.8s-1.6-2.1-1.6-3.7 1.6-2.2 1.6-3.8" opacity=".55" /></Ico>;
 const IconDroplet = (p) => <Ico {...p}><circle cx="12" cy="12" r="9" fill="currentColor" stroke="none" /></Ico>;
 
-/* ── Atmosphere icons ── */
-const IconOrbs = (p) => <Ico {...p}><circle cx="7" cy="10" r="4" /><circle cx="16" cy="8" r="3" /><circle cx="14" cy="17" r="3.5" /><path d="M11 10h2M16 11v2" opacity=".5" /></Ico>;
-const IconStars = (p) => <Ico {...p}><path d="M12 2l1.2 3.6L17 7l-3.8 1.4L12 12l-1.2-3.6L7 7l3.8-1.4L12 2z" /><path d="M19 13l.7 2L22 16l-2.3.8L19 19l-.7-2L16 16l2.3-.8z" /><path d="M5 16l.5 1.5L7 18.2l-1.5.5L5 20.2l-.5-1.5L3 18.2l1.5-.5z" /></Ico>;
-const IconRipple = (p) => <Ico {...p}><circle cx="12" cy="12" r="3" /><circle cx="12" cy="12" r="7" opacity=".6" /><circle cx="12" cy="12" r="10.5" opacity=".3" /></Ico>;
-const IconSmoke = (p) => <Ico {...p}><path d="M4 16c0-3 2.5-4 4-4s3 1.5 4 1.5 3-.5 4-2" /><path d="M6 20c0-2.5 2-3.5 3.5-3.5S12.5 18 14 18s2.5-1 3.5-2" /><path d="M8 12c0-2 1.5-3 3-3s2.5 1.5 3.5 1.5 2-.5 3-1.5" opacity=".5" /></Ico>;
-const IconMinimal = (p) => <Ico {...p}><path d="M5 12h14" /><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" /></Ico>;
-const IconAtmosphere = (p) => <Ico {...p}><circle cx="8" cy="10" r="3.5" /><circle cx="16" cy="9" r="2.5" /><path d="M2 18c2-1.5 4-1.5 6 0s4 1.5 6 0 4-1.5 6 0" /><circle cx="13" cy="16" r="2" opacity=".5" /></Ico>;
+/* ── Look icons ──
+ * These replaced the atmosphere set (IconOrbs / IconStars / IconRipple /
+ * IconMinimal / IconAtmosphere), which drew the six animated backgrounds
+ * that no longer exist. IconWave and IconSmoke survived the cull because
+ * the mentor, tips, blocklist and overview pages use them for their own
+ * unrelated reasons.
+ *
+ * Each one draws the thing its look actually paints, at 24×24 — a picture
+ * of the ground, not a generic sparkle. */
+const IconMatte = (p) => <Ico {...p}><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M3 8h18" opacity=".55" /></Ico>;
+const IconHalo = (p) => <Ico {...p}><path d="M4 14a8 8 0 0116 0" /><path d="M7 18a5 5 0 0110 0" opacity=".45" /><path d="M12 3v2" /></Ico>;
+const IconFieldBg = (p) => <Ico {...p}><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M4 16L16 5" opacity=".6" /><path d="M9 19l10-9" opacity=".35" /></Ico>;
+const IconTheatre = (p) => <Ico {...p}><rect x="3" y="4" width="18" height="16" rx="3" /><circle cx="12" cy="12" r="4.5" opacity=".55" /></Ico>;
+const IconSlate = (p) => <Ico {...p}><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16" /></Ico>;
+const IconStudio = (p) => <Ico {...p}><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16M9 9h12" opacity=".7" /></Ico>;
+const IconPaperBg = (p) => <Ico {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9h10M7 13h10M7 17h6" opacity=".5" /></Ico>;
+const IconDrafting = (p) => <Ico {...p}><circle cx="6" cy="7" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="7" r="1" fill="currentColor" stroke="none" /><circle cx="18" cy="7" r="1" fill="currentColor" stroke="none" /><circle cx="6" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="18" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="6" cy="17" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="17" r="1" fill="currentColor" stroke="none" /><circle cx="18" cy="17" r="1" fill="currentColor" stroke="none" /></Ico>;
+const IconCloth = (p) => <Ico {...p}><path d="M4 9l5-5M4 15l11-11M9 20l11-11M15 20l5-5" /></Ico>;
+const IconContour = (p) => <Ico {...p}><path d="M2 16c4-4 7-1 10-5s7-2 10-5" /><path d="M2 20c4-4 7-1 10-5s7-2 10-5" opacity=".55" /><path d="M2 12c4-4 7-1 10-5s7-2 10-5" opacity=".55" /></Ico>;
+const IconEngrave = (p) => <Ico {...p}><circle cx="12" cy="12" r="2" /><circle cx="12" cy="12" r="5.5" opacity=".65" /><circle cx="12" cy="12" r="9" opacity=".4" /></Ico>;
+const IconHalftone = (p) => <Ico {...p}><circle cx="6" cy="7" r=".8" fill="currentColor" stroke="none" /><circle cx="12" cy="7" r=".8" fill="currentColor" stroke="none" /><circle cx="18" cy="7" r=".8" fill="currentColor" stroke="none" /><circle cx="6" cy="12.5" r="1.5" fill="currentColor" stroke="none" /><circle cx="12" cy="12.5" r="1.5" fill="currentColor" stroke="none" /><circle cx="18" cy="12.5" r="1.5" fill="currentColor" stroke="none" /><circle cx="6" cy="18" r="2.2" fill="currentColor" stroke="none" /><circle cx="12" cy="18" r="2.2" fill="currentColor" stroke="none" /><circle cx="18" cy="18" r="2.2" fill="currentColor" stroke="none" /></Ico>;
+
+/* ── Wallpaper / interface ── */
+const IconImage = (p) => <Ico {...p}><rect x="3" y="4" width="18" height="16" rx="3" /><circle cx="8.5" cy="9.5" r="1.8" /><path d="M3 17l5-4.5 4 3.5 3-2.5 6 5" /></Ico>;
+const IconDensity = (p) => <Ico {...p}><path d="M4 5h16M4 12h16M4 19h16" /><path d="M4 8.5h16M4 15.5h16" opacity=".4" /></Ico>;
+const IconMotionOff = (p) => <Ico {...p}><circle cx="12" cy="12" r="9" /><path d="M4.5 4.5l15 15" /></Ico>;
 
 Object.assign(window, {
   IconShield, IconGrid, IconList, IconPalette, IconSliders, IconChat, IconSpark,
   IconGear, IconUser, IconPlus, IconSearch, IconSun, IconMoon, IconLock, IconClock,
   IconChevron, IconX, IconSend, IconCheck, IconTrash, IconFlame, IconHeart, IconBell,
   IconShieldOff, IconCompass, IconGlobe, IconBook, IconArrowUp, IconWave, IconDroplet,
-  IconOrbs, IconStars, IconRipple, IconSmoke, IconMinimal, IconAtmosphere,
+  IconSmoke,
+  IconMatte, IconHalo, IconFieldBg, IconTheatre, IconSlate, IconStudio,
+  IconPaperBg, IconDrafting, IconCloth, IconContour, IconEngrave, IconHalftone,
+  IconImage, IconDensity, IconMotionOff,
 });

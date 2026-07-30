@@ -5,8 +5,8 @@
   "identifier": "com.oathlight.desktop",
   "build": {
     "frontendDist": "../src/renderer",
-    "beforeDevCommand": "node scripts/bundle-sidecars.mjs",
-    "beforeBuildCommand": "node scripts/bundle-sidecars.mjs"
+    "beforeDevCommand": "node ../scripts/sync-design-system.mjs && node scripts/bundle-sidecars.mjs",
+    "beforeBuildCommand": "node ../scripts/sync-design-system.mjs && node scripts/bundle-sidecars.mjs"
   },
   "app": {
     "withGlobalTauri": true,

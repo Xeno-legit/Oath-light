@@ -18,6 +18,15 @@ behind translations, and the 90-day course.
 * Get the Arabic draft read by a fluent speaker, then flip `reviewed: true`
   in `design-system/locales/ar.js`. Until then the picker calls it a draft.
 * Swap the OTA dev keys for production keys. (owner only — [docs/OTA_KEYS.md](docs/OTA_KEYS.md))
+* **Publish to Microsoft Edge Add-ons, then set `EDGE_STORE_EXTENSION_ID` in
+  `browsers.rs`.** This is the *only* way Edge can be force-**installed**:
+  Microsoft limits forced installation to its own store on any PC that isn't
+  domain-joined, so the Chrome Web Store entry we write is accepted as policy and
+  silently discarded. Until then Edge falls back to auto-install via the
+  external-extensions registry — the extension downloads itself and needs one
+  click to enable, which works but is not a lock. Owner-only (needs the Partner
+  Center account); the code is already wired for both.
+  Details in [docs/RELEASE.md](docs/RELEASE.md#1-where-its-published).
 * Smoke-test the Firefox force-install against a real admin Firefox.
 * Test the overlay's "this was wrong" button on a live detection.
 * Test grayscale hours on a real machine.
@@ -68,7 +77,7 @@ behind translations, and the 90-day course.
     properties throughout, `dir`/`lang` on `<html>`, picker in Settings.
   * Arabic ships as an **unreviewed draft** (`reviewed: false`, all 94 keys).
     A fluent speaker needs to read it in context before that flips — the
-    Companion/Drill Sergeant split does not survive literal translation.
+    Companion/Coach split does not survive literal translation.
   * What's left: only ~94 keys exist, and most UI copy is still hardcoded
     English in the JSX. Extracting it is mechanical (`data-ol-str` on the
     extension pages, `PP.t()` in the renderer) but it is the bulk of the job.
@@ -99,7 +108,6 @@ behind translations, and the 90-day course.
 
 ▶ So it stops getting re-suggested.
 
-* Edge Add-ons. (too much hassle, Chrome store covers Edge)
 * Safari. (no native messaging, so the desktop bridge can't exist)
 * A phone version of the browser extension. (phones get the AI scanner instead)
 * Score-based blocking in the filter. (unpredictable, undebuggable)

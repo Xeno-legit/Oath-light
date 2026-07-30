@@ -27,6 +27,31 @@
     // elevation; this relaunches elevated, writes it, and sets up silent
     // elevated re-assertion at future logins.
     requestElevatedSetup() { return invoke('request_elevated_setup'); },
+    // Open a browser at its own extensions page. Needed where the extension is
+    // auto-installed rather than force-installed (Edge): the browser downloads
+    // it but leaves it switched off until the user approves it once.
+    openExtensionsPage(browserKey) {
+      return invoke('open_extensions_page', { browserKey })
+        .catch((e) => console.warn('[OathLight] openExtensionsPage failed:', e));
+    },
+    // Open a restore window for a locked-out browser (Edge): re-asserts the
+    // auto-install registration, launches the browser at its extensions page,
+    // and suspends the kill for ~20s. Resolves to the seconds granted.
+    //
+    // Not friction-gated, deliberately: it grants seconds, not access, and the
+    // only thing it enables is installing the extension — the outcome the lock
+    // exists to produce. Gating it would make the lockout unrecoverable.
+    requestBrowserRestore(browserKey) {
+      return invoke('request_browser_restore', { browserKey })
+        .catch((e) => console.warn('[OathLight] requestBrowserRestore failed:', e));
+    },
+    // Toggle the browser lock (kill a browser that can't be force-installed
+    // until it carries the extension). ON is instant; OFF is a friction-gated
+    // weakening — same { applied, pending } contract as `setGuard`, and the same
+    // rule: `applied: false` means the lock is still fully ON.
+    setBrowserLock(enabled, auth) {
+      return invoke('set_browser_lock_enabled', { enabled: !!enabled, auth: auth || null });
+    },
     // Toggle the "keep the extension installed" guard. Turning it ON is
     // instant; turning it OFF is a friction-gated weakening (4.1) — resolves
     // to { applied, pending }. When `applied` is false the guard is still ON
@@ -149,7 +174,8 @@
     },
 
     // System DNS filter (1.1/1.2). `getDnsStatus` -> { running, taken_over,
-    // last_error, upstreams }. `setDnsFilter(true)` is a strengthening —
+    // last_error, upstreams, upstream_warning, exposure_warning }.
+    // `setDnsFilter(true)` is a strengthening —
     // instant, and REJECTS (throws) on a port-53 conflict / no-admin so the
     // caller can show the error verbatim; `setDnsFilter(false, auth)` is a
     // friction-gated weakening (same { applied, pending } shape as setGuard)
@@ -368,6 +394,27 @@
     setSeriousMode(enabled, auth) {
       return invoke('set_serious_mode', { enabled: !!enabled, auth: auth || null });
     },
+
+    // Update mode (update.rs). `getUpdateState` resolves
+    // `{ active, seconds_left, window_secs, app_version, recovery_armed }`.
+    //
+    // `beginUpdate` is the one that does something: it opens a bounded window
+    // in which the dual-process watchdog stops resurrecting, so an installer
+    // can actually replace the two executables, and then CLOSES THE APP about
+    // two seconds later. Callers must treat a resolved promise as "the app is
+    // going away now" and say so before it happens — there is no second
+    // notification. Master-password gated, so it goes through PPAuth.acquire()
+    // like every other gated call.
+    //
+    // `cancelUpdate` re-arms the guards; ungated, since strengthening never is.
+    getUpdateState() {
+      return invoke('get_update_state').catch((e) => {
+        console.warn('[OathLight] getUpdateState failed:', e);
+        return null;
+      });
+    },
+    beginUpdate(auth) { return invoke('begin_update', { auth: auth || null }); },
+    cancelUpdate() { return invoke('cancel_update'); },
 
     // Panic / SOS flow (5.1). `onOpenPanic` subscribes to the backend's
     // `open-panic` event (tray "I need help now" / Ctrl+Shift+Space / the

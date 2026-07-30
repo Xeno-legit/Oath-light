@@ -14,7 +14,14 @@
 //   node scripts/bundle-sidecars.mjs
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, copyFileSync, existsSync } from 'node:fs';
+import {
+  mkdirSync,
+  copyFileSync,
+  existsSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+} from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -53,6 +60,72 @@ for (const { dir, bin } of crates) {
   const dst = join(outDir, `${bin}-${triple}${ext}`);
   copyFileSync(src, dst);
   console.log(`[sidecars] staged ${dst}`);
+
+  unblockCopyTargets(bin);
+}
+
+// tauri-build copies each sidecar from `binaries/` next to the app executable
+// (`target/<profile>/<bin><ext>`) and does so with a bare
+// `fs::remove_file(dest).unwrap()` — so a *running* guardian / native-messaging
+// host makes the whole build fail with `Os { code: 5, PermissionDenied }`.
+//
+// The host is respawned by the browser and the guardian by the app, so both can
+// be live whenever a build starts. We can't always kill them (they may run
+// elevated), but Windows does allow renaming a running executable, which is
+// enough: with the path free, tauri-build's remove+copy succeeds and the old
+// process keeps running off its renamed image until it exits on its own.
+function unblockCopyTargets(bin) {
+  for (const dir of copyTargetDirs()) {
+    sweepStale(dir, bin);
+
+    const dest = join(dir, bin + ext);
+    if (!existsSync(dest)) continue;
+
+    try {
+      rmSync(dest);
+      continue;
+    } catch {
+      // in use — fall through to the rename
+    }
+
+    const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+    const aside = `${dest}.locked-${stamp}`;
+    try {
+      renameSync(dest, aside);
+      console.log(`[sidecars] ${bin}${ext} is running; moved aside to ${aside}`);
+    } catch (err) {
+      throw new Error(
+        `[sidecars] ${dest} is locked and could not be moved aside (${err.code ?? err.message}). ` +
+          `Close Oath Light and any running ${bin}${ext} process, then rebuild.`,
+      );
+    }
+  }
+}
+
+// Where tauri-build may land the sidecars: plain and --target-qualified target
+// dirs, both profiles. Missing ones are skipped by the caller.
+function copyTargetDirs() {
+  const target = join(root, 'target');
+  return [
+    join(target, 'debug'),
+    join(target, 'release'),
+    join(target, triple, 'debug'),
+    join(target, triple, 'release'),
+  ].filter((d) => existsSync(d));
+}
+
+// Drop `.locked-*` leftovers from earlier builds once their process is gone,
+// so target/ doesn't accumulate a copy per build.
+function sweepStale(dir, bin) {
+  const prefix = `${bin}${ext}.locked-`;
+  for (const name of readdirSync(dir)) {
+    if (!name.startsWith(prefix)) continue;
+    try {
+      rmSync(join(dir, name));
+    } catch {
+      // still running — leave it for a later build
+    }
+  }
 }
 
 function hostTriple() {

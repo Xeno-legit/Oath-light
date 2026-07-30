@@ -6,14 +6,21 @@
 //! blocked queries with a synthesized NXDOMAIN, and relays everything else to
 //! the machine's real upstream resolvers.
 //!
-//! **No hickory-dns / trust-dns** — a deliberate lead decision. Nothing in
-//! this codebase can be compile-checked before the owner builds it by hand
-//! (`cargo` hangs in the dev environment), so pulling in a large, unfamiliar
-//! async DNS server crate here would be pure risk with no way to verify it
-//! actually compiles. `std::net` plus a from-scratch wire-format parser is
-//! the same hand-rolled-FFI-over-a-big-dependency instinct `friction.rs`
-//! (`GetTickCount64`) and `watchdog.rs` (kernel32 mutex/event calls) already
-//! apply elsewhere in this codebase.
+//! **No hickory-dns / trust-dns** — a deliberate lead decision. This resolver
+//! does one narrow job (parse a query far enough to decide, answer NXDOMAIN or
+//! relay), and a full async DNS server crate would bring an executor and a
+//! large dependency tree into a process that already ships an ML runtime, for
+//! features nothing here uses. `std::net` plus a from-scratch wire-format
+//! parser is the same hand-rolled-FFI-over-a-big-dependency instinct
+//! `friction.rs` (`GetTickCount64`) and `watchdog.rs` (kernel32 mutex/event
+//! calls) already apply elsewhere in this codebase.
+//!
+//! An earlier version of this comment also justified the choice with "nothing
+//! here can be compile-checked because `cargo` hangs in the dev environment".
+//! That was false and has been removed rather than corrected in place, because
+//! it was being read as permission to skip verification: `cargo check`, `cargo
+//! test` and `cargo clippy` all run fine on the workspace (seconds, not
+//! minutes). **Do not land a change to this crate without running them.**
 //!
 //! Module map:
 //! - `packet` — wire-format parsing (query -> `ParsedQuery`) and
@@ -41,5 +48,6 @@ pub mod upstream;
 
 pub use decide::{decide, init_custom_domains, Decision};
 pub use packet::{build_query, parse_query, synthesize_nxdomain, ParseError, ParsedQuery};
-pub use server::{health_check, start, DnsServer, Upstreams};
+pub use server::{health_check, probe_upstream, start, DnsServer, Upstreams};
+pub use takeover::{Exposure, LiveAdapter};
 pub use upstream::{AdapterDns, CapturedDns, FALLBACK_PRIMARY, FALLBACK_SECONDARY};

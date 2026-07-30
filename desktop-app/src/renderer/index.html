@@ -13,6 +13,47 @@
 <body>
   <div id="root"></div>
 
+  <!-- Boot backstop. ErrorBoundary (ui.jsx) catches anything React throws while
+       rendering, but it can only do that once React is mounted. A script that
+       throws at LOAD time never gets that far: babel-standalone transpiles each
+       file below in the browser, and one bad file leaves its globals undefined,
+       app.jsx never calls createRoot, and #root stays empty — a black window
+       with no explanation and no way out.
+
+       So: collect load-time errors, and if #root is still empty a moment after
+       load, say what happened in plain HTML. Deliberately the first script on
+       the page and dependency-free, because everything it exists to report on
+       comes after it. -->
+  <script>
+    (function () {
+      var errs = [];
+      window.addEventListener('error', function (e) {
+        errs.push((e && e.message) || 'unknown error');
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        errs.push('unhandled rejection: ' + ((e && e.reason && e.reason.message) || e.reason));
+      });
+      window.addEventListener('load', function () {
+        setTimeout(function () {
+          var root = document.getElementById('root');
+          if (!root || root.childNodes.length) return;
+          root.innerHTML =
+            '<div style="padding:48px 40px;max-width:620px;font:14px/1.6 system-ui,sans-serif">' +
+            '<div style="font-size:11.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;opacity:.6;margin-bottom:10px">Something broke</div>' +
+            '<h1 style="font-size:24px;font-weight:800;margin:0 0 12px;line-height:1.25">Oath Light could not start its interface.</h1>' +
+            '<p style="margin:0 0 8px;opacity:.8">This is a bug in the app, not something you did. Blocking is unaffected — it runs in the background and in your browsers, not in this window.</p>' +
+            '<p style="margin:0 0 22px;font-family:ui-monospace,monospace;font-size:12.5px;opacity:.6;word-break:break-word">' +
+            (errs.length ? errs.map(function (m) {
+              return String(m).replace(/[<&]/g, function (c) { return c === '<' ? '&lt;' : '&amp;'; });
+            }).join('<br>') : 'No error was reported.') +
+            '</p>' +
+            '<button onclick="window.location.reload()" style="font:inherit;font-weight:700;padding:9px 16px;border-radius:8px;cursor:pointer">Reload the app</button>' +
+            '</div>';
+        }, 1500);
+      });
+    })();
+  </script>
+
   <script src="lib/react.production.min.js"></script>
   <script src="lib/react-dom.production.min.js"></script>
   <script src="lib/babel.min.js"></script>
