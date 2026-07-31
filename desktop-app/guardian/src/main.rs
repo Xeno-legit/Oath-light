@@ -53,19 +53,17 @@ fn main() {
     /// this value less-than-or-equal to the app's guarantees a real, completed
     /// uninstall is always honored.
     ///
-    /// !!! TEMPORARILY 10 SECONDS — PRE-ALPHA TESTING VALUE, DO NOT SHIP !!!
-    /// Production value is `24 * 60 * 60`; revert together with
-    /// `uninstall::DEFAULT_DELAY_SECS` and `friction::DEFAULT_WEAKENING_DELAY_SECS`.
-    ///
-    /// Equal is the right setting, not merely a safe one: while this side was
-    /// laxer, a hand-crafted sentinel plus a backdated `uninstall.json` could
-    /// satisfy the guardian but not the app, and the two would sit there
-    /// spawning and exiting a guardian at each other. Not a bypass — the app
-    /// never stops resurrecting — but a pointless fight, and one that only
-    /// existed because the constants disagreed. That is also why this constant
-    /// must move in the *same commit* as the app's: leaving this at 24h while
-    /// the app sits at 10s recreates exactly that fight during testing.
-    const COOLOFF_DELAY_SECS: u64 = 10; // ← keep in sync w/ uninstall.rs
+    /// Now at the production value, matching `uninstall.rs` (which finished its
+    /// own move off the 10-second testing value). Equal is the right setting,
+    /// not merely a safe one: while this side was laxer, a hand-crafted
+    /// sentinel plus a backdated `uninstall.json` could satisfy the guardian
+    /// but not the app, and the two would sit there spawning and exiting a
+    /// guardian at each other. Not a bypass — the app never stops resurrecting
+    /// — but a pointless fight, and one that only existed because the constants
+    /// disagreed. That is also why this constant must move in the *same commit*
+    /// as the app's, in both directions: the 2026-07-31 gate test dropped both
+    /// to 10s together and raised both back together.
+    const COOLOFF_DELAY_SECS: u64 = 24 * 60 * 60; // ← keep in sync w/ uninstall.rs
 
     /// Longest update window this side will honor. MUST be greater than or
     /// equal to `update::WINDOW_SECS` in the app — the opposite direction to

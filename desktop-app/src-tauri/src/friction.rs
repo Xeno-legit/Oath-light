@@ -67,22 +67,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// which keeps its own separately-tunable constant in `uninstall.rs`) is
 /// allowed to apply.
 ///
-/// !!! TEMPORARILY 10 SECONDS — PRE-ALPHA TESTING VALUE, DO NOT SHIP !!!
+/// **At its real production value: 24 hours**, raised alongside the uninstall
+/// timer (plan item 4.6). The two are still separate constants on purpose so
+/// they can be dialled independently, but they must always move together:
+/// shipping one at 24h and the other at 10s would make the whole asymmetry
+/// theatre — every protection would be one click and ten seconds from off.
 ///
-/// Production value is `24 * 60 * 60`. Dialled down alongside the uninstall
-/// timer so the weakening flows can be walked end to end on a real *release*
-/// install, which the debug-only `OATHLIGHT_FRICTION_SECS` override cannot
-/// reach. The two constants stay separate on purpose so they can be dialled
-/// independently, but they must go back up together: shipping one at 24h and
-/// the other at 10s makes the whole asymmetry theatre — every protection would
-/// be one click and ten seconds from off.
-///
-/// Revert together with `uninstall::DEFAULT_DELAY_SECS` and the guardian's
-/// `COOLOFF_DELAY_SECS`.
+/// Briefly at 10s on 2026-07-31 to exercise the weakening flows on a real
+/// release install (the debug-only override below cannot reach an
+/// NSIS-installed build). That test passed and both constants went back up in
+/// the same commit.
 ///
 /// Local testing still works: debug builds honor `OATHLIGHT_FRICTION_SECS`
 /// (see `weakening_delay_secs` below); release builds ignore it entirely.
-const DEFAULT_WEAKENING_DELAY_SECS: u64 = 10;
+const DEFAULT_WEAKENING_DELAY_SECS: u64 = 24 * 60 * 60;
 
 /// Debug builds: honor `OATHLIGHT_FRICTION_SECS` so the cool-off can be dialed
 /// down for manual testing. Release builds ignore the env var entirely and

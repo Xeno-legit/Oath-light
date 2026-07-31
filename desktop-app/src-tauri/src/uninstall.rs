@@ -15,19 +15,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Cool-off window before an uninstall can complete.
 ///
-/// !!! TEMPORARILY 10 SECONDS — PRE-ALPHA TESTING VALUE, DO NOT SHIP !!!
-///
-/// Production value is `24 * 60 * 60`. It is dialled down to 10s so the
-/// uninstall/upgrade gate can be exercised end to end on a real *release*
-/// install (the debug-only `OATHLIGHT_UNINSTALL_SECS` override below can't
-/// reach an NSIS-installed build). Restore before any build that leaves this
-/// machine — `revert_before_release` in the test module fails until it is,
-/// and the same reversion is needed in `friction.rs` and the guardian.
+/// **At its real production value: 24 hours** (plan item 4.6 — "uninstall
+/// hardening at the real timer value"). It spent Phase 4 at a deliberate 10
+/// seconds, and was briefly returned there on 2026-07-31 to exercise the
+/// uninstall/upgrade gate end to end on a real release install — the
+/// debug-only override below cannot reach an NSIS-installed build. That test
+/// passed; the testing value is gone again.
 ///
 /// Local testing still works: debug builds honor `OATHLIGHT_UNINSTALL_SECS`
 /// (see `delay_secs` below). Release builds ignore it entirely, so a shipped
 /// app cannot have its friction dialled to zero from a shell.
-const DEFAULT_DELAY_SECS: u64 = 10;
+const DEFAULT_DELAY_SECS: u64 = 24 * 60 * 60;
 
 /// Debug builds: honor `OATHLIGHT_UNINSTALL_SECS` so the cool-off can be dialed
 /// down for manual testing. Release builds ignore the env var entirely and
@@ -598,19 +596,16 @@ mod tests {
         assert!(phrase_matches("   ", "whatever"));
     }
 
-    /// !!! The timer is NOT at its production value right now. !!!
+    /// The timer is at its real production value (4.6). Guarded by a test so a
+    /// stray debugging edit back to seconds can't ship silently.
     ///
-    /// This test used to assert 24h precisely so a stray debugging edit back to
-    /// seconds couldn't ship silently. It is deliberately inverted for pre-alpha
-    /// testing of the uninstall/upgrade gate, which cannot be exercised on a
-    /// real release install at 24h. Flipping it back to `24 * 60 * 60` is part
-    /// of the reversion — the assertion below fails the moment the constant
-    /// moves, in either direction, so neither half can drift alone.
-    ///
-    /// Revert together with `friction::DEFAULT_WEAKENING_DELAY_SECS` and the
-    /// guardian's `COOLOFF_DELAY_SECS`.
+    /// This has now caught exactly the thing it was written for: the constant
+    /// was deliberately dropped to 10s on 2026-07-31 to test the uninstall gate
+    /// on a real install, and flipping this assertion was the step that made
+    /// that temporary state impossible to forget. Keep it asserting the
+    /// production value.
     #[test]
-    fn default_delay_is_the_pre_alpha_testing_value_not_production() {
-        assert_eq!(DEFAULT_DELAY_SECS, 10);
+    fn default_delay_is_twenty_four_hours() {
+        assert_eq!(DEFAULT_DELAY_SECS, 24 * 60 * 60);
     }
 }
