@@ -25,9 +25,11 @@ cool-off. That asymmetry is the product.
 | Document | What's in it |
 | :-- | :-- |
 | [ROADMAP.md](ROADMAP.md) | **What's left.** The only place work is tracked |
+| [docs/LAUNCH_GATES.md](docs/LAUNCH_GATES.md) | What stands between here and each launch, and who can clear it |
 | [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md) | What it is, the phases, and the rules we don't break |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it blocks — layers, pipeline, engine rules |
 | [SECURITY.md](SECURITY.md) | What it does, what it touches, and what it never does |
+| [docs/HARDENING.md](docs/HARDENING.md) | Tamper resistance: what stops removal, what doesn't, what would |
 | [BYPASSES.md](BYPASSES.md) | Found a hole? Report it here |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, tests, and the blocklist-PR rules |
 | [docs/RELEASE.md](docs/RELEASE.md) | Store publication, zip builds, OTA releases |

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "OathLight",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "identifier": "com.oathlight.desktop",
   "build": {
     "frontendDist": "../src/renderer",
@@ -17,7 +17,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
     "licenseFile": "../installer/EULA.rtf",
     "externalBin": [
       "binaries/oathlightguard",
@@ -32,7 +32,8 @@
     ],
     "windows": {
       "nsis": {
-        "installMode": "perMachine"
+        "installMode": "perMachine",
+        "installerHooks": "../installer/hooks.nsh"
       }
     }
   }

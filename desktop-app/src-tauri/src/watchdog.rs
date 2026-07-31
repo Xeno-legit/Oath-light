@@ -508,12 +508,31 @@ mod imp {
     /// see exactly what Oath Light installed.
     const LOGON_TASK_NAME: &str = "OathLight Autostart";
 
-    /// `schtasks` command that never flashes a console window (mirrors `reg`).
-    fn schtasks() -> std::process::Command {
+    /// PowerShell single-quote escaping (double an embedded `'`) — mirrors the
+    /// guardian crate's `ps_quote`.
+    fn ps_quote(s: &str) -> String {
+        format!("'{}'", s.replace('\'', "''"))
+    }
+
+    /// Run a PowerShell one-liner, windowless, and report whether it succeeded.
+    ///
+    /// Used for the logon task because `schtasks.exe` cannot register one from
+    /// an unelevated process — see `register_logon_task`.
+    fn run_powershell(script: &str) -> bool {
         use std::os::windows::process::CommandExt;
-        let mut c = std::process::Command::new("schtasks");
-        c.creation_flags(CREATE_NO_WINDOW);
-        c
+        std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                script,
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
     }
 
     /// Second autostart registration, as a per-user logon Scheduled Task
@@ -536,16 +555,45 @@ mod imp {
     /// covering it would need a service registered under the `SafeBoot` keys,
     /// which requires elevation. That gap is documented in SECURITY.md rather
     /// than papered over here.
+    /// Registered through the Task Scheduler COM API (via PowerShell's
+    /// `Register-ScheduledTask`), **not** `schtasks.exe`.
+    ///
+    /// This is the fix for a bug that silently disabled half of 4.6's
+    /// double-registration for the entire life of the feature.
+    /// `schtasks.exe /create` refuses to create ANY task from an unelevated
+    /// process — it fails with `ERROR: Access is denied.` regardless of the
+    /// flags, including with an explicit `/ru <current user> /it`. The app runs
+    /// unelevated in normal operation, so this function's old implementation
+    /// could only ever take its failure branch: the log line said "logon task
+    /// registration failed (Run key still active)" on every single launch, and
+    /// the second registration this feature exists to provide never existed on
+    /// any user's machine. Verified empirically, not inferred: on a stock
+    /// Windows 11 install, `schtasks /create /sc onlogon` is denied unelevated
+    /// while `Register-ScheduledTask` with the same trigger succeeds.
+    ///
+    /// The COM API has no such restriction for a task scoped to the *current*
+    /// user, which is exactly the task we want. `-Force` overwrites, so this
+    /// stays idempotent and self-healing across an app move or upgrade, just as
+    /// the old `/f` intended.
+    ///
+    /// The battery settings are deliberate: Task Scheduler's defaults refuse to
+    /// start a task on battery power and stop one when a laptop unplugs, which
+    /// on exactly the machines that matter most would have made this autostart
+    /// path quietly conditional on the charger being in.
     fn register_logon_task(exe: &std::path::Path) {
-        let tr = format!("\"{}\" {}", exe.display(), AUTOSTART_ARG);
-        let ok = schtasks()
-            .args([
-                "/create", "/tn", LOGON_TASK_NAME, "/tr", &tr, "/sc", "onlogon", "/f",
-            ])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if ok {
+        let script = format!(
+            "$a = New-ScheduledTaskAction -Execute {exe} -Argument {arg}; \
+             $t = New-ScheduledTaskTrigger -AtLogOn -User \"$env:USERDOMAIN\\$env:USERNAME\"; \
+             $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries \
+                  -DontStopIfGoingOnBatteries -StartWhenAvailable \
+                  -ExecutionTimeLimit ([TimeSpan]::Zero); \
+             Register-ScheduledTask -TaskName {task} -Action $a -Trigger $t \
+                  -Settings $s -Force | Out-Null",
+            exe = ps_quote(&exe.display().to_string()),
+            arg = ps_quote(AUTOSTART_ARG),
+            task = ps_quote(LOGON_TASK_NAME),
+        );
+        if run_powershell(&script) {
             log::info!("autostart logon task registered: {LOGON_TASK_NAME}");
         } else {
             // Not fatal: the Run key is still registered, and a machine with
@@ -557,8 +605,17 @@ mod imp {
 
     /// Remove the logon Scheduled Task. Silent about failure — being absent is
     /// the desired end state, and "it wasn't there" is not an error.
+    ///
+    /// Uses the COM API for the same reason `register_logon_task` does: a task
+    /// registered by an unelevated process is removable by one, but
+    /// `schtasks.exe /delete` inherits the same access denial as `/create`.
     fn unregister_logon_task() {
-        let _ = schtasks().args(["/delete", "/tn", LOGON_TASK_NAME, "/f"]).status();
+        let script = format!(
+            "Unregister-ScheduledTask -TaskName {task} -Confirm:$false \
+             -ErrorAction SilentlyContinue",
+            task = ps_quote(LOGON_TASK_NAME),
+        );
+        let _ = run_powershell(&script);
     }
 
     /// Register Oath Light to start at user login, through BOTH the HKCU Run

@@ -13,11 +13,13 @@ What the app does, what it touches on your machine, and what it never does.
 * Unwraps proxies, translators and archive viewers, then checks the real destination.
 * Filters at the system DNS level, so it covers every app, not only browsers.
 * Watches the screen with on-device AI and covers what it finds.
-* Holds its core protections on permanently — the uninstall guard, SafeSearch,
-  YouTube Restricted Mode, the extension requirement and the system DNS filter
-  have no off switch at all. Settings that *are* choices wait out a cool-off
-  before they weaken.
+* Holds its core protections on — the uninstall guard, SafeSearch, YouTube
+  Restricted Mode, the extension requirement and the system DNS filter have no
+  off switch anywhere in the app. Settings that *are* choices wait out a
+  cool-off before they weaken.
 * Keeps itself installed and running through a watchdog and browser policy.
+  Removal goes through the app and its cool-off; Windows' own Uninstall entry
+  refuses. What that is **not** is unremovable — see below.
 
 ## What it installs and runs
 
@@ -87,6 +89,28 @@ protected, and the DNS layer keeps asking until you allow it.
   verifiable and cannot be quietly rewritten.
 * The AI has no irreversible action available to it. It can cover the screen and
   open your redirect. That is all it can do.
+
+## What the tamper resistance actually holds against
+
+Straight, because a protection you believe in but don't have is worse than one
+you know you're missing.
+
+**It holds** the doors an ordinary moment of wanting it gone goes through:
+Settings → Apps → Uninstall is refused outright, closing the app doesn't stop
+it (two processes watch each other), and every weakening setting waits out a
+cool-off with protection fully on the whole time.
+
+**It does not hold** against an administrator on this machine who sets out to
+remove it. Every Oath Light process runs as the user it is protecting, so the
+operating system will help. In particular: if you decline the one-time
+administrator prompt at setup, browser policy is written to your own user hive,
+where it comes off without a prompt — accepting that prompt writes it
+machine-wide instead, which is the stronger of the two.
+
+[docs/HARDENING.md](docs/HARDENING.md) is the unvarnished version: what stops
+what today, what doesn't, and what is being built next. If you want the strong
+form of this, the single biggest step is making the protected account a
+standard (non-admin) user, with the administrator password held by someone else.
 
 ## Scope
 

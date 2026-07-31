@@ -41,6 +41,15 @@ a momentary urge cannot instantly undo your commitment. Once installed:
   out a cool-off period (**24 hours in the full release**) before the app can
   actually be removed. Blocking stays fully active during the wait. You can cancel
   the request at any time.
+- **Windows' own uninstaller goes through that same wait.** Removing Oath Light
+  from *Settings → Apps* (or *Add/Remove Programs*) before the cool-off has
+  elapsed is refused, and refusing changes nothing on your device — it does not
+  half-remove the app. This is the only supported removal path besides the
+  in-app one, and both honour the same timer.
+- **Updating asks the same of you, briefly.** A new version can only replace an
+  old one while an *update window* is open, which you start from **Settings**
+  inside the app. It lasts fifteen minutes, then protection comes back on its
+  own whether or not the update happened.
 
 These measures are **friction, not unbreakable security**: a determined,
 technically-capable user can still work around them. They exist to slow down
@@ -87,7 +96,9 @@ or other harm arising from its use. **You install and use it at your own risk.**
 
 You can remove Oath Light at any time by opening the app, going to **Settings**, and
 starting the uninstall request — then completing it after the cool-off period
-described in section 3.
+described in section 3. Windows' own *Settings → Apps → Uninstall* also works, but
+only once that same cool-off has elapsed; used earlier it refuses and leaves your
+device untouched.
 
 ## 8. Your agreement
 

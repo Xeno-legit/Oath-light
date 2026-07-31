@@ -20,6 +20,8 @@ Oath Light is deliberately hard to remove or disable in the moment, by design, s
 - It starts automatically when you sign in to Windows and runs in the background (minimized). This is enforced, not an optional setting.\par
 - It runs two cooperating processes - OathLight.exe and a hidden oathlightguard.exe - that watch each other. If one is closed or force-killed (including via Task Manager "End task"), the other restarts it. This is intentional behavior, not a virus.\par
 - Uninstalling is a two-step, delayed process. You request removal, then wait out a cool-off period (24 hours in the full release) before the app can actually be removed. Blocking stays fully active during the wait. You can cancel the request at any time.\par
+- Windows' own uninstaller goes through that same wait. Removing Oath Light from Settings > Apps (or Add/Remove Programs) before the cool-off has elapsed is refused, and refusing changes nothing on your device - it does not half-remove the app. This is the only supported removal path besides the in-app one, and both honour the same timer.\par
+- Updating asks the same of you, briefly. A new version can only replace an old one while an update window is open, which you start from Settings inside the app. It lasts fifteen minutes, then protection comes back on its own whether or not the update happened.\par
 These measures are friction, not unbreakable security: a determined, technically-capable user can still work around them. They exist to slow down impulsive decisions - not to trap you.\par
 \par
 {\b 4. What it can access on this device}\par
@@ -42,7 +44,7 @@ All processing - including the AI image analysis - happens locally. Nothing abou
 Because this is beta software provided free of charge, it is offered without warranty of any kind, express or implied. To the maximum extent permitted by law, the authors are not liable for any damages, data loss, missed or wrongful blocking, or other harm arising from its use. You install and use it at your own risk.\par
 \par
 {\b 7. Removing Oath Light}\par
-You can remove Oath Light at any time by opening the app, going to Settings, and starting the uninstall request - then completing it after the cool-off period described in section 3.\par
+You can remove Oath Light at any time by opening the app, going to Settings, and starting the uninstall request - then completing it after the cool-off period described in section 3. Windows' own Settings > Apps > Uninstall also works, but only once that same cool-off has elapsed; used earlier it refuses and leaves your device untouched.\par
 \par
 {\b 8. Your agreement}\par
 By continuing this installation you confirm that you have read and understood the above - including the tamper-resistance measures, the login autostart, the optional on-device screen monitoring, and the delayed-uninstall process - and that you consent to Oath Light operating on this device as described.\par

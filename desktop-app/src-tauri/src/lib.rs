@@ -1,6 +1,7 @@
 mod auth;
 mod browser_lock;
 mod browsers;
+mod cli;
 mod dns_filter;
 mod evallog;
 mod friction;
@@ -4704,6 +4705,20 @@ fn cancel_update(app: AppHandle) -> Result<UpdateStateView, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Uninstall CLI modes (`--uninstall-check` / `--uninstall-teardown`), before
+    // anything else in the process does any work. These are how the NSIS
+    // uninstaller asks whether removal is authorized and, if it is, has the app
+    // reverse its own machine state — see `cli` for why `uninstall.exe` must go
+    // through this gate rather than around it.
+    //
+    // First, and with an immediate `exit`, for two reasons: this instance must
+    // never take the watchdog's main-role mutex (it would be seen as the running
+    // app and fight the very removal it is performing), and the check mode must
+    // stay side-effect-free so that a refusal genuinely touches nothing.
+    if let Some(code) = cli::dispatch() {
+        std::process::exit(code);
+    }
+
     // Elevated one-shot: this instance was relaunched with admin rights for the
     // sole purpose of writing the force-install policy (which *requires*
     // elevation — the `Software\Policies` key is admin-only) and registering the
