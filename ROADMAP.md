@@ -90,6 +90,17 @@ translations.
     extension pages, `PP.t()` in the renderer) but it is the bulk of the job.
     Adding es/pt/hi/id is a file each once that's done.
 
+## Needs someone who didn't write it
+
+* **A proper red team.** Someone who did not write this code sitting down and
+  genuinely trying to get past it, then writing down what worked. Read
+  [docs/HARDENING.md](docs/HARDENING.md) first so the attack lands on the real
+  thing rather than the version you assume exists; report holes in
+  [BYPASSES.md](BYPASSES.md). The priority target is an administrator account —
+  that is the known-weakest surface, stated plainly in SECURITY.md rather than
+  papered over. Not gating alpha, but it should happen before this is
+  recommended to anyone who is depending on it.
+
 ## Needs CI
 
 * Reproducible installer builds. NSIS embeds a timestamp and a compiler
