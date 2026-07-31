@@ -9,7 +9,7 @@
 //
 // Two modes mirror the two entries in manifest.json's "background" block:
 //   'firefox' — evaluate bg/blocklists.js, bg/matching.js, bg/graylist.js,
-//               bg/native-bridge.js, bg/reminders.js, then background.js, each
+//               bg/native-bridge.js, bg/vulnerable-window.js, then background.js, each
 //               as a separate script sharing ONE global scope (exactly what
 //               Firefox's `background.scripts` array does — sequential classic
 //               scripts, no importScripts). `importScripts` is left undefined,
@@ -46,7 +46,7 @@ const BG_FILES = [
   'bg/matching.js',
   'bg/graylist.js',
   'bg/native-bridge.js',
-  'bg/reminders.js',
+  'bg/vulnerable-window.js',
   // Vendored @noble/ed25519 + the OTA consumer (plan 3.5). noble attaches
   // globalThis.nobleEd25519; ota.js reads it (and WHITELIST_DOMAINS from
   // matching.js) at runtime, so it loads after both.

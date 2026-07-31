@@ -283,12 +283,15 @@ function LanguageCard({ s, PP }) {
 
 // What this section says is now true, which it previously wasn't.
 //
-// The two check-in reminders ARE real and DO fire: `alerts` rides the
-// `setBlocking` payload down to the extension (app.jsx), where a persistent
-// `chrome.alarms` alarm (extension/bg/reminders.js) evaluates the
-// vulnerable-hours window every 30 minutes and asks content.js to draw an
-// in-page nudge on the active tab. In-page, not an OS toast — so that is what
-// this says.
+// The two check-in reminders ARE real and DO fire — **from the desktop app**,
+// as of 0.5.0. They used to be the extension's job (a `chrome.alarms` alarm
+// drew an in-page card on the active tab), which meant a nudge only reached
+// someone who happened to have a browser open on a page the content script
+// runs on. They now come from `src-tauri/src/reminder.rs`: the applier
+// heartbeat checks once a minute, and at most every 30 minutes it shows a
+// small card in the corner of the screen that closes itself after 12 seconds.
+// Still not an OS toast — the app has no notification plugin — but it no
+// longer depends on a browser being open, so that is what this now says.
 //
 // The three rows underneath used to be "Coming soon · not built yet". Audited
 // the same way the Blocking page's were, that was wrong about two of the
@@ -320,7 +323,7 @@ function NotificationsCard({ s, PP, go }) {
     <SectionCard
       title="Check-ins and reminders"
       sub="Gentle nudges during your vulnerable hours, and what the app shows you on its own."
-      info="Reminders appear inside whatever page you're looking at, roughly twice an hour, and only while your vulnerable-hours window is open — set that window on the Blocking Settings page. They need a browser open with the extension running; Oath Light does not send operating-system notifications at all.">
+      info="Reminders appear in the corner of your screen, roughly twice an hour, and only while your vulnerable-hours window is open — set that window on the Blocking Settings page. They come from Oath Light itself, so no browser needs to be open. The card closes itself after a few seconds and never takes focus. Oath Light does not send operating-system notifications at all.">
 
       {b.alerts.map((a) => (
         <Setting key={a.id} icon={IconBell}
@@ -332,7 +335,7 @@ function NotificationsCard({ s, PP, go }) {
 
       <div className="sub-block">
         <div className="muted-note">
-          These fire in the browser during your vulnerable hours.{' '}
+          These appear in the corner of your screen during your vulnerable hours.{' '}
           <a href="#" onClick={(e) => { e.preventDefault(); go('blocking'); }}>Set the window</a>
           {' '}— currently {b.vulnerable && b.vulnerable.on ? `${b.vulnerable.start} → ${b.vulnerable.end}` : 'off, so nothing will fire'}.
         </div>

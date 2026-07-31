@@ -2,7 +2,9 @@
 Launch gates
 
 ▶ What stands between today and each launch, and **who can clear it**.
-Written 2026-07-31, Phase 4.
+Written 2026-07-31, Phase 4. Revised the same day to fold in three owner
+decisions: no Edge Add-ons listing, no 90-day course, and the Edge browser lock
+stays exactly as it is.
 
 This is a *view*, not a source. [ROADMAP.md](../ROADMAP.md) remains the only list
 of unfinished work and [MASTER_PLAN.md](MASTER_PLAN.md) the only list of phases —
@@ -38,29 +40,53 @@ Phase 4 has exactly two lines outstanding; every other item on it is Done.
 
 | Item | Who | Note |
 | :-- | :-- | :-- |
-| Commit the working tree | owner | |
+| ~~Commit the working tree~~ | owner | **done** — `b15e816` |
 | Verify the uninstall/upgrade gate on a real install | anyone, at a machine | never tested end to end — see [HARDENING.md](HARDENING.md) |
-| Test the overlay's "this was wrong" button on a live detection | anyone, at a machine | |
+| Verify the Edge browser lock (kill + 20s grace window) | anyone, at a machine | *the* enforcement path on Edge, not a stopgap — see below |
+| Test the AI overlay's "this was wrong" button on a live detection | anyone, at a machine | overlay only; the extension's blocked page has no such button |
 | Test grayscale hours on a real machine | anyone, at a machine | |
 | Smoke-test Firefox force-install against a real admin Firefox | anyone, at a machine | |
 | Pre-Alpha launch test, full scale | anyone, at a machine | |
 | Swap OTA dev keys for production keys | **owner only** | needs the private key — [OTA_KEYS.md](OTA_KEYS.md) |
-| Publish to Microsoft Edge Add-ons, set `EDGE_STORE_EXTENSION_ID` | **owner only** | needs the Partner Center account |
 | Arabic draft read by a fluent speaker → `reviewed: true` | **a fluent speaker** | cannot be faked or machine-checked |
 
-Five of those nine are the *same activity* — install the current build on a
-machine and exercise it. Budget one focused session, not five.
+Six of those are the *same activity* — install the current build on a machine
+and exercise it. Budget one focused session, not six.
 
-The last three are not work items at all. No amount of engineering time clears
-them, and two of them gate real user-facing behaviour:
+The last two are not work items at all. No amount of engineering time clears
+them, and one of them gates real user-facing behaviour:
 
-* **Until the Edge Add-ons listing exists**, Edge can only *auto-install* the
-  extension (the user clicks once to enable) rather than force-install it.
-  Microsoft limits forced installation to its own store on any machine that
-  isn't domain-joined, so the Chrome Web Store entry written as policy is
-  accepted and silently discarded. The code is already wired for both paths.
 * **Until the OTA keys are production keys**, shipped builds trust a development
   signing key.
+* **Until a fluent speaker reads it**, Arabic ships as a draft and the picker
+  says so.
+
+### The Edge lock is permanent, and it is the thing to verify
+
+Oath Light is **not** being published to Microsoft Edge Add-ons — owner's call,
+2026-07-31, already recorded in `browsers.rs`. That closes the only route to
+force-installing on Edge: Microsoft honors forced installation solely from its
+own store on a machine that isn't domain-joined, so a Chrome Web Store entry
+written as Edge policy is accepted and silently discarded.
+
+So `browser_lock.rs` is not a placeholder waiting on a listing. It is how Edge
+is enforced, permanently: **while the extension isn't running in Edge, Edge
+isn't running either.** The way back is a 20-second grace window requested from
+the app, which never extends and never exempts — not even when Edge is the only
+browser on the machine. That is the largest deliberate design decision in the
+app that has never been exercised on real hardware, which is what makes it the
+highest-value item in the session above.
+
+**The 20 seconds stays as it is.** What needs verifying is the loop around it:
+
+1. Edge without the extension dies on sight.
+2. The app offers a window, and opens Edge straight at the page that fixes it.
+3. The install completes inside 20s, and Edge stops dying.
+4. A lapsed window resumes the kill, and a second window costs a second
+   deliberate trip to the app.
+
+Step 4 is the one worth being unsentimental about — it is the step that makes
+the other three friction rather than theatre.
 
 ### Deliberately not gating alpha
 
@@ -70,10 +96,15 @@ Parked in other ROADMAP buckets, and none of it blocks the launch:
   Telegram Web, WhatsApp previews, Discord embeds. *(needs the sites open)*
 * Model quantization, DirectML/NPU, the real 200-400 image eval set, in-page
   image scoring, the strictness knob. *(needs a GPU)*
-* The 90-day recovery course, and translation **extraction** — only ~94 keys
-  exist and most UI copy is still hardcoded English. *(needs writing)*
+* Translation **extraction** — only ~94 keys exist and most UI copy is still
+  hardcoded English. *(needs writing)*
 * Reproducible installer builds. The zip half is done and proven in CI; the
   NSIS half isn't, so no hash claim is made for the installer. *(needs CI)*
+
+Two things that used to sit on this list are now **not happening at all**, and
+have moved to ROADMAP's "Not doing" so they stop being re-planned: publishing to
+Edge Add-ons, and the 90-day recovery course. Both are owner's calls made
+2026-07-31.
 
 One item on that list deserves a second look before you commit to it:
 

@@ -49,7 +49,7 @@
       "bg/matching.js",
       "bg/graylist.js",
       "bg/native-bridge.js",
-      "bg/reminders.js",
+      "bg/vulnerable-window.js",
       "bg/noble-ed25519.js",
       "bg/ota.js",
       "background.js"

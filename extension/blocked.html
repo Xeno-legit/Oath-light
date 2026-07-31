@@ -9,10 +9,25 @@
   <link rel="stylesheet" href="blocklist_assets/desktop.css">
   <style>
     /* ---- blocked page layout (page-specific; tokens come from desktop.css) ---- */
+
+    /* Vertical rhythm, scaled to the viewport HEIGHT rather than fixed.
+       The card was authored at a fixed 26px rhythm with a 92px shield and
+       38px numerals, which totalled ~973px — taller than the ~855px a
+       maximised browser actually leaves on a 1080p screen. Combined with the
+       `overflow: hidden` below (which was there to stop the fixed background
+       canvas scrolling), that clipped the status pill and the shield off the
+       TOP of the page with no way to scroll to them. Every measurement that
+       repeats down the card now derives from this one value. */
+    :root { --vr: clamp(12px, 2.4vh, 26px); }
+
     html, body { height: 100%; }
     body {
       display: flex; align-items: center; justify-content: center;
-      padding: 24px; overflow: hidden;
+      padding: 24px;
+      /* Scroll rather than clip. `.bg` is `position: fixed` (see below), so
+         the background stays put while the card scrolls — which is what the
+         old `overflow: hidden` was really protecting. */
+      overflow-x: hidden; overflow-y: auto;
       background: var(--desktop);
     }
 
@@ -23,7 +38,12 @@
     .blocked-card {
       position: relative; z-index: 2;
       width: 100%; max-width: 560px;
-      padding: 48px 46px 44px;
+      /* `margin-block: auto` is what keeps the card centred when it fits and
+         stops it overflowing past the TOP of the scroll container when it
+         doesn't — plain `align-items: center` clips the start edge instead of
+         letting you scroll back to it. */
+      margin-block: auto;
+      padding: clamp(24px, 4.2vh, 48px) 46px clamp(22px, 3.8vh, 44px);
       text-align: center;
       background: var(--glass);
       border: 1px solid var(--glass-brd);
@@ -37,7 +57,7 @@
     /* status pill — mirrors the desktop titlebar .tl-status */
     .status {
       display: inline-flex; align-items: center; gap: 8px;
-      margin: 0 auto 26px;
+      margin: 0 auto var(--vr);
       font-size: 12px; font-weight: 700; letter-spacing: .04em;
       color: var(--text-2);
       padding: 6px 14px; border-radius: 999px;
@@ -52,21 +72,21 @@
     @keyframes statusPulse { 0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent-2) 55%, transparent); } 70% { box-shadow: 0 0 0 8px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
     .shield {
-      width: 92px; height: 92px; margin: 0 auto 26px;
+      width: clamp(64px, 9vh, 92px); height: clamp(64px, 9vh, 92px); margin: 0 auto var(--vr);
       border-radius: 26px; display: grid; place-items: center;
       background: color-mix(in oklab, var(--accent) 16%, transparent);
       color: var(--accent);
       box-shadow: inset 0 0 0 1px var(--glass-brd), 0 18px 40px -22px color-mix(in oklab, var(--accent) 90%, transparent);
       animation: gentlePulse 4.5s var(--ease-soft) infinite;
     }
-    .shield img { width: 54px; height: 54px; display: block; }
+    .shield img { width: clamp(38px, 5.3vh, 54px); height: clamp(38px, 5.3vh, 54px); display: block; }
     @keyframes gentlePulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
 
-    h1 { font-size: 38px; font-weight: 800; letter-spacing: -.03em; line-height: 1.05; margin-bottom: 12px; }
+    h1 { font-size: clamp(27px, 3.7vh, 38px); font-weight: 800; letter-spacing: -.03em; line-height: 1.05; margin-bottom: 12px; }
 
     .reason {
       color: var(--text-2); font-size: 16px; font-weight: 600;
-      margin-bottom: 26px; line-height: 1.5;
+      margin-bottom: var(--vr); line-height: 1.5;
     }
 
     /* quote — mirrors the popup quote (serif mark + text + author) */
@@ -75,7 +95,7 @@
       background: var(--glass-2);
       border: 1px solid var(--glass-brd);
       border-left: 4px solid var(--accent);
-      padding: 22px 24px 22px 56px; margin: 26px 0;
+      padding: clamp(14px, 2.1vh, 22px) 24px clamp(14px, 2.1vh, 22px) 56px; margin: var(--vr) 0;
       border-radius: var(--r-md);
       text-align: left; cursor: pointer; overflow: hidden;
       transition: border-color .25s, background .25s, transform .2s var(--ease);
@@ -98,7 +118,7 @@
 
     .stats {
       display: flex; gap: 14px;
-      margin: 26px 0; padding: 22px;
+      margin: var(--vr) 0; padding: clamp(14px, 2.1vh, 22px);
       background: var(--glass-2);
       border: 1px solid var(--glass-brd);
       border-radius: var(--r-lg);
@@ -106,13 +126,13 @@
     .stat { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; }
     .stat + .stat { border-left: 1px solid var(--glass-brd); }
     .stat-ico {
-      width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center;
+      width: clamp(30px, 4.2vh, 38px); height: clamp(30px, 4.2vh, 38px); border-radius: 12px; display: grid; place-items: center;
       background: color-mix(in oklab, var(--accent) 15%, transparent); color: var(--accent);
       margin-bottom: 2px;
     }
     .stat-ico svg { width: 20px; height: 20px; }
     .stat-value {
-      font-size: 38px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
+      font-size: clamp(26px, 3.8vh, 38px); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
       background: linear-gradient(135deg, var(--accent), var(--accent-2));
       -webkit-background-clip: text; background-clip: text;
       -webkit-text-fill-color: transparent;
@@ -122,7 +142,7 @@
       text-transform: uppercase; letter-spacing: .08em;
     }
 
-    .message { color: var(--muted); line-height: 1.6; font-size: 15px; font-weight: 500; margin-bottom: 34px; }
+    .message { color: var(--muted); line-height: 1.6; font-size: 15px; font-weight: 500; margin-bottom: calc(var(--vr) * 1.3); }
 
     /* Habit replacement (plan 5.6) — the user's own alternatives. Styled as a
        quiet list rather than a row of buttons: it's an offer, not a demand,
@@ -130,7 +150,7 @@
     /* Block-level with an auto inline margin, NOT inline-block: the card
        centres its children inline, so an inline-block here let the following
        "Return to Safety" button flow onto the same line and overlap it. */
-    .alts { display: block; width: fit-content; margin: -14px auto 30px; text-align: left; }
+    .alts { display: block; width: fit-content; margin: -14px auto calc(var(--vr) * 1.15); text-align: left; }
     .alts-title { font-size: 12.5px; font-weight: 700; color: var(--muted); margin-bottom: 8px; }
     .alts-list { display: flex; flex-direction: column; gap: 6px; }
     .alt-item {
@@ -144,6 +164,22 @@
 
     .safe-btn { padding: 16px 36px; font-size: 16px; border-radius: var(--r-md); }
     .safe-btn svg { width: 20px; height: 20px; }
+
+    /* Short viewports (a laptop, or any window that isn't full height). The
+       `--vr` scaling above handles the repeating rhythm, but the prose blocks
+       and the two buttons are sized in `px` and don't shrink with it — on a
+       760px-tall window they were the last ~30px keeping the card from
+       fitting. Trimmed only here, so the full-height look is untouched. */
+    @media (max-height: 820px) {
+      :root { --vr: clamp(10px, 2vh, 20px); }
+      body { padding: 12px; }
+      .reason { font-size: 15px; }
+      .message { font-size: 14px; line-height: 1.5; }
+      .quote-text { font-size: 14.5px; line-height: 1.5; }
+      .quote-author { margin-top: 8px; }
+      .safe-btn { padding: 13px 32px; font-size: 15px; }
+      .panic-btn { margin-top: 10px; }
+    }
 
     @media (max-width: 520px) {
       .blocked-card { padding: 38px 24px 34px; }

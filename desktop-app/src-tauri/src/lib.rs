@@ -15,6 +15,7 @@ mod overlay;
 mod grayscale;
 mod profiles;
 mod recovery;
+mod reminder;
 pub mod screen;
 mod settings;
 mod sidecars;
@@ -5080,6 +5081,11 @@ pub fn run() {
                 let auth2 = auth_state.clone();
                 let lockdown2 = lockdown_store.clone();
                 let event_log2 = event_log.clone();
+                // Owned by this thread alone — the nudge's rate limit is not
+                // state anything else reads, and deliberately does NOT persist:
+                // a restart may fire one reminder early, which is harmless, and
+                // that is a better trade than another file on disk.
+                let reminder2 = reminder::ReminderState::new();
                 std::thread::spawn(move || {
                     let mut tick: u64 = 0;
                     loop {
@@ -5129,6 +5135,19 @@ pub fn run() {
 
                         if tick % 60 == 0 {
                             maybe_send_contact_heartbeat(&app2, &settings2);
+
+                            // Vulnerable-hours nudge (moved here from the
+                            // browser extension — see reminder.rs). Checked
+                            // once a minute, but `reminder::tick` rate-limits
+                            // itself to one card per 30 minutes and returns
+                            // immediately unless the window is open and a
+                            // nudge type is switched on, so this is a no-op
+                            // almost every time it runs.
+                            let (blocking, serious) = {
+                                let s = state2.lock().unwrap();
+                                (s.ext_blocking.clone(), s.serious_mode)
+                            };
+                            reminder::tick(&app2, &reminder2, blocking.as_ref(), serious);
                         }
 
                         for (action_id, payload) in friction2.take_ready() {

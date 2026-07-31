@@ -2,13 +2,13 @@
 What's left
 
 ▶ The only list of unfinished work. If it isn't here, it's either done or we're not doing it.
-Updated 2026-07-27. Phase 4, branch `pre-alpha/release`.
+Updated 2026-07-31. Phase 4, branch `pre-alpha/release`.
 
 Almost everything that can be finished by writing code is finished. What's left
 mostly needs something else — the real sites open, a GPU, someone writing
-content, or the owner's own keys. Three code exceptions are called out where
-they sit: the installer half of reproducible builds, the string extraction
-behind translations, and the 90-day course.
+content, or the owner's own keys. Two code exceptions are called out where they
+sit: the installer half of reproducible builds, and the string extraction behind
+translations.
 
 ## Before Alpha
 
@@ -18,17 +18,23 @@ behind translations, and the 90-day course.
 * Get the Arabic draft read by a fluent speaker, then flip `reviewed: true`
   in `design-system/locales/ar.js`. Until then the picker calls it a draft.
 * Swap the OTA dev keys for production keys. (owner only — [docs/OTA_KEYS.md](docs/OTA_KEYS.md))
-* **Publish to Microsoft Edge Add-ons, then set `EDGE_STORE_EXTENSION_ID` in
-  `browsers.rs`.** This is the *only* way Edge can be force-**installed**:
-  Microsoft limits forced installation to its own store on any PC that isn't
-  domain-joined, so the Chrome Web Store entry we write is accepted as policy and
-  silently discarded. Until then Edge falls back to auto-install via the
-  external-extensions registry — the extension downloads itself and needs one
-  click to enable, which works but is not a lock. Owner-only (needs the Partner
-  Center account); the code is already wired for both.
-  Details in [docs/RELEASE.md](docs/RELEASE.md#1-where-its-published).
 * Smoke-test the Firefox force-install against a real admin Firefox.
-* Test the overlay's "this was wrong" button on a live detection.
+* **Verify the Edge browser lock on a real machine** — `browser_lock.rs` kills
+  Edge on sight while the extension isn't running in it, and the only way back
+  is a 20-second grace window requested from the app. This is not a stopgap
+  waiting on an Edge Add-ons listing; it is *the* enforcement mechanism on Edge,
+  permanently (see "Not doing"). Verify the loop end to end: Edge dies, the app
+  offers the window, the window opens Edge at the install page, the install
+  completes inside 20s, and Edge stops dying. Then check the failure path — let
+  a window lapse and confirm the kill resumes and a second window costs a second
+  trip to the app. **Keep the 20s as is.**
+* **Verify the uninstall/upgrade gate on a real install** — never run end to
+  end. Settings → Apps must refuse, an in-app removal must complete, and an
+  upgrade must preserve policy/DNS/autostart. Newest and least-proven code in
+  the release ([docs/HARDENING.md](docs/HARDENING.md)).
+* Test the AI overlay's "this was wrong" button on a live detection. (overlay
+  only — it reports a *screen-monitor* false positive and re-derives the dwell.
+  The extension's blocked page has no equivalent and isn't getting one.)
 * Test grayscale hours on a real machine.
 * Pre-Alpha launch test — everything, full scale.
 
@@ -68,7 +74,6 @@ behind translations, and the 90-day course.
   before the network, and an output guard that runs every reply through the
   real blocklist + keyword engine. Seven tests cover the three code layers.
 
-* 90-day recovery course. (one JSON per day, the existing flow runner already plays it)
 * Translations — the remaining work is **extraction**, not the layer.
   * The layer is done: `strings.js` resolves key → locale → voice, locales
     register from `design-system/locales/<code>.js`, direction comes off the
@@ -108,6 +113,17 @@ behind translations, and the 90-day course.
 
 ▶ So it stops getting re-suggested.
 
+* **Publishing to Microsoft Edge Add-ons.** (owner's call, 2026-07-31) The
+  listing's verification requirements aren't worth it for a store that won't
+  meaningfully distribute the extension anyway. The consequence is deliberate
+  and permanent, not a gap: Microsoft only force-installs from its own store on
+  a PC that isn't domain-joined, so Edge can never be force-installed here.
+  `EDGE_STORE_EXTENSION_ID` stays empty, Edge stays `StoreUnavailable`, and the
+  browser lock is what enforces Edge instead. The machinery for the other
+  outcome is left intact and costs nothing — an item ID in `browsers.rs` is the
+  only change needed if this is ever revisited.
+* **The 90-day recovery course.** (owner's call, 2026-07-31) The flow runner
+  that would play it stays; there is no 90-day content coming.
 * Safari. (no native messaging, so the desktop bridge can't exist)
 * A phone version of the browser extension. (phones get the AI scanner instead)
 * Score-based blocking in the filter. (unpredictable, undebuggable)

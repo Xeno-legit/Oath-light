@@ -13,7 +13,7 @@
 | :-- | :-- | :-- |
 | Chrome Web Store | **Live** (submitted 2026-07-19, approved 2026-07-22) | `oigdpcdgmldgjalfnlgekcbkmniplnad` — [listing](https://chromewebstore.google.com/detail/oigdpcdgmldgjalfnlgekcbkmniplnad) |
 | Firefox AMO | **Live** | [oath-light-content-filter](https://addons.mozilla.org/en-GB/firefox/addon/oath-light-content-filter/) |
-| Microsoft Edge Add-ons | **Required, not yet submitted** | The only way Edge can be force-installed — see below |
+| Microsoft Edge Add-ons | **Not doing** (owner's call, 2026-07-31) | Would be the only route to force-install on Edge; the browser lock covers Edge instead — see below |
 | Opera Add-ons | Optional, not submitted | Same Chromium zip if ever wanted |
 | Safari | Ruled out | Cost/effort, and no `nativeMessaging` |
 
@@ -63,16 +63,29 @@ afterwards and Chromium remembers that in `external_uninstalls`.
 
 So Edge gets: automatic download, one click to enable, and no lock. Reported as
 `needs_approval` → `auto_installed`, never as "locked". `enforce_external_install`
-in `browsers.rs`. Publishing to Edge Add-ons remains the only way to make Edge a
-real lock.
+in `browsers.rs`.
 
-**To fix it: publish to Microsoft Edge Add-ons, then set
-`EDGE_STORE_EXTENSION_ID` in `browsers.rs` to the item ID.** Nothing else needs
-to change — `forcelist_target()` already prefers that ID and pairs it with
-`EDGE_UPDATE_URL` (`https://edge.microsoft.com/extensionwebstorebase/v1/crx`).
-Until then Edge reports `store_unavailable` and the UI offers a manual install
-instead of claiming a lock it doesn't have. The store zip needs no changes;
-Edge Add-ons takes the same Chromium package.
+#### We are not publishing to Edge Add-ons, so this is settled, not pending
+
+Owner's call, **2026-07-31**: the listing's verification requirements are not
+worth it for a store that will not meaningfully distribute the extension anyway.
+`EDGE_STORE_EXTENSION_ID` stays empty and Edge stays `store_unavailable`
+permanently. Nothing in this section is waiting on anything.
+
+What enforces Edge instead is `browser_lock.rs`: while the extension is not
+running in Edge, **Edge does not run either**, and the only way back is a
+20-second grace window requested from the app. It is not a stopgap standing in
+for the listing — on Edge it is the mechanism, and it is always on with no
+exemption for a machine where Edge is the only browser. See
+[HARDENING.md](HARDENING.md) and the module doc in `browser_lock.rs`.
+
+If that decision is ever revisited, one line changes: put the item ID in
+`EDGE_STORE_EXTENSION_ID`. `forcelist_target()` already prefers it and pairs it
+with `EDGE_UPDATE_URL`
+(`https://edge.microsoft.com/extensionwebstorebase/v1/crx`), and Edge drops out
+of the browser lock automatically. The store zip would need no changes — Edge
+Add-ons takes the same Chromium package. That machinery is left intact because
+it costs nothing to keep.
 
 ### The extension-ID trap (cost us a broken release once)
 

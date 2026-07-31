@@ -208,8 +208,8 @@ const NativeMessagingBridge = (function () {
         break;
 
       case 'set_blocking':
-        // Desktop app pushed the blocking settings (redirect target + reminder
-        // schedule). Cache them and re-arm the reminder loop.
+        // Desktop app pushed the blocking settings (redirect target +
+        // vulnerable-hours window). Cache them and re-arm the escalation loop.
         handleSetBlocking(msg);
         break;
 
@@ -248,10 +248,10 @@ const NativeMessagingBridge = (function () {
     // `ppBlocking` through voice-sync.js). `voice` is the user's onboarding
     // choice; `serious` is backend-owned and overrides it inside `t()`.
     applyVoiceSettings(settings);
-    // Re-arm the reminder loop to reflect the new schedule immediately.
-    if (typeof armReminderAlarm === 'function') armReminderAlarm();
     // Lockdown schedule-from-vulnerable-hours (4.4 v2): arm/disarm the
-    // escalation alarm to match whatever the desktop just pushed.
+    // escalation alarm to match whatever the desktop just pushed. (There used
+    // to be a second re-arm here for the in-page reminder loop; reminders now
+    // fire from the desktop app — see src-tauri/src/reminder.rs.)
     if (typeof reconcileLockdownEscalationAlarm === 'function') reconcileLockdownEscalationAlarm();
     // Apply the opt-in YouTube Restricted Mode DNR toggle (default OFF) the
     // moment the desktop app pushes it — same channel as the redirect link.
@@ -388,7 +388,7 @@ const NativeMessagingBridge = (function () {
 
   // ─ Lockdown schedule-from-vulnerable-hours (plan 4.4 v2) ───
   // Tells the desktop app the vulnerable-hours window is currently active and
-  // how many minutes remain in it — see reminders.js's `maybeEscalateLockdown`.
+  // how many minutes remain in it — see vulnerable-window.js's `maybeEscalateLockdown`.
   // Only ever called while the desktop-owned `escalate_vulnerable_hours`
   // setting is on (opt-in, off by default).
   function sendVulnerableWindowActive(remainingMin) {

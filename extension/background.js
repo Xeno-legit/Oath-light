@@ -2,7 +2,7 @@
 //
 // This file used to be the entire 2,657-line extension monolith. It has been
 // split into cohesive modules under bg/ (blocklists, matching, graylist,
-// native-bridge, reminders) — see each file's header comment. This file now
+// native-bridge, vulnerable-window) — see each file's header comment. This file now
 // keeps only: the shared block handler (handleBlock / recordBlockAndRedirect
 // / getRedirectTarget / isIgnoredUrl), the navigation event listeners, and
 // the runtime.onMessage router.
@@ -23,7 +23,7 @@ if (typeof importScripts === 'function') {
   // scripts for exactly this reason: a worker cannot lazily import a locale,
   // so every shipped language is listed here (and in manifest.background.
   // scripts for Firefox, in the same order).
-  importScripts('strings.js', 'locales/ar.js', 'bg/blocklists.js', 'bg/matching.js', 'bg/graylist.js', 'bg/native-bridge.js', 'bg/reminders.js', 'bg/noble-ed25519.js', 'bg/ota.js');
+  importScripts('strings.js', 'locales/ar.js', 'bg/blocklists.js', 'bg/matching.js', 'bg/graylist.js', 'bg/native-bridge.js', 'bg/vulnerable-window.js', 'bg/noble-ed25519.js', 'bg/ota.js');
 }
 
 // SHARED BLOCK HANDLER — single source of truth for blocking + stats

@@ -301,7 +301,7 @@ function otaDeps() {
 
 // Register the weekly alarm + its handler. Idempotent (chrome.alarms.create
 // with the same name just resets the period), so it's safe to call on both
-// install and startup, mirroring bg/reminders.js's armReminderAlarm pattern.
+// install and startup, mirroring bg/vulnerable-window.js's arm-alarm pattern.
 function armOtaAlarm() {
   try {
     if (typeof chrome === 'undefined' || !chrome.alarms) return;
@@ -334,7 +334,7 @@ const OathLightOTA = {
 if (typeof globalThis !== 'undefined') globalThis.OathLightOTA = OathLightOTA;
 if (typeof module === 'object' && module.exports) module.exports = OathLightOTA;
 
-// ── self-registration (same shape as bg/reminders.js) ────────────────────────
+// ── self-registration (same shape as bg/vulnerable-window.js) ────────────────────────
 // Arm the weekly alarm on install + startup, and run the alarm's check when it
 // fires. Guarded so the file is inert under the Node test harness (no
 // chrome.runtime there) — tests drive runOtaCheck() directly with fake deps.

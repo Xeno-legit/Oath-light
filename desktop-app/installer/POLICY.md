@@ -1,7 +1,7 @@
-# Oath Light — Open Beta
+# Oath Light — Alpha
 ### End-User Notice, Disclosure & Privacy Policy
 
-**Version 0.1.0 (Open Beta) — 2026-07-05**
+**Version 0.5.0 (Alpha) — 2026-07-31**
 
 Please read this before installing. Installing Oath Light means you understand and
 agree to what it does, how it protects itself from being disabled, and what it can
@@ -9,22 +9,23 @@ access on this device.
 
 ---
 
-## 1. This is an open beta
+## 1. This is an alpha
 
-Oath Light is early, in-development software released for public testing. It may
-contain bugs, block the wrong things, miss things it should block, or stop working
-without warning. **Do not rely on it as your only safeguard.** It is provided
-"as is", with no warranty of any kind.
+Oath Light is early, in-development software. It may contain bugs, block the wrong
+things, miss things it should block, or stop working without warning. **Do not rely
+on it as your only safeguard.** It is provided "as is", with no warranty of any kind.
 
 ## 2. What Oath Light is
 
 Oath Light is an accountability and content-blocking tool designed to help you avoid
-pornography and other explicit material online. It has two parts:
+pornography and other explicit material online. It has three parts:
 
 - **A browser extension** that blocks known adult domains, a curated "graylist" of
   risky sites, and keyword matches — and can redirect you to a page of your choice.
 - **A desktop app** that keeps that protection in place, checks that the extension
   stays active, and offers an **optional, on-device AI monitor**.
+- **A system-wide DNS filter** that blocks the same lists for *every* application on
+  this device, not just browsers. See section 4.
 
 ## 3. Friction & tamper-resistance (please read — this is intentionally strict)
 
@@ -37,22 +38,34 @@ a momentary urge cannot instantly undo your commitment. Once installed:
   `oathlightguard.exe` — that watch each other. If one is closed or force-killed
   (including via Task Manager → *End task*), the other restarts it. **This is
   intentional behavior, not a virus.**
+- **Some protections cannot be switched off at all.** The uninstall guard,
+  SafeSearch enforcement, YouTube Restricted Mode, the extension requirement and
+  the DNS filter have no off switch anywhere in the app. Settings that *are*
+  genuine choices weaken only after a **24-hour** cool-off, during which protection
+  stays fully on.
 - **Uninstalling is a two-step, delayed process.** You *request* removal, then wait
-  out a cool-off period (**24 hours in the full release**) before the app can
-  actually be removed. Blocking stays fully active during the wait. You can cancel
-  the request at any time.
+  out a **24-hour** cool-off before the app can actually be removed. Blocking stays
+  fully active during the wait. You can cancel the request at any time.
 - **Windows' own uninstaller goes through that same wait.** Removing Oath Light
   from *Settings → Apps* (or *Add/Remove Programs*) before the cool-off has
   elapsed is refused, and refusing changes nothing on your device — it does not
   half-remove the app. This is the only supported removal path besides the
   in-app one, and both honour the same timer.
+- **Microsoft Edge is held shut unless it is carrying the extension.** Microsoft
+  does not allow this extension to be force-installed into Edge on an ordinary
+  consumer PC, so Oath Light closes that gap by **closing Edge** whenever it is
+  running without the extension active. To fix it, open Oath Light and ask for a
+  restore window: Edge is left alone for **20 seconds**, opened straight at the
+  page that installs the extension. The window does not extend, but you can ask
+  for another one as many times as you need. Other browsers are never closed —
+  they keep the extension installed by policy instead.
 - **Updating asks the same of you, briefly.** A new version can only replace an
   old one while an *update window* is open, which you start from **Settings**
   inside the app. It lasts fifteen minutes, then protection comes back on its
   own whether or not the update happened.
 
-These measures are **friction, not unbreakable security**: a determined,
-technically-capable user can still work around them. They exist to slow down
+These measures are **friction, not unbreakable security**: an administrator on this
+machine who sets out to remove Oath Light can still do so. They exist to slow down
 impulsive decisions — not to trap you.
 
 ## 4. What it can access on this device
@@ -62,10 +75,16 @@ To do its job, Oath Light:
 - **Reads your browsers' profile settings** to check whether the Oath Light extension
   is installed and enabled.
 - **Adds Windows registry/policy entries** to start at login, to register a local
-  "native messaging host", and (in a future release) to keep the extension installed.
+  "native messaging host", and to keep the extension installed in supported browsers.
+- **Changes this device's DNS settings** to point at a filtering resolver that runs
+  locally on this machine (`127.0.0.1`). Lookups for blocked domains are refused;
+  everything else is passed through to your normal upstream provider. Your original
+  DNS settings are restored when Oath Light is properly uninstalled.
+- **Closes Microsoft Edge** when it is running without the extension — see section 3.
+  No other application is ever closed.
 - **Communicates between the app and the browser extension over your local machine
   only** (localhost / `127.0.0.1`).
-- **Optional AI monitor — only if you turn it on** from the *AI Monitor* screen:
+- **Optional AI monitor — only if you turn it on** from *Blocking Settings*:
   periodically captures an image of your primary display and analyzes it **on this
   device** using built-in AI models to detect explicit imagery. **This is off until
   you enable it.**
@@ -85,9 +104,15 @@ Oath Light is built to run **entirely on your device**. It does **not**:
 **All processing — including the AI image analysis — happens locally. Nothing about
 what you view or do leaves this computer through Oath Light.**
 
+Two optional features you must turn on yourself are the only exceptions, and both
+use *your* account, not ours: the **trusted-contact notifier** (sends a short
+message saying *that* an event happened — never what was browsed) and the **AI
+mentor** (uses an API key you supply, sent to the provider you choose). Both are off
+by default.
+
 ## 6. No warranty / limitation of liability
 
-Because this is beta software provided free of charge, it is offered **without
+Because this is alpha software provided free of charge, it is offered **without
 warranty of any kind**, express or implied. To the maximum extent permitted by law,
 the authors are not liable for any damages, data loss, missed or wrongful blocking,
 or other harm arising from its use. **You install and use it at your own risk.**
@@ -98,12 +123,14 @@ You can remove Oath Light at any time by opening the app, going to **Settings**,
 starting the uninstall request — then completing it after the cool-off period
 described in section 3. Windows' own *Settings → Apps → Uninstall* also works, but
 only once that same cool-off has elapsed; used earlier it refuses and leaves your
-device untouched.
+device untouched. A completed removal restores your DNS settings and removes the
+browser policies, the autostart entries and the app's own data.
 
 ## 8. Your agreement
 
 By continuing this installation you confirm that you have read and understood the
-above — including the tamper-resistance measures, the login autostart, the optional
+above — including the tamper-resistance measures, the login autostart, the system
+DNS change, the closing of Microsoft Edge when it is unprotected, the optional
 on-device screen monitoring, and the delayed-uninstall process — and that you consent
 to Oath Light operating on this device as described.
 
