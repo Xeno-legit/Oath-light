@@ -34,8 +34,8 @@
 // stranding clients. Keep these byte-identical to OTA_PUBKEY_*_HEX in
 // desktop-app/core/src/ota.rs.
 const OTA_PUBKEYS_HEX = [
-  '4522971bcbc8b48009e98ffa8dec7fa26d225ae9fd46c94449a88f61a65c85c9', // active
-  '9900bb2b4e3b884c6e2dd0cdfa1b1bdcd075a9077bb79680ad4e63b672fb6c3d', // spare
+  '839a62f44c288c4f339349b0630bf8c870efe5cd6701a3ea31056655d8a6de45', // active
+  'a49202aca120c91a330ca5a803a9ef8b39462d3efea9aa68b011cd1fc1d25a26', // spare
 ];
 
 // GitHub "latest release" asset base — the same repo slug the desktop uses.
@@ -343,7 +343,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onInstalle
   chrome.runtime.onStartup.addListener(armOtaAlarm);
   if (chrome.alarms && chrome.alarms.onAlarm) {
     chrome.alarms.onAlarm.addListener((alarm) => {
-      if (alarm && alarm.name === OTA_ALARM) runOtaCheck(otaDeps()).catch(() => {});
+      if (alarm && alarm.name === OTA_ALARM) runOtaCheck(otaDeps()).catch(() => { });
     });
   }
 }
