@@ -44,9 +44,22 @@ translations.
 
 ▶ Written blind these would look right and quietly do nothing. Do them in a session where the pages can be loaded and checked.
 
-* Instagram, TikTok, YouTube Shorts, Twitch, Kick.
-  * YouTube and Twitch have real labels — strip per item.
-  * Instagram and TikTok don't — hide the feed, keep search and DMs.
+* ~~Twitch, Kick.~~ **Done 2026-08-01** — both label their own streams and serve
+  those labels as ordinary JSON, so the existing per-item stripper covers them.
+  Twitch: `contentClassificationLabels[].id`, matching **only** `SexualThemes` —
+  a live 30-stream pull carried `MatureGame` ("Mature-rated game" — Rust,
+  Rainbow Six), `DebatedSocialIssuesAndPolitics` and `ProfanityVulgarity`, and
+  stripping those would gut ordinary gaming Twitch for no NSFW gain. Kick:
+  `is_mature`, its only signal, so gambling streams go with it. A labelled
+  channel opened directly can't be stripped (the flag isn't in an array), so it
+  hard-blocks the tab instead — off the same label, no DOM selectors. Covered by
+  `tests/test-graylist-inject.cjs` against live-captured fixtures.
+* Instagram, TikTok, YouTube Shorts.
+  * None has a per-item label — nothing to strip. The question is which
+    *surfaces* to block (Explore, Reels, /shorts), which is a product decision
+    first, not a capture problem.
+  * YouTube already runs forced Restricted Mode, which covers Shorts at the cost
+    of removing comments platform-wide. Decide that trade before adding more.
 * Telegram Web, WhatsApp link previews, Discord embed media.
   * Discord media should wait for image scoring below.
 

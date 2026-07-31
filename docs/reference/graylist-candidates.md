@@ -112,7 +112,7 @@ Ranked best → worst. A site is only "easy" if it sits near the top.
 
 | Site | Why cut/deferred |
 |---|---|
-| **twitch.tv / kick.com** | Live video, **WebSocket transport** (no JSON labels, no per-item DOM rating), and suggestive content is exactly what streamers don't flag. Mostly SFW → blacklist is huge collateral. No good hook. **Defer.** |
+| ~~**twitch.tv / kick.com**~~ | ~~Live video, **WebSocket transport** (no JSON labels, no per-item DOM rating)… No good hook. **Defer.**~~ **Overturned and implemented 2026-08-01.** The transport premise was wrong: only *chat* is WebSocket. Every feed the Twitch web app renders — directory, category, search, sidebar, channel — comes from `POST gql.twitch.tv/gql` as ordinary JSON, and `Stream.contentClassificationLabels[].id` is per-item ground truth (verified live: `MatureGame`, `DebatedSocialIssuesAndPolitics`, `ProfanityVulgarity` all present in one 30-stream pull). Kick is plainer still — REST with `is_mature` on browse, channel and search. Both are Tier A. The "streamers don't flag it" concern survives as the residual tail every graylist site has, and it does not argue for deferring a working ground-truth signal. |
 | **substack.com** | Overwhelmingly SFW (journalism/essays); tiny adult fraction behind an 18+ splash. Page-gate only if ever; low payoff. **Defer.** |
 | **commons.wikimedia.org** | Educational/anatomical content, categorized but complex; huge SFW/educational value; philosophically borderline (educational ≠ porn). **Defer / special-case only.** |
 | **archive.org** | Public library; inconsistent user metadata; millions of SFW items. Can't cleanly filter; very high collateral. **Defer.** |

@@ -84,9 +84,10 @@ per-item NSFW label** and removes flagged items before they render — ground
 truth rather than heuristics, and it survives redesigns because the underlying
 API fields stay stable.
 
-- **35 platforms**: 24 via JSON/API interception, 10 via server-rendered DOM
-  filtering with whole-page blocking of adult content pages, and Discord via
-  age-restricted channel and server blocking.
+- **42 platforms**: 26 via JSON/API interception, 10 via server-rendered DOM
+  filtering with whole-page blocking of adult content pages, 5 via forced
+  safe-mode enforcement, and Discord via age-restricted channel and server
+  blocking.
 - Labels used include Reddit `over_18`, X `possibly_sensitive`, Pixiv
   `xRestrict`, Mastodon `sensitive`, Mangadex `contentRating`, NexusMods
   `contains_adult_content`, Writing.com `crating`.
@@ -195,14 +196,17 @@ and features change; verify independently before relying on them.
 
 Filtered in place rather than blocked outright.
 
-**API / network interception (24):** reddit, x/twitter, tumblr, pixiv, mastodon
+**API / network interception (26):** reddit, x/twitter, tumblr, pixiv, mastodon
 (all instances), imgur, nexusmods, vimeo, dailymotion, odysee, patreon, gumroad,
 minds, itaku, peertube (all instances), lemmy (all instances), mangadex,
-artstation, flickr, sketchfab, 500px, gamebanana, wattpad, fanbox.
+artstation, flickr, sketchfab, 500px, gamebanana, wattpad, fanbox, twitch, kick.
 
 **Server-rendered DOM filtering (10):** newgrounds, archiveofourown,
 fanfiction.net, scribblehub, itch.io, steam, webtoons, tapas, ko-fi,
 writing.com.
+
+**Forced safe mode (5):** youtube (Restricted Mode), spotify, character.ai,
+poe.com, huggingface.co — the platform keeps working, its adult search does not.
 
 **Sub-unit blocking (1):** discord (age-restricted channels and servers).
 

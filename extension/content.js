@@ -213,10 +213,33 @@
     window.addEventListener('message', (e) => {
       if (e.source !== window) return;
       const d = e.data;
-      if (!d || d.__oathLight !== 'graylist-filter' || typeof d.count !== 'number') return;
-      try {
-        chrome.runtime.sendMessage({ action: 'graylistFiltered', count: d.count, site: d.site });
-      } catch (_) {}
+      if (!d || !d.__oathLight) return;
+
+      if (d.__oathLight === 'graylist-filter' && typeof d.count === 'number') {
+        try {
+          chrome.runtime.sendMessage({ action: 'graylistFiltered', count: d.count, site: d.site });
+        } catch (_) {}
+        return;
+      }
+
+      // Channel-page hard block (Twitch/Kick). The MAIN-world interceptor found
+      // the site's OWN adult label on the channel THIS page is, in JSON it
+      // already parses — a case item-stripping can't handle, because the flagged
+      // object isn't in an array (see graylist-inject.js → checkPageBlock).
+      // Same destination as checkPageLabel's DOM-driven block; different, and
+      // more durable, evidence.
+      if (d.__oathLight === 'graylist-page-block' && !pageLabelBlocked) {
+        pageLabelBlocked = true;
+        try { document.documentElement.style.display = 'none'; } catch (_) {}
+        try {
+          chrome.runtime.sendMessage({
+            action: 'notifyBlock',
+            url: window.location.href,
+            reason: 'graylist_page_label',
+            match: d.match || (d.site + ' adult-labelled channel')
+          });
+        } catch (_) {}
+      }
     });
   }
 

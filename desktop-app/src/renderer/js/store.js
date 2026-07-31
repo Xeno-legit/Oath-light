@@ -111,6 +111,8 @@
         { id: 'gamebanana', url: 'gamebanana.com', kind: 'api', on: true, desc: 'NSFW/sexual mods stripped from browse & search feeds' },
         { id: 'wattpad', url: 'wattpad.com', kind: 'api', on: true, desc: 'Mature-rated stories stripped from search, browse & feeds' },
         { id: 'fanbox', url: 'fanbox.cc', kind: 'api', on: true, desc: 'R-18 creators & posts stripped from feeds (Pixiv Fanbox)' },
+        { id: 'twitch', url: 'twitch.tv', kind: 'api', on: true, desc: 'Sexually-labelled streams stripped from directories & search; labelled channels blocked' },
+        { id: 'kick', url: 'kick.com', kind: 'api', on: true, desc: 'Mature-flagged streams stripped from browse & search; mature channels blocked' },
         { id: 'newgrounds', url: 'newgrounds.com', kind: 'dom', on: true, desc: 'Adult (A-rated) work removed; adult pages blocked' },
         { id: 'ao3', url: 'archiveofourown.org', kind: 'dom', on: true, desc: 'Explicit & Mature works removed' },
         { id: 'fanfiction', url: 'fanfiction.net', kind: 'dom', on: true, desc: 'M/MA-rated stories removed' },

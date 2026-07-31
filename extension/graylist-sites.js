@@ -37,6 +37,12 @@ const GRAYLIST_SITES = [
   { url: 'gamebanana.com',      kind: 'api', desc: 'NSFW/sexual mods stripped from browse & search feeds' },
   { url: 'wattpad.com',         kind: 'api', desc: 'Mature-rated stories stripped from search, browse & feeds' },
   { url: 'fanbox.cc',           kind: 'api', desc: 'R-18 creators & posts stripped from feeds (Pixiv Fanbox)' },
+  // Live video. Both platforms label their own streams and serve those labels as
+  // ordinary JSON — Twitch over gql.twitch.tv, Kick over its REST API — so the
+  // same per-item stripper works here. A labelled channel opened directly can't be
+  // stripped (the flag isn't in an array), so it blocks the tab instead.
+  { url: 'twitch.tv',           kind: 'api', desc: 'Sexually-labelled streams stripped from directories & search; labelled channels blocked' },
+  { url: 'kick.com',            kind: 'api', desc: 'Mature-flagged streams stripped from browse & search; mature channels blocked' },
   // ── DOM-label filtering (server-rendered sites) ───────────────────────────
   { url: 'newgrounds.com',      kind: 'dom', desc: 'Adult (A-rated) work removed; adult pages blocked' },
   { url: 'archiveofourown.org', kind: 'dom', desc: 'Explicit & Mature works removed' },
