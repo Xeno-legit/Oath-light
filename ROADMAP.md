@@ -28,14 +28,16 @@ translations.
   completes inside 20s, and Edge stops dying. Then check the failure path — let
   a window lapse and confirm the kill resumes and a second window costs a second
   trip to the app. **Keep the 20s as is.**
-* **Verify the uninstall/upgrade gate on a real install** — never run end to
-  end. Settings → Apps must refuse, an in-app removal must complete, and an
-  upgrade must preserve policy/DNS/autostart. Newest and least-proven code in
-  the release ([docs/HARDENING.md](docs/HARDENING.md)).
+* ~~Verify the uninstall/upgrade gate on a real install.~~ **Done 2026-07-31** —
+  exercised end to end on a real install at a temporary 10s timer, then all
+  three friction constants restored to 24h in one commit.
 * Test the AI overlay's "this was wrong" button on a live detection. (overlay
   only — it reports a *screen-monitor* false positive and re-derives the dwell.
   The extension's blocked page has no equivalent and isn't getting one.)
 * Test grayscale hours on a real machine.
+* See the desktop reminder card actually render (5.0). The window math is
+  unit-tested and it compiles, but no one has watched one appear — set
+  vulnerable hours to cover now and wait a minute.
 * Pre-Alpha launch test — everything, full scale.
 
 ## Needs the sites actually open

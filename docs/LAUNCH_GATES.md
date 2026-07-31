@@ -41,17 +41,22 @@ Phase 4 has exactly two lines outstanding; every other item on it is Done.
 | Item | Who | Note |
 | :-- | :-- | :-- |
 | ~~Commit the working tree~~ | owner | **done** — `b15e816` |
-| Verify the uninstall/upgrade gate on a real install | anyone, at a machine | never tested end to end — see [HARDENING.md](HARDENING.md) |
+| ~~Verify the uninstall/upgrade gate on a real install~~ | — | **done 2026-07-31** — the newest and least-proven code in the release, now exercised |
 | Verify the Edge browser lock (kill + 20s grace window) | anyone, at a machine | *the* enforcement path on Edge, not a stopgap — see below |
-| Test the AI overlay's "this was wrong" button on a live detection | anyone, at a machine | overlay only; the extension's blocked page has no such button |
 | Test grayscale hours on a real machine | anyone, at a machine | |
 | Smoke-test Firefox force-install against a real admin Firefox | anyone, at a machine | |
+| See the desktop reminder card render | anyone, at a machine | new in 0.5.0; unit-tested and compiling, never watched |
+| Test the AI overlay's "this was wrong" button on a live detection | anyone, at a machine | overlay only; the extension's blocked page has no such button |
 | Pre-Alpha launch test, full scale | anyone, at a machine | |
 | Swap OTA dev keys for production keys | **owner only** | needs the private key — [OTA_KEYS.md](OTA_KEYS.md) |
 | Arabic draft read by a fluent speaker → `reviewed: true` | **a fluent speaker** | cannot be faked or machine-checked |
 
 Six of those are the *same activity* — install the current build on a machine
 and exercise it. Budget one focused session, not six.
+
+The uninstall gate coming off this list matters more than one row suggests: it
+was the only item here that had never run at all, and the one most likely to
+have been quietly broken.
 
 The last two are not work items at all. No amount of engineering time clears
 them, and one of them gates real user-facing behaviour:
