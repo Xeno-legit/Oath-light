@@ -148,12 +148,25 @@
     // The browser auto-installed the extension but is holding it switched off
     // until the user approves it once. Opens that browser's extensions page.
     'status.action_turn_on': { companion: 'Turn it on', serious: 'Turn it on' },
-    // Opens the ~20s restore window for a browser the lock is holding closed.
+    // Opens the short restore window for a browser the lock is holding closed.
     // Says "open" rather than "unlock": what it hands over is a short supervised
     // window to finish installing, not the browser back.
     'status.action_unlock': {
       companion: 'Open {browser} to install',
       serious: 'Open {browser} to install' },
+    // Reinstalls the extension in every browser. A state, not a promise: it says
+    // what the button does, never that the result will be a newer version — the
+    // store decides which build exists, and claiming otherwise is how a button
+    // ends up looking broken when a release is still in review.
+    'status.action_refresh_all': { companion: 'Reinstall extension', serious: 'Reinstall extension' },
+    'status.refresh_working': { companion: 'Reinstalling…', serious: 'Reinstalling…' },
+    'status.refresh_none': {
+      companion: 'No browsers found to reinstall into.',
+      serious: 'No browsers found to reinstall into.' },
+    // Shown on a row whose installed build is behind the one this app ships
+    // with. Deliberately not "update available": whether a newer build exists
+    // for that browser is the store's call, not ours.
+    'status.ext_outdated': { companion: 'older version', serious: 'older version' },
 
     /* ---------------------------------------------------------------
      * friction.* — pending-change / cool-off copy

@@ -51,7 +51,7 @@
 //!
 //! What authorizes an upgrade instead is an **active update window**
 //! (`update.json`) — which the user opens from inside the app, behind the master
-//! password, bounded to fifteen minutes, re-validated on every read, recorded in
+//! password, bounded to one minute, re-validated on every read, recorded in
 //! the event log, and backed by a recovery task. That is not an extra hurdle
 //! invented here: an upgrade *already* requires one, because both binaries are
 //! running and locked until the watchdog stands down, and the update window is
@@ -136,8 +136,8 @@ pub enum Decision {
     /// The uninstaller may delete the files — it has to, or nothing can ever be
     /// upgraded — but **nothing else comes off**. No teardown, no policy sweep,
     /// no autostart removal, no friction reset, no app data. Everything the new
-    /// install is about to re-adopt stays exactly where it is, and the fifteen
-    /// minutes between the two halves are covered by the recovery task
+    /// install is about to re-adopt stays exactly where it is, and the one
+    /// minute between the two halves is covered by the recovery task
     /// `begin_update` armed.
     ///
     /// ## Why an update window, and not the `/UPDATE` flag
@@ -145,8 +145,8 @@ pub enum Decision {
     /// A flag is a knowledge barrier, and `uninstall.exe /UPDATE` would be a
     /// one-word bypass of the entire cool-off. An update window is a capability:
     /// only the app writes one, only behind the master password, only for
-    /// fifteen minutes, and `update::active` re-checks that cap on read — so
-    /// hand-editing `update.json` buys the same fifteen minutes the button would
+    /// one minute, and `update::active` re-checks that cap on read — so
+    /// hand-editing `update.json` buys the same one minute the button would
     /// have given away anyway.
     ///
     /// It is also not an extra hurdle. An upgrade cannot physically succeed

@@ -1,9 +1,14 @@
 # Oath Light
-Alpha verification session
+Release verification session
 
 ▶ The one sitting that clears Phase 4. Everything here needs **a real machine** —
 none of it can be reasoned about, which is why it is still open.
 Written 2026-08-01, Phase 4.
+
+**This is now the 1.0.0 checklist.** The desktop app was versioned 1.0.0 on
+2026-08-01 and stopped badging itself ALPHA; not one line below was cleared by
+that. The filename stays `ALPHA_VERIFICATION.md` only so existing links keep
+working.
 
 Budget half a day. Six of these are the same activity — install the current build
 and exercise it — so do them in one pass, in this order. This is a checklist to
@@ -96,13 +101,22 @@ the exact wording — it names which of the three things went wrong, and a vague
 ## Station 3 — Edge browser lock
 
 ▶ **The highest-value item in this session.** The largest deliberate design
-decision in the app, and it has never run on real hardware. The 20 seconds stays
-as it is; what needs proving is the loop around it.
+decision in the app, and it has never run on real hardware. The window is
+**90 seconds** (raised from 20 on 2026-08-01 — 20s expired before Edge had
+finished fetching the ~3 MB CRX, so the kill landed mid-download and the window
+bought nothing); what needs proving is the loop around it.
 
 - [ ] **Kill on sight.** Open Edge without the extension → Edge dies.
 - [ ] **The way back exists.** The app offers a grace window and opens Edge
       straight at the page that fixes it.
-- [ ] **The way back works.** Complete the install inside 20s → Edge stops dying.
+- [ ] **The prompt appears.** Edge shows "a third party wants to add this
+      extension". If it never does, check the profile's `Preferences` for the
+      extension id under `extensions.external_uninstalls` — that record makes
+      Chromium skip the install entirely, and no window length can help. The app
+      clears it before each restore and on the monitor's deep tick; this step is
+      verifying that repair really runs.
+- [ ] **The way back works.** Complete the install inside the window → Edge stops
+      dying.
 - [ ] **The window is real friction.** Request a window and *deliberately let it
       lapse*. The kill must resume, and a second window must cost a second
       deliberate trip to the app.

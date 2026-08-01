@@ -184,6 +184,13 @@ pub struct BrowserStatus {
     /// state that buys more time from `browser_lock`.
     #[serde(default)]
     pub pending_approval: bool,
+    /// This browser is carrying a build older than the one this app ships with
+    /// (`browsers::EXPECTED_EXTENSION_VERSION`). Reported rather than hidden:
+    /// "why is it still on the old version" is a question the user was left to
+    /// answer by squinting at a version number, and the answer is usually either
+    /// "the browser hasn't restarted yet" or "the store hasn't published it".
+    #[serde(default)]
+    pub extension_outdated: bool,
 }
 
 /// A browser not in the built-in table, learned from a native-host connection.
@@ -1380,6 +1387,10 @@ fn build_status(
 
                     BrowserStatus {
                         pending_approval: list.iter().any(|p| p.pending_approval),
+                        extension_outdated: browsers::version_is_older(
+                            &version,
+                            browsers::EXPECTED_EXTENSION_VERSION,
+                        ),
                         locked_out: false,   // filled in by the monitor (needs settings)
                         lock_grace_secs: 0,  // …and the live BrowserLockState
                         key: def.key.to_string(),
@@ -1421,6 +1432,10 @@ fn build_status(
                         // branch is Firefox/unknown, which `browser_lock` never
                         // touches anyway.
                         pending_approval: false,
+                        extension_outdated: browsers::version_is_older(
+                            &version,
+                            browsers::EXPECTED_EXTENSION_VERSION,
+                        ),
                         locked_out: false,
                         lock_grace_secs: 0,
                         key: def.key.to_string(),
@@ -1462,6 +1477,10 @@ fn build_status(
             // connected over the native host, so it is protected by definition
             // and never a browser-lock candidate.
             pending_approval: false,
+            extension_outdated: browsers::version_is_older(
+                &version,
+                browsers::EXPECTED_EXTENSION_VERSION,
+            ),
             locked_out: false,
             lock_grace_secs: 0,
             key,
@@ -1709,6 +1728,15 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
         // but gated on the guard rather than the DNS filter. Cleared when the
         // guard is off and by `RE_ENFORCE_REQUESTED`.
         let mut lockdown_enforced: HashSet<String> = HashSet::new();
+        // Browsers whose external-uninstall record has been checked this session
+        // (see `profiles::clear_external_uninstall_record`). The read parses a
+        // multi-hundred-KB prefs file per profile, and the record only ever
+        // appears when the user removes the extension by hand — which puts the
+        // browser straight into the lock, whose restore path clears it again. So
+        // once per session, plus whenever the memo is flushed, is the right
+        // cadence; every 30s would be paying that parse forever for a file that
+        // almost never changes.
+        let mut refusals_checked: HashSet<String> = HashSet::new();
 
         loop {
             let now = now_unix_ms();
@@ -1849,7 +1877,10 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
 
             // An elevated setup pass just wrote policy — drop the memo so every
             // browser re-reads its (now written) state this tick.
-            if RE_ENFORCE_REQUESTED.swap(false, Ordering::SeqCst) {
+            // Consumed here, so anything below that also wants to react to it
+            // must read this local — the flag is already false by then.
+            let re_enforce_requested = RE_ENFORCE_REQUESTED.swap(false, Ordering::SeqCst);
+            if re_enforce_requested {
                 enforced.clear();
             }
 
@@ -1872,6 +1903,51 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
                     browsers::browser_by_key(key)
                         .is_some_and(|def| browsers::enforcement_still_present(def, *outcome))
                 });
+                if re_enforce_requested {
+                    refusals_checked.clear();
+                }
+
+                // Repair the one thing a written policy cannot survive: the
+                // browser deciding it will never install our extension again.
+                //
+                // Removing an externally-registered extension by hand makes
+                // Chromium file the id under `extensions.external_uninstalls`,
+                // after which its external provider skips that id — no download,
+                // no install, and no "a third party wants to add this extension"
+                // prompt, with our registry entry still sitting there looking
+                // perfectly healthy. On Edge, where the external registry is the
+                // only install path there is, that is the protection silently
+                // gone. Nothing else in this loop can see it, because everything
+                // else checks what *we* wrote rather than what the browser
+                // decided.
+                //
+                // Only for browsers that depend on that path, only while the
+                // extension is genuinely absent, and only while the browser is
+                // closed — Chromium keeps prefs in memory and rewrites the file
+                // on exit, so an edit under a live browser is thrown away.
+                for st in statuses.iter() {
+                    let Some(def) = browsers::browser_by_key(&st.key) else { continue };
+                    if !browsers::requires_manual_install(def)
+                        || st.installed
+                        || st.running
+                        || !refusals_checked.insert(st.key.clone())
+                    {
+                        continue;
+                    }
+                    let cleared = browsers::clear_refusals(def);
+                    if cleared > 0 {
+                        log::warn!(
+                            "[{}] cleared the browser's external-uninstall block in {cleared} profile(s) \
+                             — it can install the extension again on its next start",
+                            st.key
+                        );
+                        log_event(
+                            &app,
+                            "external_install_unblocked",
+                            serde_json::json!({ "browser": st.key, "profiles": cleared }),
+                        );
+                    }
+                }
             }
 
             // Proactive force-install: lock every supported browser present on
@@ -2573,6 +2649,29 @@ fn request_browser_restore(
     }
     if !settings.get().lock_unverified_browsers {
         return Err("The browser lock is off — nothing is being blocked".to_string());
+    }
+
+    // Clear the browser's own "never install this again" record FIRST, while it
+    // is still dead. Once an externally-registered extension has been removed by
+    // hand, Chromium files the id under `extensions.external_uninstalls` and the
+    // external provider skips it forever — so the browser launches, does nothing
+    // at all, never prompts, and the window is burned on a download that was
+    // never going to start. That, not the length of the window, is why the "a
+    // third party wants to add this extension" prompt stopped appearing.
+    //
+    // It has to happen before the launch below: Chromium holds prefs in memory
+    // and rewrites the file on exit, so an edit under a live browser is
+    // discarded. Skipped (with a log line) if it is somehow already running.
+    if browsers::detect_running_from(&browsers::running_process_names()).contains(&def.key) {
+        log::warn!(
+            "browser_lock: [{browser_key}] is running — skipping the external-uninstall repair; \
+             it would be overwritten when the browser exits"
+        );
+    } else {
+        let cleared = browsers::clear_refusals(def);
+        if cleared > 0 {
+            log::warn!("browser_lock: [{browser_key}] cleared external-uninstall block in {cleared} profile(s)");
+        }
     }
 
     // Make sure the thing the window exists to complete is actually registered.
@@ -3353,10 +3452,11 @@ fn verify_master_password(
 /// Set or change the master password. First-time set needs no `current`
 /// (setting a password from nothing is a strengthening, never gated);
 /// changing an existing one requires `current` to verify — see
-/// `auth::AuthState::set_password`. Also withdraws any pending
-/// `"password.remove"` weakening: re-setting the password is itself a
-/// strengthening, the same "turning it back on cancels the pending turn-off"
-/// rule every other weakening in this codebase follows.
+/// `auth::AuthState::set_password`. Also withdraws any pending removal of
+/// **either** kind: re-setting the password is itself a strengthening, the same
+/// "turning it back on cancels the pending turn-off" rule every other weakening
+/// in this codebase follows. Cancelling only one of the two ids would leave the
+/// other quietly running out behind a freshly-set password.
 #[tauri::command]
 fn set_master_password(
     auth_state: tauri::State<'_, Arc<auth::AuthState>>,
@@ -3365,7 +3465,8 @@ fn set_master_password(
     new: String,
 ) -> Result<(), String> {
     auth_state.set_password(current.as_deref(), &new)?;
-    friction.cancel("password.remove");
+    friction.cancel(auth::PASSWORD_REMOVE);
+    friction.cancel(auth::PASSWORD_REMOVE_FORGOTTEN);
     Ok(())
 }
 
@@ -3383,37 +3484,37 @@ fn request_password_removal(
     current: String,
 ) -> Result<friction::PendingView, String> {
     auth_state.verify_only(&current)?;
-    let view = friction.request("password.remove", "Remove the master password", serde_json::json!({}));
+    let view =
+        friction.request(auth::PASSWORD_REMOVE, "Remove the master password", serde_json::json!({}));
     log::warn!(
         "master-password removal requested — {}s cool-off started (password still required until it elapses)",
         view.delay_secs
     );
-    log_event(&app, "friction_requested", serde_json::json!({ "action": "password.remove" }));
+    log_event(&app, "friction_requested", serde_json::json!({ "action": auth::PASSWORD_REMOVE }));
     notify_contact(&app, "password_removal_requested");
     Ok(view)
 }
 
-/// The "forgot it" recovery path: no current password needed, but the
-/// request goes through the exact same `"password.remove"` friction delay as
-/// `request_password_removal` above — forgetting the password can't shortcut
-/// the wait, it only skips proving you know a password you've said you don't
-/// remember. This is the documented recovery story for a lockout: wait out
-/// the delay, don't reach for a backdoor. The pending removal shows up in
-/// Settings -> Pending changes the entire time, so a stronger-willed future
-/// self (or a partner who remembers the password) can still cancel it.
+/// The "forgot it" recovery path: no current password needed, and no way to
+/// refuse it — a genuine lockout has to have a way out, and in this app that way
+/// is always *waiting*, never a backdoor. The pending removal shows up in
+/// Settings -> Pending changes the entire time, so a stronger-willed future self
+/// (or a partner who remembers the password) can still cancel it.
 ///
-/// TODO(near-Alpha): this reuses the standard weakening delay via the shared
-/// `"password.remove"` action id — `friction::delay_for` doesn't yet have a
-/// distinct "uninstall-length" delay class for a password-less path like this
-/// one. Before Alpha, give this its own longer (24h-class) delay so a brief
-/// unattended moment can't be used to start this clock and walk away.
+/// **It costs more time than the proved route**, under its own action id
+/// (`auth::PASSWORD_REMOVE_FORGOTTEN`, doubled in `friction::delay_for`). It
+/// used to share `"password.remove"` and therefore its ordinary 24h cool-off,
+/// which made the one request that proves nothing at all exactly as cheap as
+/// the one that proves the password — startable by anyone at an unlocked
+/// machine, in a moment, and then simply walked away from. Price is the only
+/// lever available here, so it is the one that is used.
 #[tauri::command]
 fn request_password_removal_forgotten(
     app: AppHandle,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
 ) -> friction::PendingView {
     let view = friction.request(
-        "password.remove",
+        auth::PASSWORD_REMOVE_FORGOTTEN,
         "Remove the master password (forgotten)",
         serde_json::json!({}),
     );
@@ -3421,7 +3522,11 @@ fn request_password_removal_forgotten(
         "master-password removal requested via the forgotten-password path — {}s cool-off started",
         view.delay_secs
     );
-    log_event(&app, "friction_requested", serde_json::json!({ "action": "password.remove", "forgotten": true }));
+    log_event(
+        &app,
+        "friction_requested",
+        serde_json::json!({ "action": auth::PASSWORD_REMOVE_FORGOTTEN, "forgotten": true }),
+    );
     notify_contact(&app, "password_removal_requested");
     view
 }
@@ -3478,6 +3583,124 @@ fn enforce_extension(browser_key: Option<String>) -> Vec<(String, String)> {
             (def.key.to_string(), status)
         })
         .collect()
+}
+
+/// One browser's line in the Refresh result.
+#[derive(Debug, Clone, Serialize)]
+pub struct RefreshReport {
+    pub key: String,
+    pub name: String,
+    /// The same vocabulary `enforce_str` produces, so the UI can reuse the
+    /// enforcement copy it already has.
+    pub status: String,
+    /// One plain sentence about what actually happened for this browser, and —
+    /// where the answer is "nothing yet" — what it is waiting on.
+    pub detail: String,
+    /// True when finishing needs the browser closed and reopened. Firefox reads
+    /// `ExtensionSettings` only at startup, so a refresh there is genuinely
+    /// pending until it restarts; Chromium reloads policy live.
+    pub needs_restart: bool,
+}
+
+/// Re-install the extension in every browser (or one), from scratch.
+///
+/// This is the "Refresh" button, and it exists because three different things
+/// can leave a browser stuck on an old build — or on no build — with every
+/// registry key we wrote looking perfectly correct:
+///
+///   1. **Firefox never re-installs.** Its policy engine compares the installed
+///      add-on's `sourceURI` against the policy's `install_url` and returns
+///      early when they match, so a bare `latest.xpi` in the policy pins the
+///      add-on to whatever version it first fetched. `refresh_policy` writes a
+///      URL with a fresh nonce, which is what makes Firefox actually go back to
+///      AMO. Takes effect on the next Firefox start.
+///   2. **Chromium refuses to install at all** once the id is in the profile's
+///      `extensions.external_uninstalls` — the Edge case, where that record is
+///      why the "a third party wants to add this extension" prompt stopped
+///      appearing entirely. Cleared here, per profile, while the browser is
+///      closed.
+///   3. **The policy was never written, or was deleted.** Re-asserted for every
+///      browser on the machine.
+///
+/// What it deliberately does NOT do is delete a healthy Chromium force-install
+/// and let the browser re-download it. That would uninstall the extension —
+/// wiping its `chrome.storage.local` (stats, streak, local lists) — to obtain
+/// the exact same build, because a Chromium force-install resolves to whatever
+/// version the Web Store is currently serving. There is no version the store
+/// won't give us that a reinstall would.
+#[tauri::command]
+fn refresh_extensions(app: AppHandle, browser_key: Option<String>) -> Vec<RefreshReport> {
+    let targets: Vec<&BrowserDef> = match &browser_key {
+        Some(k) => browsers::browser_by_key(k).into_iter().collect(),
+        None => BROWSERS.iter().collect(),
+    };
+    let running = browsers::detect_running_from(&browsers::running_process_names());
+
+    let mut out = Vec::new();
+    for def in targets {
+        // Browsers that aren't on this machine have nothing to refresh; saying
+        // so for all seven would bury the two lines that matter.
+        let present = browsers::is_installed(def) || running.contains(&def.key);
+        if !present {
+            continue;
+        }
+        let is_running = running.contains(&def.key);
+
+        // Clearing the refusal record edits the profile's `Preferences`, which a
+        // live browser holds in memory and rewrites on exit — so under a running
+        // browser the edit is simply discarded. Say that plainly instead of
+        // reporting a repair that didn't stick.
+        let cleared = if is_running { 0 } else { browsers::clear_refusals(def) };
+        let outcome = browsers::refresh_policy(def);
+        let _ = browsers::enforce_incognito_guest_policy(def);
+
+        let needs_restart = def.engine == Engine::Gecko && is_running;
+        let mut detail = match def.engine {
+            // Firefox reads `ExtensionSettings` only at startup, so the work is
+            // real but genuinely pending until it restarts. Say which.
+            Engine::Gecko if is_running => {
+                "Re-pointed at the current Add-ons build. Restart Firefox to finish."
+            }
+            Engine::Gecko => "Re-pointed at the current Add-ons build. It installs on the next start.",
+            Engine::Chromium => match outcome {
+                EnforceOutcome::AutoInstallPendingApproval => {
+                    "Registered to install again — approve it when the browser asks."
+                }
+                EnforceOutcome::StoreUnavailable => "No store will install it here — add it by hand.",
+                EnforceOutcome::Failed => "Couldn't write the policy — grant admin.",
+                _ => "Force-install re-applied.",
+            },
+        }
+        .to_string();
+        if cleared > 0 {
+            detail = format!("Cleared a block that was stopping the install. {detail}");
+        } else if is_running && browsers::requires_manual_install(def) {
+            detail = format!("{detail} Close it first if the prompt still doesn't appear.");
+        }
+
+        log::warn!(
+            "[{}] refresh requested — outcome {}, refusal records cleared: {}",
+            def.key,
+            enforce_str(outcome),
+            cleared
+        );
+        out.push(RefreshReport {
+            key: def.key.to_string(),
+            name: def.name.to_string(),
+            status: enforce_str(outcome).to_string(),
+            detail,
+            needs_restart,
+        });
+    }
+
+    // The 30s profile cache would otherwise show the pre-refresh row for up to
+    // half a minute, which reads as the button having done nothing. Same for the
+    // enforcement memo: without dropping it the monitor would keep reporting
+    // whatever it last wrote.
+    profiles::invalidate_cache();
+    RE_ENFORCE_REQUESTED.store(true, Ordering::SeqCst);
+    log_event(&app, "extensions_refreshed", serde_json::json!({ "browsers": out.len() }));
+    out
 }
 
 /// Open a browser at its own extensions page.
@@ -4603,7 +4826,7 @@ fn kill_native_hosts() {}
 ///
 /// Deliberately NOT friction-gated. A cool-off on updating would mean shipping
 /// a security fix that users have to wait a day to apply, and the bound that
-/// makes this safe is the window's own fifteen-minute expiry, not a delay in
+/// makes this safe is the window's own one-minute expiry, not a delay in
 /// front of it.
 ///
 /// Order matters, and mirrors `perform_uninstall`: arm the recovery FIRST,
@@ -4786,6 +5009,7 @@ pub fn run() {
             open_external,
             set_app_streak,
             enforce_extension,
+            refresh_extensions,
             open_extensions_page,
             set_browser_lock_enabled,
             request_browser_restore,
@@ -5198,16 +5422,20 @@ pub fn run() {
                                 let msg = serde_json::json!({ "type": "set_custom_domains", "domains": merged });
                                 let _ = broadcast_to_extensions(&state2, &msg);
                                 log::warn!("friction: custom block on {domain} removed (weakening applied)");
-                            } else if action_id == "password.remove" {
+                            } else if action_id == auth::PASSWORD_REMOVE
+                                || action_id == auth::PASSWORD_REMOVE_FORGOTTEN
+                            {
                                 // Applies both `request_password_removal` (current
                                 // password verified up front) and the "forgot it"
-                                // path (`request_password_removal_forgotten`) —
-                                // both register under the same action id, see
-                                // that command's doc comment for why. Deletes
-                                // auth.json and drops every live session token;
-                                // idempotent if the file is already gone.
+                                // path (`request_password_removal_forgotten`).
+                                // They are separate action ids so the unproven
+                                // path can carry a longer cool-off, but they end
+                                // in the same place: delete auth.json and drop
+                                // every live session token. Idempotent if the
+                                // file is already gone, which is what makes it
+                                // safe for both to fire.
                                 auth2.remove_password_file();
-                                log::warn!("friction: master password removed (weakening applied)");
+                                log::warn!("friction: master password removed via '{action_id}' (weakening applied)");
                             } else if action_id.starts_with("process_block.remove:") {
                                 // 1.3: actually drop the process from the
                                 // blocked list now that the delay elapsed.

@@ -1,7 +1,7 @@
-# Oath Light — Alpha
+# Oath Light
 ### End-User Notice, Disclosure & Privacy Policy
 
-**Version 0.5.0 (Alpha) — 2026-07-31**
+**Version 1.0.0 — 2026-08-01**
 
 Please read this before installing. Installing Oath Light means you understand and
 agree to what it does, how it protects itself from being disabled, and what it can
@@ -9,11 +9,19 @@ access on this device.
 
 ---
 
-## 1. This is an alpha
+## 1. This is an early release, and it has not been security-tested
 
-Oath Light is early, in-development software. It may contain bugs, block the wrong
-things, miss things it should block, or stop working without warning. **Do not rely
-on it as your only safeguard.** It is provided "as is", with no warranty of any kind.
+Version 1.0.0 is the first public build. **No independent security review or
+red-team test has been done on it** — everything this notice says about how well
+Oath Light resists being switched off is the authors' assessment of their own
+code, not an outside verdict. The app shows an *Early release* badge for this
+reason.
+
+No content filter catches everything either. Oath Light may block the wrong thing,
+miss something it should have blocked, or stop working — and someone determined to
+get around it on their own machine eventually can. **Do not rely on it as your only
+safeguard.** It is provided "as is", with no warranty of any kind. It works best
+alongside people who know what you are trying to do.
 
 ## 2. What Oath Light is
 
@@ -55,13 +63,13 @@ a momentary urge cannot instantly undo your commitment. Once installed:
   does not allow this extension to be force-installed into Edge on an ordinary
   consumer PC, so Oath Light closes that gap by **closing Edge** whenever it is
   running without the extension active. To fix it, open Oath Light and ask for a
-  restore window: Edge is left alone for **20 seconds**, opened straight at the
+  restore window: Edge is left alone for **90 seconds**, opened straight at the
   page that installs the extension. The window does not extend, but you can ask
   for another one as many times as you need. Other browsers are never closed —
   they keep the extension installed by policy instead.
 - **Updating asks the same of you, briefly.** A new version can only replace an
   old one while an *update window* is open, which you start from **Settings**
-  inside the app. It lasts fifteen minutes, then protection comes back on its
+  inside the app. It lasts one minute, then protection comes back on its
   own whether or not the update happened.
 
 These measures are **friction, not unbreakable security**: an administrator on this
@@ -112,7 +120,7 @@ by default.
 
 ## 6. No warranty / limitation of liability
 
-Because this is alpha software provided free of charge, it is offered **without
+Oath Light is free software provided free of charge, and is offered **without
 warranty of any kind**, express or implied. To the maximum extent permitted by law,
 the authors are not liable for any damages, data loss, missed or wrongful blocking,
 or other harm arising from its use. **You install and use it at your own risk.**

@@ -29,7 +29,7 @@
 //!
 //! Three properties keep that from being a hole in the product:
 //!
-//!   1. **It is short.** `WINDOW_SECS` is fifteen minutes. Long enough for an
+//!   1. **It is short.** `WINDOW_SECS` is one minute. Long enough for an
 //!      installer and a UAC prompt; far too short to be a way to get an
 //!      afternoon off.
 //!   2. **It closes itself.** The window is defined by an expiry, not by a
@@ -42,7 +42,7 @@
 //!      one-shot Windows task at the expiry time that relaunches the app. If
 //!      the update succeeds, the new install cancels that task on first run;
 //!      if it doesn't, the task fires and everything is back. The worst case
-//!      is fifteen unprotected minutes, once, on purpose.
+//!      is one unprotected minute, once, on purpose.
 //!
 //! Only the *resurrection* guards stand down. Nothing here touches the
 //! blocklists, the browser policies, the extension enforcement or the uninstall
@@ -56,9 +56,9 @@
 //! which is the part that matters. Hand-editing `expires_at` to next year does
 //! nothing — a window is only honored while
 //! `opened_at <= now < expires_at <= opened_at + WINDOW_SECS`, so the longest
-//! forgery anyone gets from one edit is the same fifteen minutes the button
+//! forgery anyone gets from one edit is the same one minute the button
 //! would have given them. Holding it open indefinitely means rewriting the file
-//! every quarter hour, forever, which is a strictly worse deal than the
+//! every minute, forever, which is a strictly worse deal than the
 //! 24-hour uninstall path that already exists and is meant to be used.
 
 use serde::{Deserialize, Serialize};
@@ -68,7 +68,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// How long an update window lasts. See the module doc — this is the number
 /// that bounds the whole feature's blast radius, so it is deliberately one
 /// constant with one meaning, checked on write AND on every read.
-pub const WINDOW_SECS: u64 = 15 * 60;
+pub const WINDOW_SECS: u64 = 1 * 60;
 
 /// Name of the one-shot recovery task that relaunches the app when a window
 /// expires without the update having happened. Registered by `begin_update`,

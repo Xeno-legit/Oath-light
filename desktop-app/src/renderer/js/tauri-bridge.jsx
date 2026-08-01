@@ -23,6 +23,19 @@
     // Re-apply the force-install policy. Live for Chromium (user-scope by
     // default); still dormant for Firefox while it's on hold.
     enforce(browserKey) { return invoke('enforce_extension', { browserKey: browserKey || null }); },
+    // Install the extension again from scratch, in every browser (or one).
+    // Re-asserts the policy, clears the record Chromium keeps that makes it
+    // refuse to auto-install an extension the user once removed (the reason
+    // Edge stopped prompting), and re-points Firefox at the current Add-ons
+    // build — Firefox will not re-install an add-on whose source URL it already
+    // has, so a plain re-apply there is a no-op.
+    //
+    // Resolves to [{ key, name, status, detail, needs_restart }], one line per
+    // browser actually present on the machine.
+    refreshExtensions(browserKey) {
+      return invoke('refresh_extensions', { browserKey: browserKey || null })
+        .catch((e) => { console.warn('[OathLight] refreshExtensions failed:', e); return []; });
+    },
     // Ask for admin once (UAC) and lock the extension. Writing the policy needs
     // elevation; this relaunches elevated, writes it, and sets up silent
     // elevated re-assertion at future logins.

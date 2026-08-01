@@ -112,8 +112,97 @@ pub const EDGE_UPDATE_URL: &str = "https://edge.microsoft.com/extensionwebstoreb
 /// the current signed build for the user's platform. Non-empty, so Gecko
 /// enforcement is LIVE. A failed fetch here is non-fatal in Firefox (it just
 /// doesn't install), so there is no dead-URL brick to guard against.
+///
+/// **Never written to the policy bare** — see `gecko_install_url`, which tags it
+/// with the expected extension version. That tag is what makes Firefox actually
+/// upgrade rather than sit on whatever build it first installed.
 pub const FIREFOX_XPI_URL: &str =
     "https://addons.mozilla.org/firefox/downloads/latest/oath-light-content-filter/latest.xpi";
+
+/// The extension version this desktop build ships alongside — i.e. the newest
+/// build we know has been published to the stores.
+///
+/// Two jobs. It is the tag in the Firefox `install_url` (below), and it is what
+/// a detected install is compared against to decide whether a browser is
+/// carrying a stale copy (`version_is_older`). Kept as a plain literal rather
+/// than parsed from the manifest at build time so a missing/relocated extension
+/// folder can never fail a release build; `expected_version_matches_manifest`
+/// (in the test module) is what keeps it honest.
+pub const EXPECTED_EXTENSION_VERSION: &str = "4.2.0";
+
+/// The `install_url` to write into the Firefox force-install policy.
+///
+/// **This is the fix for "Firefox never updates the add-on".** Firefox's policy
+/// engine does not re-install a `force_installed` add-on that is already there:
+/// it compares the installed add-on's `sourceURI` against the policy's
+/// `install_url` and returns early when they are equal. With a bare
+/// `…/latest.xpi` in the policy, that comparison matches on every single
+/// startup forever — so the add-on Firefox happened to install on day one is
+/// the add-on it keeps, and the only thing that could ever move it is AMO's
+/// background update ping (24h timer, silently skippable, and observed in the
+/// field to leave an install pinned at 3.5.0 for weeks while AMO was serving
+/// 4.2.0).
+///
+/// Tagging the URL with the version we expect breaks that tie exactly once per
+/// release: the tag differs from the installed copy's `sourceURI`, Firefox
+/// re-runs the install, AMO's `latest.xpi` redirect serves the current signed
+/// build, and the add-on is upgraded (an upgrade, not a reinstall — extension
+/// storage survives). After that the new `sourceURI` equals this URL again and
+/// the early return resumes, so there is no download-every-launch loop. AMO
+/// ignores unknown query parameters on this endpoint, so the tag costs nothing.
+///
+/// `nonce` is for the user-triggered refresh: passing one makes this URL differ
+/// from whatever is installed *even at the same version*, which is what lets
+/// "Refresh" mean "fetch it again" rather than "no-op".
+pub fn gecko_install_url(nonce: Option<u64>) -> String {
+    match nonce {
+        Some(n) => format!("{}?v={}&r={}", FIREFOX_XPI_URL, EXPECTED_EXTENSION_VERSION, n),
+        None => format!("{}?v={}", FIREFOX_XPI_URL, EXPECTED_EXTENSION_VERSION),
+    }
+}
+
+/// True when `url` is one of ours AND already tagged with the version this build
+/// expects — so re-asserting the policy can leave it alone instead of writing a
+/// different URL and triggering a pointless re-download.
+///
+/// Deliberately tolerant of a trailing `&r=…` refresh nonce: a URL a manual
+/// refresh wrote is still current for this version, and rewriting it back to the
+/// nonce-free form would make every refresh cost a *second* reinstall on the
+/// next monitor tick.
+fn gecko_install_url_is_current(url: &str) -> bool {
+    let Some(query) = url.strip_prefix(FIREFOX_XPI_URL).and_then(|q| q.strip_prefix('?')) else {
+        return false;
+    };
+    let want = format!("v={}", EXPECTED_EXTENSION_VERSION);
+    query.split('&').any(|p| p == want)
+}
+
+/// Compare two dotted numeric version strings; true when `installed` is strictly
+/// behind `expected`.
+///
+/// A version string that does not fully parse as dotted numbers — empty, a
+/// pre-release suffix, anything unexpected — reads as **not older**. That
+/// asymmetry is deliberate: this drives an "older version" note on the status
+/// row, and a component we merely failed to read must never be presented to the
+/// user as a stale install. Missing trailing components count as zero, so "4.2"
+/// and "4.2.0" compare equal.
+pub fn version_is_older(installed: &str, expected: &str) -> bool {
+    fn parse(s: &str) -> Option<Vec<u64>> {
+        let s = s.trim();
+        if s.is_empty() {
+            return None;
+        }
+        s.split('.').map(|p| p.trim().parse::<u64>().ok()).collect()
+    }
+    let (Some(a), Some(b)) = (parse(installed), parse(expected)) else { return false };
+    for i in 0..a.len().max(b.len()) {
+        let (x, y) = (a.get(i).copied().unwrap_or(0), b.get(i).copied().unwrap_or(0));
+        if x != y {
+            return x < y;
+        }
+    }
+    false
+}
 
 // ============================================================================
 // Browser table
@@ -1012,7 +1101,7 @@ fn pick_forcelist_value(full_key: &str) -> String {
 /// Chromium forcelist writer has. Returns a compact one-line object suitable for
 /// a single `REG_MULTI_SZ` value.
 #[cfg(target_os = "windows")]
-fn extension_settings_json(existing: Option<&str>) -> String {
+fn extension_settings_json(existing: Option<&str>, install_url: &str) -> String {
     let mut obj: serde_json::Map<String, serde_json::Value> = existing
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or_default();
@@ -1020,10 +1109,52 @@ fn extension_settings_json(existing: Option<&str>) -> String {
         GECKO_EXTENSION_ID.to_string(),
         serde_json::json!({
             "installation_mode": "force_installed",
-            "install_url": FIREFOX_XPI_URL,
+            "install_url": install_url,
         }),
     );
     serde_json::Value::Object(obj).to_string()
+}
+
+/// Our entry's `install_url` inside an `ExtensionSettings` JSON string, if it
+/// has one. Used to decide whether an already-written policy is current.
+#[cfg(target_os = "windows")]
+fn gecko_installed_url(settings_json: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(settings_json)
+        .ok()?
+        .get(GECKO_EXTENSION_ID)?
+        .get("install_url")?
+        .as_str()
+        .map(|s| s.to_string())
+}
+
+/// The `install_url` this write should put in the Gecko policy.
+///
+/// `Assert` keeps a URL that is already tagged for the expected version — the
+/// steady state, and the thing that stops the monitor re-triggering a download
+/// every time it re-asserts. Anything else (a bare legacy URL, a URL tagged for
+/// an older version, no policy at all) gets a freshly tagged one, which is what
+/// makes the *next* Firefox start pull the current build from AMO.
+///
+/// `Refresh` always writes a nonce, so "fetch it again" works even when the
+/// installed copy is already at the expected version.
+#[cfg(target_os = "windows")]
+fn gecko_url_for_write(def: &BrowserDef, mode: WriteMode) -> String {
+    if mode == WriteMode::Refresh {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        return gecko_install_url(Some(nonce));
+    }
+    for root in ["HKLM", "HKCU"] {
+        let key = format!(r"{}\{}", root, def.policy_subkey);
+        if let Some(url) = read_extension_settings(&key).as_deref().and_then(gecko_installed_url) {
+            if gecko_install_url_is_current(&url) {
+                return url;
+            }
+        }
+    }
+    gecko_install_url(None)
 }
 
 /// Read the Firefox `ExtensionSettings` policy value (the whole JSON string) at
@@ -1166,6 +1297,62 @@ pub fn enforcement_still_present(_def: &BrowserDef, _last: EnforceOutcome) -> bo
 /// already has the HKLM lock still reports `EnforcedMachine`.
 #[cfg(target_os = "windows")]
 pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
+    enforce_policy_mode(def, WriteMode::Assert)
+}
+
+/// How hard a policy write should push the browser to fetch the extension again.
+///
+/// The distinction only bites on Firefox, where the policy carries the URL the
+/// add-on is installed from and Firefox skips the install when that URL matches
+/// what it already has (see `gecko_install_url`). Everywhere else both modes
+/// write the same thing — a Chromium forcelist entry names a store item, and the
+/// browser's own updater decides which build that resolves to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteMode {
+    /// Steady state (the monitor): assert the policy without disturbing an
+    /// install that is already current.
+    Assert,
+    /// The user pressed Refresh: make the browser go and fetch the extension
+    /// again, even if it believes it already has it.
+    Refresh,
+}
+
+/// `enforce_policy`, but re-fetching rather than merely asserting — the write
+/// behind the Refresh button. Also clears anything the browser is holding that
+/// would make it *refuse* to install (Chromium's external-uninstall record); see
+/// `clear_refusals`.
+#[cfg(target_os = "windows")]
+pub fn refresh_policy(def: &BrowserDef) -> EnforceOutcome {
+    clear_refusals(def);
+    enforce_policy_mode(def, WriteMode::Refresh)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn refresh_policy(def: &BrowserDef) -> EnforceOutcome {
+    enforce_policy(def)
+}
+
+/// Drop every record the browser keeps that would make it decline to install the
+/// extension on its own.
+///
+/// Today that is exactly one thing, and it is the reason Edge stopped showing
+/// the "a third party wants to add this extension" prompt: when a user removes
+/// an externally-registered extension, Chromium writes its id into
+/// `extensions.external_uninstalls` in the profile's `Preferences`, and from
+/// then on the external-registry provider **skips that id entirely**. No
+/// download, no install, no prompt — permanently, and with the registry entry
+/// still sitting there looking perfectly healthy. No amount of extra time in a
+/// restore window can help, because the browser never starts the work.
+///
+/// Returns the number of profiles whose record was cleared. Safe to call for any
+/// browser; a no-op unless something was actually blocking us.
+#[cfg(target_os = "windows")]
+pub fn clear_refusals(def: &BrowserDef) -> usize {
+    crate::profiles::clear_external_uninstall_record(def)
+}
+
+#[cfg(target_os = "windows")]
+fn enforce_policy_mode(def: &BrowserDef, mode: WriteMode) -> EnforceOutcome {
     if !enforcement_configured(def.engine) {
         return EnforceOutcome::Dormant;
     }
@@ -1217,9 +1404,16 @@ pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
             // JSON object (REG_MULTI_SZ), not per-key subkeys. Merge our
             // force-install entry into whatever object is already there so we
             // don't clobber another managed extension, and write it back.
+            //
+            // The URL is decided once, before the hive loop, so both hives agree
+            // — a nonce that differed between HKLM and HKCU would be two
+            // competing "reinstall now" instructions depending on which hive
+            // Firefox read last.
+            let install_url = gecko_url_for_write(def, mode);
             for (root, strong) in HIVES {
                 let key = format!(r"{}\{}", root, def.policy_subkey);
-                let json = extension_settings_json(read_extension_settings(&key).as_deref());
+                let json =
+                    extension_settings_json(read_extension_settings(&key).as_deref(), &install_url);
                 let ok = reg()
                     .args(["add", &key, "/v", "ExtensionSettings", "/t", "REG_MULTI_SZ", "/d", &json, "/f"])
                     .output()
@@ -1257,6 +1451,11 @@ pub fn enforce_policy(def: &BrowserDef) -> EnforceOutcome {
     }
     // macOS/Linux managed-policy enforcement is out of scope for this pass.
     EnforceOutcome::Unsupported
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn clear_refusals(_def: &BrowserDef) -> usize {
+    0
 }
 
 /// Remove any force-install policy we may have written for `def`. Used when the
@@ -1313,6 +1512,10 @@ pub fn remove_policy(def: &BrowserDef) {
     // …and drop the auto-install registration, or the browser puts the extension
     // straight back after a sanctioned uninstall.
     remove_external_install(def);
+    // Take our prefs backups with us — a completed removal is supposed to leave
+    // nothing of ours behind, and that includes the safety copies the
+    // external-uninstall repair writes into each browser profile.
+    crate::profiles::remove_backup_files(def);
     // Also drop the DoH policy (1.2) and the incognito/guest/private lockdown
     // (1.5), so a completed uninstall leaves no "managed by your organization"
     // settings behind and restores those browser modes.
@@ -1554,12 +1757,12 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn firefox_extension_settings_force_installs_us_from_amo() {
-        let json = extension_settings_json(None);
+        let json = extension_settings_json(None, &gecko_install_url(None));
         // The exact object Firefox reads from the ExtensionSettings policy value.
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         let entry = v.get(GECKO_EXTENSION_ID).expect("our add-on id must be a key");
         assert_eq!(entry["installation_mode"], "force_installed");
-        assert_eq!(entry["install_url"], FIREFOX_XPI_URL);
+        assert_eq!(entry["install_url"], gecko_install_url(None));
         assert!(gecko_force_installs_us(&json), "detector must recognize our own write");
     }
 
@@ -1568,13 +1771,72 @@ mod tests {
     fn firefox_settings_merge_preserves_other_extensions() {
         // A pre-existing policy from some other manager must survive our write.
         let existing = r#"{"other@example.com":{"installation_mode":"blocked"}}"#;
-        let merged = extension_settings_json(Some(existing));
+        let merged = extension_settings_json(Some(existing), &gecko_install_url(None));
         let v: serde_json::Value = serde_json::from_str(&merged).unwrap();
         assert_eq!(
             v["other@example.com"]["installation_mode"], "blocked",
             "must not clobber another managed extension"
         );
         assert!(gecko_force_installs_us(&merged), "and must still add ours");
+    }
+
+    /// `EXPECTED_EXTENSION_VERSION` is what the Firefox policy URL is tagged
+    /// with and what a stale install is measured against, so it drifting behind
+    /// the extension we actually ship would silently switch Gecko auto-update
+    /// off. The manifest is the source of truth; this is the tripwire.
+    #[test]
+    fn expected_version_matches_manifest() {
+        let manifest = include_str!("../../../extension/manifest.json");
+        let v: serde_json::Value = serde_json::from_str(manifest).expect("manifest must parse");
+        assert_eq!(
+            v["version"].as_str(),
+            Some(EXPECTED_EXTENSION_VERSION),
+            "bump EXPECTED_EXTENSION_VERSION in lock-step with extension/manifest.json"
+        );
+    }
+
+    /// The Firefox auto-update mechanism, pinned end to end: the URL we write
+    /// carries the expected version, a bare/legacy/older-tagged URL is NOT
+    /// current (so it gets rewritten and Firefox upgrades), and the URL we just
+    /// wrote IS current (so the monitor doesn't re-trigger a download forever).
+    #[test]
+    fn gecko_install_url_tagging_drives_exactly_one_upgrade() {
+        let tagged = gecko_install_url(None);
+        assert!(tagged.starts_with(FIREFOX_XPI_URL), "must stay AMO's latest-XPI endpoint");
+        assert!(tagged.contains(EXPECTED_EXTENSION_VERSION), "must carry the version tag");
+
+        // What is on a machine today, and what an older build wrote.
+        assert!(!gecko_install_url_is_current(FIREFOX_XPI_URL), "bare URL must be refreshed");
+        assert!(
+            !gecko_install_url_is_current(&format!("{}?v=0.0.1", FIREFOX_XPI_URL)),
+            "a URL tagged for an older extension must be refreshed"
+        );
+        // …and what we write, which must then be left alone.
+        assert!(gecko_install_url_is_current(&tagged), "our own write must read as current");
+        assert!(
+            gecko_install_url_is_current(&gecko_install_url(Some(1234))),
+            "a refresh nonce must not make the URL look stale on the next tick"
+        );
+        assert!(
+            !gecko_install_url_is_current("https://evil.example/latest.xpi?v=4.2.0"),
+            "a foreign host must never read as our current URL"
+        );
+    }
+
+    #[test]
+    fn version_comparison_only_flags_genuinely_older_builds() {
+        assert!(version_is_older("3.5.0", "4.2.0"));
+        assert!(version_is_older("4.1.9", "4.2.0"));
+        assert!(version_is_older("4.2", "4.2.1"));
+        assert!(!version_is_older("4.2.0", "4.2.0"));
+        assert!(!version_is_older("4.3.0", "4.2.0"), "ahead is not behind");
+        assert!(!version_is_older("4.2.0.1", "4.2.0"), "a fourth component is still ahead");
+        // Anything we cannot fully read must fail towards "not stale" — this
+        // note goes in front of the user, and a parse we got wrong must not.
+        assert!(!version_is_older("", "4.2.0"), "unknown version must never read as stale");
+        assert!(!version_is_older("nonsense", "4.2.0"), "unparseable must never read as stale");
+        assert!(!version_is_older("4.2.0b1", "4.2.0"), "a pre-release suffix is not a number");
+        assert!(!version_is_older("3.5.x", "4.2.0"), "one bad component poisons the whole read");
     }
 
     #[cfg(target_os = "windows")]

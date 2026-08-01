@@ -120,15 +120,31 @@ const LOCKDOWN_ALLOW_DELAY_SECS: u64 = 60;
 /// any reversible setting.
 const SERIOUS_DISABLE_DELAY_MULTIPLE: u64 = 2;
 
+/// The forgotten-password removal's multiple of the standard weakening delay.
+///
+/// Same 2× as Serious Mode, and for the same reason expressed differently:
+/// `"password.remove.forgotten"` is the **only** weakening in the app that asks
+/// the requester to prove nothing at all — not the password, not that they know
+/// what they are undoing. Every other path is gated by something. At the plain
+/// weakening delay it was the cheapest way to start dismantling the app's own
+/// gate, reachable by anyone at an unlocked machine including a version of the
+/// user who has already decided not to remember.
+///
+/// It cannot be refused outright — a genuine lockout has to have a way out, and
+/// waiting is that way — so the lever is price, not permission.
+const PASSWORD_FORGOTTEN_DELAY_MULTIPLE: u64 = 2;
+
 /// Resolve the cool-off length for a given action id. `"uninstall"` defers to
 /// `uninstall::delay_secs()` — its own, separately-tunable constant, kept
 /// distinct on purpose so the two systems can still be dialed independently
 /// even though they now share one persistence engine. Any
 /// `"lockdown.allow:<domain>"` id gets the fixed short anti-brick delay
-/// (4.4), and `"serious.disable"` gets the doubled Serious Mode cool-off (UX
-/// Direction §1). Every other action id gets the shared weakening default
-/// above — including `"lockdown.cancel"` and `"trusted_contact.remove"`, which
-/// are ordinary weakenings with no special-cased delay of their own.
+/// (4.4); `"serious.disable"` gets the doubled Serious Mode cool-off (UX
+/// Direction §1); and the unproven `"password.remove.forgotten"` path gets the
+/// same doubling for the reason above. Every other action id gets the shared
+/// weakening default — including `"password.remove"` (the *proved* route),
+/// `"lockdown.cancel"` and `"trusted_contact.remove"`, which are ordinary
+/// weakenings with no special-cased delay of their own.
 pub(crate) fn delay_for(action_id: &str) -> u64 {
     if action_id == "uninstall" {
         crate::uninstall::delay_secs()
@@ -136,10 +152,13 @@ pub(crate) fn delay_for(action_id: &str) -> u64 {
         LOCKDOWN_ALLOW_DELAY_SECS
     } else if action_id == "serious.disable" {
         weakening_delay_secs().saturating_mul(SERIOUS_DISABLE_DELAY_MULTIPLE)
+    } else if action_id == crate::auth::PASSWORD_REMOVE_FORGOTTEN {
+        weakening_delay_secs().saturating_mul(PASSWORD_FORGOTTEN_DELAY_MULTIPLE)
     } else {
         weakening_delay_secs()
     }
 }
+
 
 fn now_wall() -> u64 {
     SystemTime::now()
@@ -554,6 +573,30 @@ mod tests {
         assert_eq!(delay_for("lockdown.cancel"), weakening_delay_secs());
         assert_eq!(delay_for("trusted_contact.remove"), weakening_delay_secs());
         assert_eq!(delay_for("guard.disable"), weakening_delay_secs());
+        // The *proved* password removal is an ordinary weakening; only the
+        // unproven route below is special-cased.
+        assert_eq!(delay_for(crate::auth::PASSWORD_REMOVE), weakening_delay_secs());
+    }
+
+    /// The pre-1.0 bug this closes: both password-removal routes shared one
+    /// action id, so the route that proves nothing cost exactly as much as the
+    /// route that proves the password — startable by anyone at an unlocked
+    /// machine for the same price as a deliberate, authenticated removal.
+    #[test]
+    fn the_unproven_password_route_costs_more_than_the_proved_one() {
+        let proved = delay_for(crate::auth::PASSWORD_REMOVE);
+        let forgotten = delay_for(crate::auth::PASSWORD_REMOVE_FORGOTTEN);
+        assert_eq!(
+            forgotten,
+            weakening_delay_secs() * PASSWORD_FORGOTTEN_DELAY_MULTIPLE,
+            "asserted as a multiple so it tracks whichever base delay the build carries"
+        );
+        assert!(forgotten > proved, "forgetting the password must not be the cheap way out");
+        assert_ne!(
+            crate::auth::PASSWORD_REMOVE,
+            crate::auth::PASSWORD_REMOVE_FORGOTTEN,
+            "one shared id is exactly what made the two cost the same"
+        );
     }
 
     /// Serious Mode's disable wait is deliberately the longest of any

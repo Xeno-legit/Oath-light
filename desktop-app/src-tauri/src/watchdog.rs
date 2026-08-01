@@ -301,7 +301,7 @@ mod imp {
     ///
     /// Unlike the shutdown sentinel, this behaves identically in debug and
     /// release: the file is never trusted on its own in either build, because
-    /// the thing that bounds this — the fifteen-minute window in `update.json`,
+    /// the thing that bounds this — the one-minute window in `update.json`,
     /// re-validated on every read by `update::window_active_at` — is the whole
     /// safety argument. A stale sentinel left behind by an interrupted update
     /// therefore stops authorizing anything the moment its window expires, with

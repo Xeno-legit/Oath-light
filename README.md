@@ -228,8 +228,16 @@ graylisted — they are blocked outright.
 
 ## Installation
 
-The project is in pre-Alpha. The extension is published; the desktop app is
+The extension is published on both stores. The desktop app is at **1.0.0** and is
 built from source.
+
+> **1.0.0 is an early release, and it has never been red-teamed.** No independent
+> party has adversarially tested this code — every claim about what its tamper
+> resistance withstands is our own assessment of our own work, on software whose
+> whole job is resisting a motivated attacker who owns the machine. Treat Oath
+> Light as one layer, not your only safeguard. If you can do that review, it is
+> the most valuable thing anyone could contribute right now —
+> [SECURITY.md](SECURITY.md#this-has-never-been-red-teamed-and-it-needs-to-be).
 
 | Step | Action |
 | :--- | :--- |

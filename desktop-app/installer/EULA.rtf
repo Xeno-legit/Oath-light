@@ -1,14 +1,15 @@
 {\rtf1\ansi\ansicpg1252\deff0
 {\fonttbl{\f0\fnil\fcharset0 Segoe UI;}}
 \viewkind4\uc1\pard\sa120\sl252\slmult1\f0\fs20
-{\b\fs30 Oath Light - Alpha}\par
+{\b\fs30 Oath Light}\par
 {\b End-User Notice, Disclosure & Privacy Policy}\par
-Version 0.5.0 (Alpha) - 2026-07-31\par
+Version 1.0.0 - 2026-08-01\par
 \par
 Please read this before installing. Installing Oath Light means you understand and agree to what it does, how it protects itself from being disabled, and what it can access on this device.\par
 \par
-{\b 1. This is an alpha}\par
-Oath Light is early, in-development software. It may contain bugs, block the wrong things, miss things it should block, or stop working without warning. Do not rely on it as your only safeguard. It is provided "as is", with no warranty of any kind.\par
+{\b 1. This is an early release, and it has not been security-tested}\par
+Version 1.0.0 is the first public build. No independent security review or red-team test has been done on it - everything this notice says about how well Oath Light resists being switched off is the authors' assessment of their own code, not an outside verdict. The app shows an "Early release" badge for this reason.\par
+No content filter catches everything either. Oath Light may block the wrong thing, miss something it should have blocked, or stop working - and someone determined to get around it on their own machine eventually can. Do not rely on it as your only safeguard. It is provided "as is", with no warranty of any kind. It works best alongside people who know what you are trying to do.\par
 \par
 {\b 2. What Oath Light is}\par
 Oath Light is an accountability and content-blocking tool designed to help you avoid pornography and other explicit material online. It has three parts:\par
@@ -23,8 +24,8 @@ Oath Light is deliberately hard to remove or disable in the moment, by design, s
 - Some protections cannot be switched off at all. The uninstall guard, SafeSearch enforcement, YouTube Restricted Mode, the extension requirement and the DNS filter have no off switch anywhere in the app. Settings that are genuine choices weaken only after a 24-hour cool-off, during which protection stays fully on.\par
 - Uninstalling is a two-step, delayed process. You request removal, then wait out a 24-hour cool-off before the app can actually be removed. Blocking stays fully active during the wait. You can cancel the request at any time.\par
 - Windows' own uninstaller goes through that same wait. Removing Oath Light from Settings > Apps (or Add/Remove Programs) before the cool-off has elapsed is refused, and refusing changes nothing on your device - it does not half-remove the app. This is the only supported removal path besides the in-app one, and both honour the same timer.\par
-- Microsoft Edge is held shut unless it is carrying the extension. Microsoft does not allow this extension to be force-installed into Edge on an ordinary consumer PC, so Oath Light closes that gap by closing Edge whenever it is running without the extension active. To fix it, open Oath Light and ask for a restore window: Edge is left alone for 20 seconds, opened straight at the page that installs the extension. The window does not extend, but you can ask for another one as many times as you need. Other browsers are never closed - they keep the extension installed by policy instead.\par
-- Updating asks the same of you, briefly. A new version can only replace an old one while an update window is open, which you start from Settings inside the app. It lasts fifteen minutes, then protection comes back on its own whether or not the update happened.\par
+- Microsoft Edge is held shut unless it is carrying the extension. Microsoft does not allow this extension to be force-installed into Edge on an ordinary consumer PC, so Oath Light closes that gap by closing Edge whenever it is running without the extension active. To fix it, open Oath Light and ask for a restore window: Edge is left alone for 90 seconds, opened straight at the page that installs the extension. The window does not extend, but you can ask for another one as many times as you need. Other browsers are never closed - they keep the extension installed by policy instead.\par
+- Updating asks the same of you, briefly. A new version can only replace an old one while an update window is open, which you start from Settings inside the app. It lasts one minute, then protection comes back on its own whether or not the update happened.\par
 These measures are friction, not unbreakable security: an administrator on this machine who sets out to remove Oath Light can still do so. They exist to slow down impulsive decisions - not to trap you.\par
 \par
 {\b 4. What it can access on this device}\par
@@ -47,7 +48,7 @@ All processing - including the AI image analysis - happens locally. Nothing abou
 Two optional features you must turn on yourself are the only exceptions, and both use your account, not ours: the trusted-contact notifier (sends a short message saying that an event happened - never what was browsed) and the AI mentor (uses an API key you supply, sent to the provider you choose). Both are off by default.\par
 \par
 {\b 6. No warranty / limitation of liability}\par
-Because this is alpha software provided free of charge, it is offered without warranty of any kind, express or implied. To the maximum extent permitted by law, the authors are not liable for any damages, data loss, missed or wrongful blocking, or other harm arising from its use. You install and use it at your own risk.\par
+Oath Light is free software provided free of charge, and is offered without warranty of any kind, express or implied. To the maximum extent permitted by law, the authors are not liable for any damages, data loss, missed or wrongful blocking, or other harm arising from its use. You install and use it at your own risk.\par
 \par
 {\b 7. Removing Oath Light}\par
 You can remove Oath Light at any time by opening the app, going to Settings, and starting the uninstall request - then completing it after the cool-off period described in section 3. Windows' own Settings > Apps > Uninstall also works, but only once that same cool-off has elapsed; used earlier it refuses and leaves your device untouched. A completed removal restores your DNS settings and removes the browser policies, the autostart entries and the app's own data.\par

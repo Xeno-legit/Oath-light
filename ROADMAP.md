@@ -2,13 +2,45 @@
 What's left
 
 ▶ The only list of unfinished work. If it isn't here, it's either done or we're not doing it.
-Updated 2026-07-31. Phase 4, branch `pre-alpha/release`.
+Updated 2026-08-01. Phase 4, branch `pre-alpha/release`.
 
 Almost everything that can be finished by writing code is finished. What's left
 mostly needs something else — the real sites open, a GPU, someone writing
 content, or the owner's own keys. Two code exceptions are called out where they
 sit: the installer half of reproducible builds, and the string extraction behind
 translations.
+
+## Release state
+
+**The desktop app is versioned 1.0.0 as of 2026-08-01** (`tauri.conf.json`,
+`src-tauri/Cargo.toml`), and the ALPHA badge, hub banner and alpha framing in
+the installer notice came off with it.
+
+That is a version number, not a verification. **Every item in the list below is
+still open**, and the ones that need a person at a machine still need one — the
+version bump does not clear a single line of it. Read the list as the 1.0.0 gate
+list; the heading below says "Before Alpha" only because these were always the
+same gates. The app keeps an *Early release* badge in its titlebar for the same
+reason.
+
+### An independent red team is required, and has not happened
+
+**Nobody outside this project has ever attacked this code.** Every claim the
+project makes about what its tamper resistance holds against is self-assessment
+of self-written code — the weakest evidence there is about software whose whole
+purpose is resisting a motivated attacker who owns the machine, has unlimited
+time, can read the source, and is at their least reasonable when it matters.
+
+This is not a nice-to-have and it does not belong in "Later". It sits above
+every remaining feature in value, because a filtering miss is a bad afternoon
+and a hole in the friction engine is the product not working at all. The targets
+are enumerated in [SECURITY.md](SECURITY.md#this-has-never-been-red-teamed-and-it-needs-to-be):
+the friction/cool-off engine, the two-process watchdog and its stand-down
+windows, `auth.rs`, the browser enforcement and profile surgery, the OTA
+signature path, and the NSIS uninstall gate.
+
+Until it happens, every strength claim in the docs is unverified by anyone but
+us, and should be read that way.
 
 ## Before Alpha
 
@@ -29,13 +61,17 @@ translations.
 * Smoke-test the Firefox force-install against a real admin Firefox.
 * **Verify the Edge browser lock on a real machine** — `browser_lock.rs` kills
   Edge on sight while the extension isn't running in it, and the only way back
-  is a 20-second grace window requested from the app. This is not a stopgap
+  is a 90-second grace window requested from the app. This is not a stopgap
   waiting on an Edge Add-ons listing; it is *the* enforcement mechanism on Edge,
   permanently (see "Not doing"). Verify the loop end to end: Edge dies, the app
-  offers the window, the window opens Edge at the install page, the install
-  completes inside 20s, and Edge stops dying. Then check the failure path — let
-  a window lapse and confirm the kill resumes and a second window costs a second
-  trip to the app. **Keep the 20s as is.**
+  offers the window, the window opens Edge at the install page, **Edge actually
+  prompts**, the install completes inside the window, and Edge stops dying. Then
+  check the failure path — let a window lapse and confirm the kill resumes and a
+  second window costs a second trip to the app.
+  *(2026-08-01: window raised 20s → 90s. 20 expired before Edge finished
+  fetching the ~3 MB CRX, so the kill landed mid-download. The prompt failing to
+  appear at all was a separate cause — `extensions.external_uninstalls` — now
+  cleared automatically; see `profiles::clear_external_uninstall_record`.)*
 * ~~Verify the uninstall/upgrade gate on a real install.~~ **Done 2026-07-31** —
   exercised end to end on a real install at a temporary 10s timer, then all
   three friction constants restored to 24h in one commit.

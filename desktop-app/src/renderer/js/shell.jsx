@@ -40,7 +40,19 @@ function TitleBar({ s }) {
       <div className="tl-brand" data-tauri-drag-region>
         <span className="tl-logo"><Logo size={18} /></span>
         <span className="tl-title">Oath Light</span>
-        <span className="stage-badge" title="Alpha build — features are still in testing and may change or misbehave.">ALPHA</span>
+        {/* 1.0.0 is the first public build, not a proven one. The badge says
+            EARLY RELEASE rather than ALPHA — the code is finished and the
+            version is real, but it has never been red-teamed and most of the
+            enforcement path has only ever run on the machines that wrote it.
+            Kept permanently visible on purpose: someone deciding how much to
+            lean on this should be able to see what it is without going
+            looking. */}
+        <span
+          className="stage-badge"
+          title="Early release — 1.0.0 is the first public build. It has not been independently security-tested; treat it as one layer, not your only safeguard."
+        >
+          Early release
+        </span>
       </div>
       <div className="tl-drag" data-tauri-drag-region style={{ flex: 1, alignSelf: 'stretch' }} />
       <div className="win-ctrls">
@@ -129,13 +141,12 @@ function HubMenu({ s, go }) {
   const counts = (window.useBlocklistCounts || (() => null))();
   return (
     <div className="page hub" style={{ maxWidth: 1040 }}>
-      <div className="stage-banner fade-up" role="note">
-        <span className="stage-banner-tag">ALPHA</span>
-        <span className="stage-banner-text">
-          You're running an early build of Oath Light. It's still in active
-          testing — some protection may be incomplete and things can change or break.
-        </span>
-      </div>
+      {/* The "you're running an early build" banner came off for 1.0.0. What it
+          was really saying — no blocker catches everything, don't lean on this
+          alone — is not a build-stage caveat and belongs where it is now: the
+          install-time notice (installer/POLICY.md §1), where it is read once and
+          deliberately, rather than as a permanent strip of doubt above the
+          greeting of an app someone opens on a bad day. */}
       <div className="hub-hero fade-up">
         <div className="hub-mark"><Logo size={56} /></div>
         <div className="eyebrow" style={{ marginTop: 22 }}>{PP.t(greetKey, { name })}</div>

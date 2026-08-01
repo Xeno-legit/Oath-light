@@ -295,6 +295,15 @@ function extensionAction(b) {
   if (!PPNative.available) return null;
   const missing = b.state === 'extension_missing' || b.state === 'running_partial'
     || b.state === 'not_installed' || b.state === 'running_unknown';
+  // Edge: the external-install popup is unreliable — send the user straight to
+  // the Chrome Web Store listing instead, where Edge can install it directly.
+  if (b.key === 'edge' && (b.enforcement === 'needs_approval' || b.enforcement === 'store_unavailable')) {
+    return {
+      labelKey: 'status.action_install_manually',
+      ghost: false,
+      run: () => PPNative.openExternal('https://chromewebstore.google.com/detail/oath-light-content-filter/oigdpcdgmldgjalfnlgekcbkmniplnad?hl=en-GB&utm_source=ext_sidebar'),
+    };
+  }
   switch (b.enforcement) {
     // The browser downloaded it for us and is waiting on the user's approval.
     // One click, in the browser — so send them straight to the toggle rather
@@ -403,6 +412,10 @@ function ExtensionRow({ b }) {
           <span className="ext-dot" style={{ background: st.dot }} />
           {PP.t(st.labelKey)}
           {multi && <span className="ext-sync">· {PP.t('status.profiles_connected', { connected: connProfiles, total: profiles.length })}</span>}
+          {/* Sits next to the version so "v3.5.0 · older version" reads as one
+              fact. The row still says "Protected" — an older build is a stale
+              build, not an unprotected browser. */}
+          {b.extension_outdated && <span className="ext-sync">· {PP.t('status.ext_outdated')}</span>}
           {note && <span className="ext-sync">· {note}</span>}
         </div>
 
@@ -1114,10 +1127,53 @@ function OverviewPage({ s, PP, go }) {
 
 }
 
+// Reinstall the extension everywhere, and report back per browser.
+//
+// Separate from `extensionAction`'s per-row buttons on purpose: those are about
+// one browser's *policy* (grant admin, approve, restore), while this is the
+// blunt "put the extension back in all of them, from scratch" — the move for
+// when a browser is sitting on a build that won't shift, or has quietly decided
+// it will never auto-install the extension again.
+//
+// The result lines are the whole value: the answers differ per browser ("it
+// installs on the next Firefox start", "approve it when Edge asks") and a single
+// "Done" would hide the one thing the user still has to do.
+function useRefreshExtensions() {
+  const [busy, setBusy] = React.useState(false);
+  const [report, setReport] = React.useState(null);
+
+  async function run() {
+    setBusy(true);
+    setReport(null);
+    try {
+      setReport(await PPNative.refreshExtensions());
+    } finally {
+      setBusy(false);
+    }
+  }
+  return { busy, report, run };
+}
+
+function RefreshReport({ report }) {
+  if (!report) return null;
+  return (
+    <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 12, display: 'grid', gap: 4 }}>
+      {report.length === 0
+        ? PP.t('status.refresh_none')
+        : report.map((r) => (
+            <div key={r.key}>
+              <strong style={{ color: 'var(--text)' }}>{r.name}</strong> — {r.detail}
+            </div>
+          ))}
+    </div>
+  );
+}
+
 // Live browser-protection panel. Shows the desktop app monitoring each running
 // browser's extension; falls back to a calm empty state when nothing is up yet.
 function BrowserProtectionCard() {
   const browsers = useBrowsers();
+  const refresh = useRefreshExtensions();
 
   // Show what's running plus any browser that has the extension installed
   // (even if currently closed); ignore the rest of the large table.
@@ -1138,12 +1194,19 @@ function BrowserProtectionCard() {
             {PP.t('overview.browser_sub')}
           </div>
         </div>
-        {runningBrowsers.length > 0 &&
-          <span className="chip" style={{ color: allGood ? 'var(--accent-2)' : (missing ? '#e5544b' : 'var(--warn, #d9a441)') }}>
-            <IconShield size={14} />{' '}
-            {PP.t('status.browsers_protected_count', { protected: protectedRunning, total: runningBrowsers.length })}
-          </span>
-        }
+        <div className="row" style={{ gap: 8 }}>
+          {runningBrowsers.length > 0 &&
+            <span className="chip" style={{ color: allGood ? 'var(--accent-2)' : (missing ? '#e5544b' : 'var(--warn, #d9a441)') }}>
+              <IconShield size={14} />{' '}
+              {PP.t('status.browsers_protected_count', { protected: protectedRunning, total: runningBrowsers.length })}
+            </span>
+          }
+          {PPNative.available &&
+            <button className="btn btn-sm btn-ghost" disabled={refresh.busy} onClick={refresh.run}>
+              {PP.t(refresh.busy ? 'status.refresh_working' : 'status.action_refresh_all')}
+            </button>
+          }
+        </div>
       </div>
 
       {!PPNative.available ? (
@@ -1159,6 +1222,11 @@ function BrowserProtectionCard() {
           {shown.map((b) => <ExtensionRow key={b.key} b={b} />)}
         </div>
       )}
+
+      {/* What the reinstall actually did, per browser — the answers differ
+          (Firefox needs a restart, Edge needs a click) and a single "Done"
+          would hide the step the user still has to take. */}
+      <RefreshReport report={refresh.report} />
     </div>
   );
 }

@@ -112,6 +112,42 @@ what today, what doesn't, and what is being built next. If you want the strong
 form of this, the single biggest step is making the protected account a
 standard (non-admin) user, with the administrator password held by someone else.
 
+## This has never been red-teamed, and it needs to be
+
+**No independent adversarial security review has been done on Oath Light. Not a
+partial one, not an informal one. Zero.** Version 1.0.0 is the first public
+build, and the app still carries an *Early release* badge for exactly this
+reason.
+
+Everything on this page describing what the tamper resistance holds against is
+the authors' own assessment of their own code. That is the weakest possible
+form of evidence about a system whose entire job is resisting a motivated
+attacker — and the motivated attacker here is unusually well-placed: they own
+the machine, they have all the time they want, they can read this source, and on
+a bad night they are strongly motivated. Self-assessment is precisely the thing
+that misses what someone like that finds in an afternoon.
+
+Concretely, this is what a red team is needed on:
+
+* The friction and cool-off engine (`friction.rs`, `uninstall.rs`) — the clock
+  handling, the on-disk state, and every way to make a timer credit time it
+  should not.
+* The two-process watchdog (`watchdog.rs`, `guardian/`) — the resurrection
+  protocol, the update/uninstall stand-down windows, and the sentinel files
+  that authorize them.
+* The master password and session tokens (`auth.rs`).
+* Browser enforcement (`browsers.rs`, `browser_lock.rs`) and the profile
+  surgery in `profiles.rs`, which writes to browser preference files.
+* The OTA blocklist channel (`ota.rs`, `core/src/ota.rs`) — signature
+  verification, rollback and monotonicity.
+* The uninstall gate in the NSIS hooks (`desktop-app/installer/hooks.nsh`).
+
+Until that work happens, treat every strength claim here as **unverified by
+anyone but us**, and treat the app as one layer among several rather than the
+thing standing between you and a relapse. If you have the skills to do this
+review, it is the single most valuable contribution the project can receive
+right now — see *Reporting a security issue* below.
+
 ## Scope
 
 Oath Light protects the machine it is installed on, for the person who chose to

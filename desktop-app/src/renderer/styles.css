@@ -210,6 +210,9 @@ input, textarea { font-family: inherit; }
   background: color-mix(in oklab, var(--ol-warn) 16%, transparent);
   border: 1px solid color-mix(in oklab, var(--ol-warn) 40%, transparent);
   text-transform: uppercase; cursor: default; user-select: none;
+  /* Two words since 1.0.0 ("Early release"), and the titlebar is a fixed-height
+     row — without this it wraps and pushes the row open on a narrow window. */
+  white-space: nowrap;
 }
 
 /* window controls (minimize / maximize / close) */

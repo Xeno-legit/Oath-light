@@ -15,6 +15,23 @@ Credentials block, however many hours you throw at them.
 
 If an item here disagrees with ROADMAP, ROADMAP is right and this file is stale.
 
+**2026-08-01 — the desktop app is now versioned 1.0.0**, badged *Early release*
+rather than ALPHA. Nothing below was cleared by that: the gates are unchanged,
+and the six "anyone, at a machine" rows plus the two owner-only rows are all
+still open. A build calling itself 1.0.0 with these unverified is a decision to
+ship on them, which is a legitimate call to make — but it should be made
+knowingly, which is what this page is for.
+
+**And one gate is not on any table below, because nobody has started it: an
+independent red team.** No outside party has ever adversarially tested this
+code. Everything this project says about what its tamper resistance withstands
+is the authors marking their own homework, on software whose entire job is
+resisting someone who owns the machine and has all the time in the world. That
+is the largest unknown in the release by a wide margin — larger than any single
+row in the tables below, because those rows ask "does this feature work" and
+this one asks "does the thing the product is for actually hold". Targets and
+scope: [SECURITY.md](../SECURITY.md#this-has-never-been-red-teamed-and-it-needs-to-be).
+
 ---
 
 ## There are two finish lines, and they are nowhere near each other
@@ -42,7 +59,7 @@ Phase 4 has exactly two lines outstanding; every other item on it is Done.
 | :-- | :-- | :-- |
 | ~~Commit the working tree~~ | owner | **done** — `b15e816` |
 | ~~Verify the uninstall/upgrade gate on a real install~~ | — | **done 2026-07-31** — the newest and least-proven code in the release, now exercised |
-| Verify the Edge browser lock (kill + 20s grace window) | anyone, at a machine | *the* enforcement path on Edge, not a stopgap — see below |
+| Verify the Edge browser lock (kill + 90s grace window + the install prompt) | anyone, at a machine | *the* enforcement path on Edge, not a stopgap — see below |
 | Test grayscale hours on a real machine | anyone, at a machine | |
 | Smoke-test Firefox force-install against a real admin Firefox | anyone, at a machine | |
 | See the desktop reminder card render | anyone, at a machine | new in 0.5.0; unit-tested and compiling, never watched |
@@ -82,22 +99,29 @@ written as Edge policy is accepted and silently discarded.
 
 So `browser_lock.rs` is not a placeholder waiting on a listing. It is how Edge
 is enforced, permanently: **while the extension isn't running in Edge, Edge
-isn't running either.** The way back is a 20-second grace window requested from
+isn't running either.** The way back is a 90-second grace window requested from
 the app, which never extends and never exempts — not even when Edge is the only
 browser on the machine. That is the largest deliberate design decision in the
 app that has never been exercised on real hardware, which is what makes it the
 highest-value item in the session above.
 
-**The 20 seconds stays as it is.** What needs verifying is the loop around it:
+**The window is 90 seconds** (raised from 20 on 2026-08-01: a cold Edge start
+plus a ~3 MB Web Store download does not finish in 20, so the kill landed
+mid-download and the window bought nothing). What needs verifying is the loop
+around it:
 
 1. Edge without the extension dies on sight.
 2. The app offers a window, and opens Edge straight at the page that fixes it.
-3. The install completes inside 20s, and Edge stops dying.
-4. A lapsed window resumes the kill, and a second window costs a second
+3. Edge actually prompts ("a third party wants to add this extension"). If it
+   never does, the id is in `extensions.external_uninstalls` in that profile's
+   `Preferences` and Chromium is skipping the install outright — the app clears
+   that record before each restore, and this step proves the repair runs.
+4. The install completes inside the window, and Edge stops dying.
+5. A lapsed window resumes the kill, and a second window costs a second
    deliberate trip to the app.
 
-Step 4 is the one worth being unsentimental about — it is the step that makes
-the other three friction rather than theatre.
+Step 5 is the one worth being unsentimental about — it is the step that makes
+the other four friction rather than theatre.
 
 ### Deliberately not gating alpha
 

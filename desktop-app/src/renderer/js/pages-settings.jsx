@@ -631,9 +631,11 @@ function TrustedContactCard({ s }) {
 // Honest recovery story, stated plainly in the "Forgot it?" copy below:
 // removing the password normally needs the CURRENT password plus the friction
 // delay (`requestRemoval`). If you've genuinely forgotten it, "Forgot it?"
-// starts the same delay without the password (`requestRemovalForgotten`) — it
-// can't skip the wait, only skip proving you know a password you don't
-// remember.
+// (`requestRemovalForgotten`) removes it without the password — it can't skip
+// the wait, only skip proving you know a password you don't remember, and it
+// pays double the ordinary delay for that. Neither route can be refused: a real
+// lockout must have a way out, so the difference between them is price, never
+// permission.
 function SecurityCard() {
   const available = native();
   const [set, setSet] = React.useState(null); // null = still loading
@@ -687,10 +689,15 @@ function SecurityCard() {
   };
 
   const forgotIt = () => {
+    // Says the wait is LONGER, because it is — this route proves nothing, so it
+    // carries double the ordinary cool-off (auth::PASSWORD_REMOVE_FORGOTTEN).
+    // The old copy promised "the same waiting period", which would have read as
+    // the app quietly moving the goalposts when the countdown showed up.
     if (!confirm(
       "Forgot your master password?\n\n"
-      + "This starts the same waiting-period removal every other protection change goes through. "
-      + "You don't need the old password for this — but you do still have to wait out the delay. "
+      + "This removes it after a waiting period — no old password needed. "
+      + "Because it asks you to prove nothing, the wait is twice as long as removing it with the password. "
+      + "It stays cancellable the whole time under \"Pending changes\".\n\n"
       + "Continue?"
     )) return;
     setErr('');
@@ -1013,7 +1020,7 @@ function EvalLogRow() {
 // the 24-hour uninstall cool-off, which is the right gate for removal and an
 // absurd one for a patch.
 //
-// So this button opens a fifteen-minute window, closes the app, and arms a
+// So this button opens a one-minute window, closes the app, and arms a
 // scheduled task to bring everything back if the update never happens. The copy
 // below is deliberately blunt about all three of those, in that order, because
 // the app is about to vanish from the screen and a user who did not expect that

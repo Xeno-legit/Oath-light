@@ -51,7 +51,7 @@
 ; old uninstaller entirely.
 ;
 ; The authorization is an active update window (update.json) - opened from
-; inside the app, behind the master password, capped at fifteen minutes,
+; inside the app, behind the master password, capped at one minute,
 ; re-validated on every read, logged, and backed by a recovery task. It is not
 ; an extra hurdle either: an upgrade cannot physically complete without one,
 ; because both binaries are running and locked until the watchdog stands down,

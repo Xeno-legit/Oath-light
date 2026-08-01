@@ -61,6 +61,23 @@ That acknowledgement lives in HMAC-signed `Secure Preferences`; it is a browser
 security control and we do not forge it. The user can also remove the extension
 afterwards and Chromium remembers that in `external_uninstalls`.
 
+**That memory is permanent, and it silently kills this whole path.** Once an id
+is in `extensions.external_uninstalls`, Chromium's external provider skips it
+outright: no download, no install, and therefore **no prompt** — while the
+registry entry we wrote sits there looking perfectly correct. Observed in the
+field on 2026-08-01 (Edge, store id present in `external_uninstalls`, no
+`extensions.settings` entry at all), and it presents exactly as "the grace window
+isn't long enough", because the browser is killed having done nothing. It is not
+a timing problem and no window length fixes it.
+
+The record lives in the plain `Preferences` file, which has no `protection`
+block — the HMACs in `Secure Preferences` cover `extensions.install`,
+`extensions.settings` and `extensions.ui`, none of it. So the app clears our ids
+out of it (`profiles::clear_external_uninstall_record`), while the browser is
+closed, before every restore window and on the monitor's ~30s deep tick. That
+un-suppresses Chromium's own prompt; it does not answer it. The user still has to
+accept.
+
 So Edge gets: automatic download, one click to enable, and no lock. Reported as
 `needs_approval` → `auto_installed`, never as "locked". `enforce_external_install`
 in `browsers.rs`.
@@ -184,6 +201,12 @@ is at least a tracked input.
    build. This is the step that stops doc drift returning.
 8. Bump `manifest.json` `version`, then `python scripts/build-extension-zips.py`
    (§2). Record the printed SHA-256s in the release notes.
+   **Bump `browsers::EXPECTED_EXTENSION_VERSION` in the same commit.** It is the
+   tag on the Firefox `install_url`, and that tag changing is the *only* thing
+   that makes Firefox re-fetch the add-on — its policy engine skips the install
+   whenever the URL matches what it already has, so leaving this behind pins
+   every Firefox user to the build they first installed. The unit test
+   `expected_version_matches_manifest` fails if the two drift.
 9. Update [../ROADMAP.md](../ROADMAP.md) — status changes land in the same PR
 
 **Build gotcha:** if `cargo` fails with `tauri-build … lib.rs:80
