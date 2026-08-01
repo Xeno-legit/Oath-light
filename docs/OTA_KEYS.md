@@ -15,28 +15,74 @@ extension can't verify). One signature, three verifiers that must never drift:
 after a loss/compromise without stranding already-deployed clients: a signature
 from *either* baked key verifies.
 
-## The current keys are DEV keys
+## The current keys are PRODUCTION keys
 
-The keys baked in `core/src/ota.rs` and `bg/ota.js` today are **development**
-keys, generated locally for testing the pipeline end-to-end. Their private seeds
-are stored, gitignored, in `scripts/ota/dev-keys.env` for local signing
-experiments — they are **not** secret and **must not** be used to sign a real
-release. Before the first production release:
+Swapped 2026-08-01. The dev pair and `scripts/ota/dev-keys.env` are gone.
 
-1. Generate a fresh production keypair on an offline/trusted machine:
-   ```
-   node scripts/ota/sign-manifest.mjs --gen-key
-   ```
-   The 32-byte **public** key prints to stdout; the **private** seed prints to
-   stderr. Do this twice (active + spare).
-2. Bake the two public keys into **both** `desktop-app/core/src/ota.rs`
-   (`OTA_PUBKEY_ACTIVE_HEX` / `OTA_PUBKEY_SPARE_HEX`) and
-   `extension/bg/ota.js` (`OTA_PUBKEYS_HEX`) — they must match byte-for-byte.
-3. Store the **active** private seed as the `OTA_SIGNING_KEY` GitHub Actions
-   repository secret. Store the **spare** private seed only offline (paper /
-   hardware / a separate password manager) — it never touches CI until a
-   rotation.
-4. Delete `scripts/ota/dev-keys.env`.
+| Step | State |
+| :-- | :-- |
+| 1. Production keypair generated (active + spare) | **done** |
+| 2. Both public keys baked into `core/src/ota.rs` **and** `extension/bg/ota.js` | **done** — verified byte-identical |
+| 3a. Active private seed → `OTA_SIGNING_KEY` repository secret | **owner — verify** |
+| 3b. Spare private seed → offline only, never CI | **owner — verify** |
+| 4. Delete `scripts/ota/dev-keys.env` | **done** |
+
+**Only the public keys belong in this repository, and they are already here.**
+There is nothing key-shaped left to upload: the public keys ship inside the
+clients by design. What CI needs is the 32-byte **private seed**, which
+`--gen-key` prints to **stderr** while the public key goes to stdout — so a
+transcript that captured only stdout captured only the half that was never
+secret.
+
+### Confirm you still hold the active seed
+
+Losing it is silent: nothing fails until the first release that needs signing,
+and by then shipped clients trust a key nobody can sign for. Check before you
+need it — the seed is never printed, only a verdict:
+
+```
+OTA_SIGNING_KEY=<64-hex seed> node scripts/ota/check-seed.mjs
+```
+
+`MATCH — ACTIVE` means set that value as the `OTA_SIGNING_KEY` repository secret
+(GitHub → Settings → Secrets and variables → Actions → New repository secret, or
+`gh secret set OTA_SIGNING_KEY < seedfile`, which reads stdin and never echoes).
+`NO MATCH` on both means regenerate — see below. Cheap now, impossible after a
+release.
+
+### Regenerating the pair
+
+If the active seed is lost, or you simply want a clean pair before the first
+release, generate both at once:
+
+```
+node scripts/ota/new-keys.mjs
+```
+
+It prints four values, each labelled with the one place it belongs, and writes
+**nothing** to disk. Use it in preference to running `--gen-key` twice: that
+command puts the public key on stdout and the private seed on stderr, so in a
+terminal both land in the same scrollback, same font, both 64 hex characters —
+and the two mistakes that follow are silent. Pasting the *public* key into the
+GitHub secret breaks signing in a way you discover at the first release; letting
+a *private* seed reach a file or a commit hands anyone the ability to push a
+blocklist update to every client.
+
+`node scripts/ota/new-keys.mjs --check-only` prints the same layout with
+placeholders instead of keys — safe to show on screen or paste into a chat.
+
+**After regenerating, three things are easy to forget:**
+
+1. Bake **both** public keys into `core/src/ota.rs` *and* `extension/bg/ota.js`.
+   They must be byte-identical or a manifest one client accepts the other
+   rejects.
+2. **Rebuild the extension zips.** `bg/ota.js` changed, so the shipped artifacts
+   are stale until `python scripts/build-extension-zips.py` runs.
+3. Clear the terminal scrollback — both private seeds are in it.
+
+Never commit a seed, never paste one into a file inside the repo, and never put
+the **spare** into CI: the spare's whole purpose is to be the key that is still
+trustworthy after the active one leaks.
 
 ## Publishing an update
 

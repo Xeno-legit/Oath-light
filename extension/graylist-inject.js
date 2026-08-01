@@ -217,6 +217,18 @@
     // mature-game streams (the mature entries in the live capture were Slots &
     // Casino). That collateral is inherent to the only signal Kick exposes, and is
     // the accepted trade on a platform whose moderation is deliberately looser.
+    //
+    // VERIFIED COVERAGE (live, 2026-08-01): live streams (featured/browse/search),
+    // the per-channel object, the global clips feed and CATEGORY objects all carry
+    // is_mature. Because the rule matches by host, any endpoint returning objects
+    // with the flag is scrubbed without being enumerated here.
+    //
+    // KNOWN GAP: per-channel VODs (/api/v2/channels/<slug>/videos) and per-channel
+    // clips carry NO is_mature — Kick simply doesn't flag them, so there is nothing
+    // to read and they pass through. Partly mitigated by the channel-page block:
+    // both are reached from a channel page, which blocks outright when the channel
+    // itself is mature. Twitch has no equivalent gap — its labels are present on
+    // the Stream, Video AND Clip types (verified live).
     kick:     o => o.is_mature === true
   };
 

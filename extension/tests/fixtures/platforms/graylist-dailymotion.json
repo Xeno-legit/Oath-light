@@ -1,0 +1,45 @@
+{
+  "_meta": {
+    "platform": "dailymotion",
+    "field": "explicit",
+    "url": "https://api.dailymotion.com/videos?fields=id,title,explicit&limit=4",
+    "itemsPath": "list",
+    "captured": "2026-08-01",
+    "flaggedAreDerived": true,
+    "why": "Clean items are a live capture. The public endpoint would not serve a flagged item, so the flagged one is a real item with ONLY `explicit` flipped. The rename canary still holds: the field name is asserted present in the LIVE clean capture."
+  },
+  "payload": {
+    "page": 1,
+    "list": [
+      {
+        "id": "xatxj5q",
+        "title": "انفجار فى ميناء دمياط",
+        "explicit": false
+      },
+      {
+        "id": "xatxhme",
+        "title": "هجوم الالاف المغاربه على مدينه سبته",
+        "explicit": false
+      },
+      {
+        "id": "xatxgbq",
+        "title": "بيع كأس العالم.. لماذا تراجع إنفانتينو عن مشروع فيفا المثير للجدل؟ ❌",
+        "explicit": false
+      },
+      {
+        "id": "xatx872",
+        "title": "\"لديه إمكانيات كبيرة وأعجبني ما رأيته في…",
+        "explicit": false
+      },
+      {
+        "id": "xatxj5q",
+        "title": "انفجار فى ميناء دمياط",
+        "explicit": true
+      }
+    ]
+  },
+  "expect": {
+    "kept": 4,
+    "removed": 1
+  }
+}

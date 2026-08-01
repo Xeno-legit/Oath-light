@@ -51,6 +51,35 @@ jobs:
             echo "value=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           fi
 
+      # Fail HERE, with a message that names the cause, rather than three steps
+      # later with an unhelpful "file not found" from `gh release upload`.
+      #
+      # Without a key, sign-manifest.mjs drops to manifest-only mode and never
+      # writes lists-manifest.json.sig — so the upload step fails on a missing
+      # file and says nothing about signing.
+      #
+      # The commonest way to get here: adding OTA_SIGNING_KEY as an ENVIRONMENT
+      # secret. This job declares no `environment:`, so an environment-scoped
+      # secret resolves to empty and never reaches it. It must be a REPOSITORY
+      # secret (Settings → Secrets and variables → Actions → Repository secrets).
+      - name: Check the signing key is present
+        if: github.event_name == 'release'
+        env:
+          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
+        run: |
+          if [ -z "$OTA_SIGNING_KEY" ]; then
+            echo "::error::OTA_SIGNING_KEY resolved to empty — the manifest would publish UNSIGNED."
+            echo "::error::It must be a REPOSITORY secret: Settings > Secrets and variables > Actions > Repository secrets."
+            echo "::error::An Environment secret does NOT reach this job (it declares no 'environment:')."
+            exit 1
+          fi
+          if [ ${#OTA_SIGNING_KEY} -ne 64 ]; then
+            echo "::error::OTA_SIGNING_KEY is ${#OTA_SIGNING_KEY} chars; expected 64 (a 32-byte seed as hex)."
+            echo "::error::A 64-char PUBLIC key is the same length — verify with scripts/ota/check-seed.mjs."
+            exit 1
+          fi
+          echo "OTA_SIGNING_KEY present, 64 chars."
+
       - name: Build + sign manifest
         env:
           OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}

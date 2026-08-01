@@ -1,0 +1,938 @@
+{
+  "_meta": {
+    "platform": "mangadex",
+    "field": "contentRating",
+    "url": "https://api.mangadex.org/manga?limit=4",
+    "itemsPath": "data",
+    "captured": "2026-08-01",
+    "flaggedAreDerived": false,
+    "why": "Both clean and flagged items are live captures. If mangadex renames `contentRating`, the flagged item stops being stripped and this test fails."
+  },
+  "payload": {
+    "data": [
+      {
+        "id": "c6bf25fd-4262-46cc-a784-fd2c2314e0c5",
+        "type": "manga",
+        "attributes": {
+          "title": {
+            "ko-ro": "Goedam e Tteoreojyeodo Chulgeun eul Haeya Haneunguna"
+          },
+          "altTitles": [
+            {
+              "ko": "괴담에 떨어져도 출근을 해야 하는구나"
+            },
+            {
+              "ko": "괴담출근"
+            },
+            {
+              "en": "Got Dropped into a Ghost Story, Still Gotta Work"
+            },
+            {
+              "es": "Aun cuando me vi arrastrado a una histor…"
+            },
+            {
+              "en": "Even if I fall into a ghost story, I still have to go to work"
+            }
+          ],
+          "description": {
+            "en": "I sacrificed my precious vacation to att…",
+            "es": "Asistí al evento especial de un pop-up s…"
+          },
+          "isLocked": false,
+          "links": {
+            "al": "212562",
+            "kt": "78555",
+            "mu": "6uqt4zm",
+            "nu": "got-dropped-into-a-ghost-story-still-gotta-work",
+            "mal": "193929",
+            "raw": "https://page.kakao.com/content/69229506"
+          },
+          "officialLinks": null,
+          "originalLanguage": "ko",
+          "lastVolume": "",
+          "lastChapter": "",
+          "publicationDemographic": null,
+          "status": "ongoing",
+          "year": 2026,
+          "contentRating": "safe",
+          "tags": [
+            {
+              "id": "07251805-a27e-4d59-b488-f0bfbec15168",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Thriller"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "391b0423-d847-456f-aff0-8b0cfc03066b",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Action"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "3b60b75c-a2d7-4860-ab56-05f391bb889c",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Psychological"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "3bb26d85-09d5-4d2e-880c-c34b974339e9",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Ghosts"
+                },
+                "description": {},
+                "group": "theme",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "3e2b8dae-350e-4ab8-a8ce-016e844b9f0d",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Long Strip"
+                },
+                "description": {},
+                "group": "format",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "5fff9cde-849c-4d78-aab0-0d52b2ee1d25",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Survival"
+                },
+                "description": {},
+                "group": "theme",
+                "version": 1
+              },
+              "relationships": []
+            }
+          ],
+          "state": "published",
+          "chapterNumbersResetOnNewVolume": false,
+          "createdAt": "2026-05-25T02:08:33+00:00",
+          "updatedAt": "2026-07-16T19:54:13+00:00",
+          "version": 15,
+          "availableTranslatedLanguages": [
+            "es",
+            "en",
+            "pt-br"
+          ],
+          "latestUploadedChapter": "ba839824-6932-4bbf-992d-5aa9b3f59a6b"
+        },
+        "relationships": [
+          {
+            "id": "2d4695fd-d178-463f-904b-3485927cfcdf",
+            "type": "author"
+          },
+          {
+            "id": "933153b6-6993-4702-8a44-875a7f71a3ec",
+            "type": "author"
+          },
+          {
+            "id": "72445b36-38b7-4682-9fa6-e097810b5d5a",
+            "type": "artist"
+          },
+          {
+            "id": "c7d63c3e-f18b-42e5-8747-cb13ecf12f91",
+            "type": "cover_art"
+          },
+          {
+            "id": "18cebd6c-4853-476a-b7e1-59d72859df63",
+            "type": "creator"
+          }
+        ]
+      },
+      {
+        "id": "29d93e89-8f63-4713-a8be-4ac58ffcd88b",
+        "type": "manga",
+        "attributes": {
+          "title": {
+            "en": "Tsuiraku JK to Haijin Kyoushi"
+          },
+          "altTitles": [
+            {
+              "ja": "墜落JKと廃人教師"
+            },
+            {
+              "en": "Love Me Before You Die"
+            },
+            {
+              "en": "The Fallen High School Girl and the Crippled Teacher"
+            },
+            {
+              "en": "Falling High School Girl and Irresponsible Teacher"
+            },
+            {
+              "de": "Lieb mich noch, bevor du stirbst"
+            },
+            {
+              "fr": "Le jeu de la mort"
+            }
+          ],
+          "description": {
+            "en": "Mikoto Ochiai is ready to jump off the r…",
+            "uk": "Мікото Очіай готова стрибнути з даху буд…",
+            "es-la": "Mikoto Ochiai está pronto para pular do …",
+            "pt-br": "Mikoto Ochiai está pronta para pular do …"
+          },
+          "isLocked": false,
+          "links": {
+            "al": "99737",
+            "ap": "tsuiraku-jk-to-haijin-kyoushi",
+            "kt": "50265",
+            "mu": "9vlgael",
+            "mal": "108639",
+            "raw": "https://twitter.com/TSUIRAKU_JK"
+          },
+          "officialLinks": null,
+          "originalLanguage": "ja",
+          "lastVolume": "20",
+          "lastChapter": "119",
+          "publicationDemographic": "shoujo",
+          "status": "completed",
+          "year": 2017,
+          "contentRating": "safe",
+          "tags": [
+            {
+              "id": "423e2eae-a7a2-4a8b-ac03-a8351462d71d",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Romance"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "4d32cc48-9f00-4cca-9b5a-a839f0764984",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Comedy"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "b9af3a63-f058-46de-a9a0-e0c13906197a",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Drama"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "caaa44eb-cd40-4177-b930-79d3ef2afe87",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "School Life"
+                },
+                "description": {},
+                "group": "theme",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "e5301a23-ebd9-49dd-a0cb-2add944c7fe9",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Slice of Life"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            }
+          ],
+          "state": "published",
+          "chapterNumbersResetOnNewVolume": false,
+          "createdAt": "2019-02-21T00:54:57+00:00",
+          "updatedAt": "2025-11-15T16:56:34+00:00",
+          "version": 29,
+          "availableTranslatedLanguages": [
+            "es-la",
+            "pt-br",
+            "en",
+            "uk",
+            "id",
+            "hu"
+          ],
+          "latestUploadedChapter": "2cb48eea-04f8-450e-82f9-d4c82740c6ae"
+        },
+        "relationships": [
+          {
+            "id": "3d7c066f-910c-43fa-9781-58be656a66a5",
+            "type": "author"
+          },
+          {
+            "id": "3d7c066f-910c-43fa-9781-58be656a66a5",
+            "type": "artist"
+          },
+          {
+            "id": "fbf9a2fc-125e-4ca0-98cc-4dc37aa6480a",
+            "type": "cover_art"
+          },
+          {
+            "id": "15ced587-ec45-48b1-96d7-583b464db6f6",
+            "type": "manga",
+            "related": "alternate_version"
+          },
+          {
+            "id": "29ed16f3-2607-408f-8d51-cbe6d68eafcb",
+            "type": "manga",
+            "related": "side_story"
+          }
+        ]
+      },
+      {
+        "id": "fa442671-f5ef-4397-93c4-0560b9a3a278",
+        "type": "manga",
+        "attributes": {
+          "title": {
+            "ja-ro": "Make Heroine o Katasetai!!"
+          },
+          "altTitles": [
+            {
+              "ja": "負けヒロインを勝たせたい！！"
+            },
+            {
+              "ja-ro": "Make Heroine wo Katasetai!!"
+            },
+            {
+              "en": "I Want To Make The Losing Heroine Win!!"
+            },
+            {
+              "en": "I Want the Losing Heroine to Win!!"
+            },
+            {
+              "es": "¡Quiero que la heroína perdedora gane!"
+            },
+            {
+              "es-la": "¡Quiero que gane la heroína perdedora!"
+            }
+          ],
+          "description": {
+            "en": "Manaka Kawashima, a high school girl, is…",
+            "es": "¡De heroína perdedora a heroína ganadora…",
+            "ja": "ラブコメの世界なら圧倒的“負けヒロイン”の「川島まなか」。その川島をモブ主人公・木村は“勝ちヒロイン”へ導こうとして…！？",
+            "vi": "Biến nữ chính thua cuộc thành nữ chính t…",
+            "es-la": "¡De heroína perdedora a heroína ganadora…"
+          },
+          "isLocked": true,
+          "links": {
+            "al": "198118",
+            "ap": "make-heroine-wo-katasetai-2025",
+            "bl": "1999986",
+            "bw": "series/547194",
+            "kt": "make-heroine-o-katasetai",
+            "mu": "o3cyxkc",
+            "amz": "https://www.amazon.co.jp/dp/B0FS24YS9F",
+            "cdj": "https://www.cdjapan.co.jp/product/NEOBK-3145478",
+            "ebj": "https://ebookjapan.yahoo.co.jp/books/933203/",
+            "mal": "186436",
+            "raw": "https://championcross.jp/series/e345a5f1fc20b/"
+          },
+          "officialLinks": null,
+          "originalLanguage": "ja",
+          "lastVolume": "",
+          "lastChapter": "",
+          "publicationDemographic": "shounen",
+          "status": "hiatus",
+          "year": 2025,
+          "contentRating": "safe",
+          "tags": [
+            {
+              "id": "423e2eae-a7a2-4a8b-ac03-a8351462d71d",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Romance"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "4d32cc48-9f00-4cca-9b5a-a839f0764984",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Comedy"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "caaa44eb-cd40-4177-b930-79d3ef2afe87",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "School Life"
+                },
+                "description": {},
+                "group": "theme",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "e5301a23-ebd9-49dd-a0cb-2add944c7fe9",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Slice of Life"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            }
+          ],
+          "state": "published",
+          "chapterNumbersResetOnNewVolume": false,
+          "createdAt": "2025-08-22T10:27:36+00:00",
+          "updatedAt": "2026-07-29T23:47:45+00:00",
+          "version": 53,
+          "availableTranslatedLanguages": [
+            "vi",
+            "es-la",
+            "es",
+            "id",
+            "en",
+            "uk"
+          ],
+          "latestUploadedChapter": "edf38ac7-e37a-428f-a8bf-5def4fae06fc"
+        },
+        "relationships": [
+          {
+            "id": "51d7467c-a845-455b-a686-6cc4c03f7494",
+            "type": "author"
+          },
+          {
+            "id": "9391d726-cbb2-48bd-871b-b7952f85192b",
+            "type": "artist"
+          },
+          {
+            "id": "3d2aa9fe-88a8-4291-bc18-675eeb24803d",
+            "type": "cover_art"
+          },
+          {
+            "id": "78f730fe-4954-475f-a443-3e4286e33bd0",
+            "type": "manga",
+            "related": "preserialization"
+          },
+          {
+            "id": "6b9003b6-c814-46fe-afc3-414ebb4580db",
+            "type": "creator"
+          }
+        ]
+      },
+      {
+        "id": "18ef1e92-f574-4c8c-99af-555e44ba418e",
+        "type": "manga",
+        "attributes": {
+          "title": {
+            "ja-ro": "Touhou Ibara Kasen ~ Wild and Horned Hermit."
+          },
+          "altTitles": [
+            {
+              "en": "Eastern Thorned Poet Hermit ~ Wild and Horned Hermit."
+            },
+            {
+              "en": "WaHH"
+            },
+            {
+              "ru": "Тохо Ибаракасэн ~ Дикий и Рогатый Отшельник"
+            },
+            {
+              "ja": "東方茨歌仙　～ Wild and Horned Hermit."
+            },
+            {
+              "de": "Der Rosenpoet des Ostens ~ Wild and Horned Hermit."
+            },
+            {
+              "uk": "Тохо Ібаракасен ~ Дика та Рогата Відлюдниця"
+            }
+          ],
+          "description": {
+            "en": "In this 10 volume official Touhou series…",
+            "pt": "De Zun, Wild and Horned Hermit é o últim…"
+          },
+          "isLocked": false,
+          "links": {
+            "al": "51054",
+            "ap": "touhou-ibara-kasen-wild-and-horned-hermit",
+            "bw": "series/17337/list",
+            "kt": "10406",
+            "mu": "g487f8m",
+            "mal": "21054"
+          },
+          "officialLinks": null,
+          "originalLanguage": "ja",
+          "lastVolume": "11",
+          "lastChapter": "51",
+          "publicationDemographic": "seinen",
+          "status": "completed",
+          "year": 2010,
+          "contentRating": "safe",
+          "tags": [
+            {
+              "id": "4d32cc48-9f00-4cca-9b5a-a839f0764984",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Comedy"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "cdc58593-87dd-415e-bbc0-2ec27bf404cc",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Fantasy"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "e5301a23-ebd9-49dd-a0cb-2add944c7fe9",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Slice of Life"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "eabc5b4c-6aff-42f3-b657-3e90cbd00b75",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Supernatural"
+                },
+                "description": {},
+                "group": "theme",
+                "version": 1
+              },
+              "relationships": []
+            }
+          ],
+          "state": "published",
+          "chapterNumbersResetOnNewVolume": false,
+          "createdAt": "2018-03-06T02:17:48+00:00",
+          "updatedAt": "2026-04-25T23:07:02+00:00",
+          "version": 14,
+          "availableTranslatedLanguages": [
+            "fr",
+            "pt-br",
+            "es-la",
+            "en",
+            "vi",
+            "ru"
+          ],
+          "latestUploadedChapter": "2c70dd31-1323-4004-9a80-d3ed3962a94d"
+        },
+        "relationships": [
+          {
+            "id": "ea023338-5071-47e7-bef2-2e05f9349bb3",
+            "type": "author"
+          },
+          {
+            "id": "d52caace-85b3-41c9-a3ce-7d5a03a41dbc",
+            "type": "artist"
+          },
+          {
+            "id": "1f582f7f-fb0b-4f61-a67c-f1c9816a5f51",
+            "type": "cover_art"
+          },
+          {
+            "id": "0483d2ef-557e-43ae-9761-2f2f0677625a",
+            "type": "manga",
+            "related": "shared_universe"
+          },
+          {
+            "id": "8b98e414-3eae-4b4f-b43b-5e75fbbb0014",
+            "type": "manga",
+            "related": "shared_universe"
+          },
+          {
+            "id": "9a954c41-dcc4-4781-b0c5-6300e4e76a99",
+            "type": "manga",
+            "related": "shared_universe"
+          }
+        ]
+      },
+      {
+        "id": "ebe80874-102e-4ba8-9283-78806e0c22e9",
+        "type": "manga",
+        "attributes": {
+          "title": {
+            "en": "Mahou Shoujo ni Akogarete - Utena no Shittai (Doujinshi)"
+          },
+          "altTitles": [
+            {
+              "ja": "うてなの失態 (魔法少女にあこがれて)"
+            },
+            {
+              "ja-ro": "Utena no Shittai (Mahou Shoujo ni Akogarete)"
+            },
+            {
+              "en": "Utena Mistake (Gushing over Magical Girls)"
+            }
+          ],
+          "description": {
+            "en": "| Namespace | Tags |\n| :- | :- |\n| parod…"
+          },
+          "isLocked": false,
+          "links": {
+            "raw": "https://www.melonbooks.co.jp/detail/detail.php?product_id=2492560"
+          },
+          "officialLinks": null,
+          "originalLanguage": "ja",
+          "lastVolume": "",
+          "lastChapter": "",
+          "publicationDemographic": null,
+          "status": "completed",
+          "year": 2024,
+          "contentRating": "pornographic",
+          "tags": [
+            {
+              "id": "0234a31e-a729-4e28-9d6a-3f87c4966b9e",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Oneshot"
+                },
+                "description": {},
+                "group": "format",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "2d1f5d56-a1e5-4d0d-a961-2193588b08ec",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Loli"
+                },
+                "description": {},
+                "group": "theme",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "81c836c9-914a-4eca-981a-560dad663e73",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Magical Girls"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "a3c67850-4684-404e-9b7f-c69850ee5da6",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Girls' Love"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "b13b2a48-c720-44a9-9c77-39c9979373fb",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Doujinshi"
+                },
+                "description": {},
+                "group": "format",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "f5ba408b-0e7a-484d-8d49-4e9125ac96de",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Full Color"
+                },
+                "description": {},
+                "group": "format",
+                "version": 1
+              },
+              "relationships": []
+            }
+          ],
+          "state": "published",
+          "chapterNumbersResetOnNewVolume": false,
+          "createdAt": "2024-09-30T03:33:20+00:00",
+          "updatedAt": "2024-09-30T06:21:23+00:00",
+          "version": 6,
+          "availableTranslatedLanguages": [
+            "pt-br",
+            "en",
+            "es-la"
+          ],
+          "latestUploadedChapter": "6a6642d2-6122-4f33-9a97-8d483e43c0d6"
+        },
+        "relationships": [
+          {
+            "id": "0044583d-39a5-4deb-bbf2-8c8eb3c524d9",
+            "type": "author"
+          },
+          {
+            "id": "7d6bb278-2754-4848-8820-c9fac539ba2f",
+            "type": "author"
+          },
+          {
+            "id": "0044583d-39a5-4deb-bbf2-8c8eb3c524d9",
+            "type": "artist"
+          },
+          {
+            "id": "7d6bb278-2754-4848-8820-c9fac539ba2f",
+            "type": "artist"
+          },
+          {
+            "id": "d91cf194-3f6c-4b06-8ff7-a3aa2675906d",
+            "type": "cover_art"
+          },
+          {
+            "id": "feff4eaf-01df-4a05-83f4-68bb5cdf4fad",
+            "type": "manga",
+            "related": "based_on"
+          }
+        ]
+      },
+      {
+        "id": "f1dec333-f6cb-4243-9968-2270e9dfb479",
+        "type": "manga",
+        "attributes": {
+          "title": {
+            "en": "Mahou Shoujo ni Akogarete - Kaishakuchigai ni Akogarete (Doujinshi)"
+          },
+          "altTitles": [
+            {
+              "ja": "解釈違いにあこがれて (魔法少女にあこがれて)"
+            },
+            {
+              "ja-ro": "Kaishakuchigai ni akogarete (Mahou Shoujo ni Akogarete)"
+            },
+            {
+              "en": "Looking up to Misinterpretations (Gushing over Magical Girls)"
+            }
+          ],
+          "description": {
+            "en": "| Namespace | Tags |\n| :- | :- |\n| parod…"
+          },
+          "isLocked": false,
+          "links": {
+            "raw": "https://www.melonbooks.co.jp/detail/detail.php?product_id=2389078"
+          },
+          "officialLinks": null,
+          "originalLanguage": "ja",
+          "lastVolume": "",
+          "lastChapter": "",
+          "publicationDemographic": null,
+          "status": "completed",
+          "year": 2024,
+          "contentRating": "pornographic",
+          "tags": [
+            {
+              "id": "0234a31e-a729-4e28-9d6a-3f87c4966b9e",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Oneshot"
+                },
+                "description": {},
+                "group": "format",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "7064a261-a137-4d3a-8848-2d385de3a99c",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Superhero"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "81c836c9-914a-4eca-981a-560dad663e73",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Magical Girls"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "a1f53773-c69a-4ce5-8cab-fffcd90b1565",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Magic"
+                },
+                "description": {},
+                "group": "theme",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "a3c67850-4684-404e-9b7f-c69850ee5da6",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Girls' Love"
+                },
+                "description": {},
+                "group": "genre",
+                "version": 1
+              },
+              "relationships": []
+            },
+            {
+              "id": "b13b2a48-c720-44a9-9c77-39c9979373fb",
+              "type": "tag",
+              "attributes": {
+                "name": {
+                  "en": "Doujinshi"
+                },
+                "description": {},
+                "group": "format",
+                "version": 1
+              },
+              "relationships": []
+            }
+          ],
+          "state": "published",
+          "chapterNumbersResetOnNewVolume": false,
+          "createdAt": "2024-05-19T20:57:28+00:00",
+          "updatedAt": "2024-05-20T01:37:08+00:00",
+          "version": 4,
+          "availableTranslatedLanguages": [
+            "vi",
+            "en"
+          ],
+          "latestUploadedChapter": "3ee50591-284f-41db-a2cd-0fdd5e31a1b7"
+        },
+        "relationships": [
+          {
+            "id": "2ee79f77-cbae-4d6c-bd98-7f9ecf5d77be",
+            "type": "author"
+          },
+          {
+            "id": "7ef1834d-af68-4527-9b34-09c5c5dac359",
+            "type": "author"
+          },
+          {
+            "id": "2ee79f77-cbae-4d6c-bd98-7f9ecf5d77be",
+            "type": "artist"
+          },
+          {
+            "id": "7ef1834d-af68-4527-9b34-09c5c5dac359",
+            "type": "artist"
+          },
+          {
+            "id": "2c42455a-254b-4498-bed0-d9bfdfb84eed",
+            "type": "cover_art"
+          },
+          {
+            "id": "feff4eaf-01df-4a05-83f4-68bb5cdf4fad",
+            "type": "manga",
+            "related": "based_on"
+          }
+        ]
+      }
+    ],
+    "result": "ok"
+  },
+  "expect": {
+    "kept": 4,
+    "removed": 2
+  }
+}

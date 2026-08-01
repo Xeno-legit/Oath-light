@@ -48,11 +48,17 @@ Phase 4 has exactly two lines outstanding; every other item on it is Done.
 | See the desktop reminder card render | anyone, at a machine | new in 0.5.0; unit-tested and compiling, never watched |
 | Test the AI overlay's "this was wrong" button on a live detection | anyone, at a machine | overlay only; the extension's blocked page has no such button |
 | Pre-Alpha launch test, full scale | anyone, at a machine | |
-| Swap OTA dev keys for production keys | **owner only** | needs the private key — [OTA_KEYS.md](OTA_KEYS.md) |
+| ~~Swap OTA dev keys for production keys~~ | — | **done 2026-08-01** — production pair baked and verified identical across both clients |
+| Confirm the active seed is the `OTA_SIGNING_KEY` secret | **owner only** | the public half is already in the repo by design; only the private seed is outstanding — [OTA_KEYS.md](OTA_KEYS.md) |
 | Arabic draft read by a fluent speaker → `reviewed: true` | **a fluent speaker** | cannot be faked or machine-checked |
 
 Six of those are the *same activity* — install the current build on a machine
 and exercise it. Budget one focused session, not six.
+
+**That session is written out station by station in
+[ALPHA_VERIFICATION.md](ALPHA_VERIFICATION.md)** — ordered so anything that
+invalidates the rest fails first, with explicit pass/fail lines and a results
+table. Run it off the screen rather than from this table.
 
 The uninstall gate coming off this list matters more than one row suggests: it
 was the only item here that had never run at all, and the one most likely to
@@ -97,8 +103,10 @@ the other three friction rather than theatre.
 
 Parked in other ROADMAP buckets, and none of it blocks the launch:
 
-* The remaining platforms — Instagram, TikTok, YouTube Shorts, Twitch, Kick,
-  Telegram Web, WhatsApp previews, Discord embeds. *(needs the sites open)*
+* The remaining platforms — Instagram, TikTok, YouTube Shorts, Telegram Web,
+  WhatsApp previews, Discord embeds. *(needs the sites open)*
+  Twitch and Kick came off this list on 2026-08-01 — both publish per-item
+  labels as ordinary JSON, so they went through the existing stripper.
 * Model quantization, DirectML/NPU, the real 200-400 image eval set, in-page
   image scoring, the strictness knob. *(needs a GPU)*
 * Translation **extraction** — only ~94 keys exist and most UI copy is still
@@ -150,18 +158,14 @@ website → donation booth → **Full launch**.
 
 ## Loose ends to settle at alpha, not after
 
-* **The installer still calls this an open beta.**
-  [installer/POLICY.md](../desktop-app/installer/POLICY.md) and
-  [installer/EULA.rtf](../desktop-app/installer/EULA.rtf) both open with
-  *"Version 0.1.0 (Open Beta) — 2026-07-05"* and a section headed "This is an
-  open beta", while the app badge reads ALPHA and the build is 0.5.0. Users
-  would be agreeing to a document describing a different stage of a different
-  version. MASTER_PLAN cancelled the Open Beta back in Phase 3 ("straight to
-  Alpha instead"), so this framing is stale by a whole phase — not just a
-  version number.
+* ~~**The installer still calls this an open beta.**~~ **Resolved** — verified
+  2026-08-01: both [installer/POLICY.md](../desktop-app/installer/POLICY.md) and
+  [installer/EULA.rtf](../desktop-app/installer/EULA.rtf) now open with
+  *"Version 0.5.0 (Alpha) — 2026-07-31"*, matching the app badge and the build.
 
-* **The uninstall gate has never run on a real install.** The NSIS assembles and
-  the decision table is unit-tested, but Settings → Apps refusing, an in-app
-  removal completing, and an upgrade preserving policy/DNS/autostart have not
-  been exercised against an installed build. This is the newest and least-proven
-  code in the release.
+* ~~**The uninstall gate has never run on a real install.**~~ **Resolved** — it
+  was exercised end to end on 2026-07-31 (see the table above; this bullet
+  contradicted it and was simply stale).
+
+Both bullets above were stale when found. This section is a view, not a source —
+when it disagrees with ROADMAP or the tree, believe those.

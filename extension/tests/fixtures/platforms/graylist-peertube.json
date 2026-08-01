@@ -1,0 +1,865 @@
+{
+  "_meta": {
+    "platform": "peertube",
+    "field": "nsfw",
+    "url": "https://framatube.org/api/v1/videos?count=4",
+    "itemsPath": "data",
+    "captured": "2026-08-01",
+    "flaggedAreDerived": false,
+    "why": "Both clean and flagged items are live captures. If peertube renames `nsfw`, the flagged item stops being stripped and this test fails."
+  },
+  "payload": {
+    "total": 6,
+    "data": [
+      {
+        "id": 71185,
+        "uuid": "1f0fdabb-04f8-4834-89e9-d503f101196c",
+        "shortUUID": "4QtaeFAKRwehVoETysqBkj",
+        "url": "https://tube.tchncs.de/videos/watch/1f0fdabb-04f8-4834-89e9-d503f101196c",
+        "name": "Nikas erste Mahlzeit im neuen Zuhause",
+        "category": {
+          "id": 16,
+          "label": "Animals"
+        },
+        "licence": {
+          "id": 9,
+          "label": "All Rights Reserved"
+        },
+        "language": {
+          "id": "de",
+          "label": "German"
+        },
+        "privacy": {
+          "id": 1,
+          "label": "Public"
+        },
+        "nsfw": false,
+        "nsfwFlags": 0,
+        "nsfwSummary": null,
+        "truncatedDescription": null,
+        "description": null,
+        "isLocal": false,
+        "duration": 263,
+        "aspectRatio": 1.7778,
+        "views": 2,
+        "viewers": 1,
+        "downloads": 15,
+        "likes": 0,
+        "dislikes": 0,
+        "thumbnailPath": "/lazy-static/thumbnails/a8b02c50-fb9d-488d-b755-41caba3ba478.jpg",
+        "previewPath": "/lazy-static/thumbnails/d31ccf6f-33b7-40a6-89a6-0cafa3b262d5.jpg",
+        "thumbnails": [
+          {
+            "height": 480,
+            "width": 850,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/60873449-7b9f-4df3-875a-5729bf63bd11.jpg"
+          },
+          {
+            "height": 1080,
+            "width": 1920,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/d31ccf6f-33b7-40a6-89a6-0cafa3b262d5.jpg"
+          },
+          {
+            "height": 157,
+            "width": 280,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/a8b02c50-fb9d-488d-b755-41caba3ba478.jpg"
+          },
+          {
+            "height": 720,
+            "width": 1280,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/7d5b6e1e-3fe2-4a5e-9f7c-2491a1cb8ae0.jpg"
+          },
+          {
+            "height": 1400,
+            "width": 1400,
+            "aspectRatio": "1:1",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/9a002219-e168-493f-9b2a-9c0da3fb0ec9.jpg"
+          }
+        ],
+        "embedPath": "/videos/embed/4QtaeFAKRwehVoETysqBkj",
+        "createdAt": "2026-08-01T11:10:44.918Z",
+        "updatedAt": "2026-08-01T11:32:40.391Z",
+        "publishedAt": "2026-08-01T11:10:44.918Z",
+        "originallyPublishedAt": null,
+        "isLive": false,
+        "account": {
+          "id": 750751,
+          "displayName": "fscdex",
+          "name": "fscdex",
+          "url": "https://tube.tchncs.de/accounts/fscdex",
+          "host": "tube.tchncs.de",
+          "avatars": [
+            {
+              "width": 120,
+              "path": "/lazy-static/avatars/c1cfd1af-dfdc-4bd8-923a-32bdc87e1973.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/c1cfd1af-dfdc-4bd8-923a-32bdc87e1973.png",
+              "createdAt": "2024-09-16T15:35:19.946Z",
+              "updatedAt": "2024-09-16T15:35:19.946Z"
+            },
+            {
+              "width": 600,
+              "path": "/lazy-static/avatars/a84c5172-40ea-43fb-a251-df041e27d961.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/a84c5172-40ea-43fb-a251-df041e27d961.png",
+              "createdAt": "2024-09-16T15:35:19.958Z",
+              "updatedAt": "2024-09-16T15:35:19.958Z"
+            },
+            {
+              "width": 1500,
+              "path": "/lazy-static/avatars/31989662-4501-43d5-bafc-0cfa99e7ac44.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/31989662-4501-43d5-bafc-0cfa99e7ac44.png",
+              "createdAt": "2024-09-16T15:35:19.971Z",
+              "updatedAt": "2025-12-15T14:40:54.159Z"
+            },
+            {
+              "width": 48,
+              "path": "/lazy-static/avatars/1e01c4c3-d632-4eca-afd6-84a55cd65ead.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/1e01c4c3-d632-4eca-afd6-84a55cd65ead.png",
+              "createdAt": "2024-09-16T15:35:19.931Z",
+              "updatedAt": "2026-08-01T11:42:16.586Z"
+            }
+          ]
+        },
+        "channel": {
+          "id": 4185,
+          "name": "nika.gsd",
+          "displayName": "Nika",
+          "url": "https://tube.tchncs.de/video-channels/nika.gsd",
+          "host": "tube.tchncs.de",
+          "avatars": [
+            {
+              "width": 48,
+              "path": "/lazy-static/avatars/5b29b966-e4a5-4881-a564-30935bafaf5a.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/5b29b966-e4a5-4881-a564-30935bafaf5a.jpg",
+              "createdAt": "2026-08-01T11:10:47.985Z",
+              "updatedAt": "2026-08-01T11:14:32.341Z"
+            },
+            {
+              "width": 600,
+              "path": "/lazy-static/avatars/4ddcf3c5-af81-452e-9135-8616c7dd29d5.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/4ddcf3c5-af81-452e-9135-8616c7dd29d5.jpg",
+              "createdAt": "2026-08-01T11:10:48.007Z",
+              "updatedAt": "2026-08-01T11:10:48.007Z"
+            },
+            {
+              "width": 1500,
+              "path": "/lazy-static/avatars/c4815b6b-1e45-4eb3-84d9-3aa126051c6b.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/c4815b6b-1e45-4eb3-84d9-3aa126051c6b.jpg",
+              "createdAt": "2026-08-01T11:10:48.024Z",
+              "updatedAt": "2026-08-01T11:10:48.024Z"
+            },
+            {
+              "width": 120,
+              "path": "/lazy-static/avatars/cc5d2de7-5b2f-4235-a899-64ba236e17e5.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/cc5d2de7-5b2f-4235-a899-64ba236e17e5.jpg",
+              "createdAt": "2026-08-01T11:10:47.964Z",
+              "updatedAt": "2026-08-01T11:27:44.356Z"
+            }
+          ]
+        },
+        "comments": 0
+      },
+      {
+        "id": 71180,
+        "uuid": "06946407-7f52-4193-9450-c01777008f24",
+        "shortUUID": "1P8cg72AqyapuCsmsUhCVj",
+        "url": "https://tube.tchncs.de/videos/watch/06946407-7f52-4193-9450-c01777008f24",
+        "name": "aus und vorbei",
+        "category": {
+          "id": 8,
+          "label": "People"
+        },
+        "licence": {
+          "id": 6,
+          "label": "Attribution - Non Commercial - No Derivatives"
+        },
+        "language": {
+          "id": "de",
+          "label": "German"
+        },
+        "privacy": {
+          "id": 1,
+          "label": "Public"
+        },
+        "nsfw": false,
+        "nsfwFlags": 0,
+        "nsfwSummary": null,
+        "truncatedDescription": null,
+        "description": null,
+        "isLocal": false,
+        "duration": 25,
+        "aspectRatio": 1.7778,
+        "views": 9,
+        "viewers": 0,
+        "downloads": 40,
+        "likes": 0,
+        "dislikes": 0,
+        "thumbnailPath": "/lazy-static/thumbnails/b1369e7b-87d3-4775-b6df-d38530997d23.jpg",
+        "previewPath": "/lazy-static/thumbnails/c75845ad-eebd-43f5-b78b-bec71d2d7f40.jpg",
+        "thumbnails": [
+          {
+            "height": 157,
+            "width": 280,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/b1369e7b-87d3-4775-b6df-d38530997d23.jpg"
+          },
+          {
+            "height": 480,
+            "width": 850,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/bbb72e3c-9a78-469a-9e4c-fc9d93902255.jpg"
+          },
+          {
+            "height": 720,
+            "width": 1280,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/6b217250-23d3-46cf-b96c-c06be60056f5.jpg"
+          },
+          {
+            "height": 1400,
+            "width": 1400,
+            "aspectRatio": "1:1",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/52032e05-63dd-4701-9c33-3a866b90a8c8.jpg"
+          },
+          {
+            "height": 1080,
+            "width": 1920,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/c75845ad-eebd-43f5-b78b-bec71d2d7f40.jpg"
+          }
+        ],
+        "embedPath": "/videos/embed/1P8cg72AqyapuCsmsUhCVj",
+        "createdAt": "2026-08-01T09:15:32.635Z",
+        "updatedAt": "2026-08-01T11:32:33.146Z",
+        "publishedAt": "2026-08-01T09:15:32.635Z",
+        "originallyPublishedAt": null,
+        "isLive": false,
+        "account": {
+          "id": 8452,
+          "displayName": "Videosophie",
+          "name": "michael_k",
+          "url": "https://tube.tchncs.de/accounts/michael_k",
+          "host": "tube.tchncs.de",
+          "avatars": [
+            {
+              "width": 48,
+              "path": "/lazy-static/avatars/b3aab98d-80bc-4f3e-9b29-66baf9eaee8c.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/b3aab98d-80bc-4f3e-9b29-66baf9eaee8c.jpg",
+              "createdAt": "2022-06-09T21:06:01.299Z",
+              "updatedAt": "2026-03-14T19:21:39.896Z"
+            },
+            {
+              "width": 120,
+              "path": "/lazy-static/avatars/399e1cfe-b2ff-4b99-aab7-df4224ab03f3.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/399e1cfe-b2ff-4b99-aab7-df4224ab03f3.jpg",
+              "createdAt": "2022-06-09T21:06:01.300Z",
+              "updatedAt": "2026-03-13T06:22:24.094Z"
+            }
+          ]
+        },
+        "channel": {
+          "id": 474,
+          "name": "videosophie",
+          "displayName": "Videosophie",
+          "url": "https://tube.tchncs.de/video-channels/videosophie",
+          "host": "tube.tchncs.de",
+          "avatars": [
+            {
+              "width": 120,
+              "path": "/lazy-static/avatars/8e78f6a0-1519-41bf-a6fb-dc32015c83c2.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/8e78f6a0-1519-41bf-a6fb-dc32015c83c2.jpg",
+              "createdAt": "2026-04-01T05:12:35.289Z",
+              "updatedAt": "2026-04-01T10:53:00.264Z"
+            },
+            {
+              "width": 1500,
+              "path": "/lazy-static/avatars/da6f86b9-744e-487d-8d0d-69535005a149.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/da6f86b9-744e-487d-8d0d-69535005a149.jpg",
+              "createdAt": "2026-04-01T05:12:35.290Z",
+              "updatedAt": "2026-04-02T12:28:05.435Z"
+            },
+            {
+              "width": 600,
+              "path": "/lazy-static/avatars/08212a7f-0e25-43e3-bf13-a5b7e9080034.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/08212a7f-0e25-43e3-bf13-a5b7e9080034.jpg",
+              "createdAt": "2026-04-01T05:12:35.299Z",
+              "updatedAt": "2026-05-11T02:15:46.896Z"
+            },
+            {
+              "width": 48,
+              "path": "/lazy-static/avatars/4724c3f9-73eb-408a-9020-55dc5f8f3ae3.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/4724c3f9-73eb-408a-9020-55dc5f8f3ae3.jpg",
+              "createdAt": "2026-04-01T05:12:35.303Z",
+              "updatedAt": "2026-04-01T12:19:49.107Z"
+            }
+          ]
+        },
+        "comments": 0
+      },
+      {
+        "id": 71178,
+        "uuid": "7b29e039-08c2-42e3-81c1-52ef98929d6b",
+        "shortUUID": "gd7hhTfxWoG8dvMg3UFHYx",
+        "url": "https://tube.tchncs.de/videos/watch/7b29e039-08c2-42e3-81c1-52ef98929d6b",
+        "name": "experiment-2026-08-01",
+        "category": {
+          "id": 1,
+          "label": "Music"
+        },
+        "licence": {
+          "id": null,
+          "label": "Unknown"
+        },
+        "language": {
+          "id": "en",
+          "label": "English"
+        },
+        "privacy": {
+          "id": 1,
+          "label": "Public"
+        },
+        "nsfw": false,
+        "nsfwFlags": 0,
+        "nsfwSummary": null,
+        "truncatedDescription": null,
+        "description": null,
+        "isLocal": false,
+        "duration": 13260,
+        "aspectRatio": 1.8378,
+        "views": 1,
+        "viewers": 0,
+        "downloads": 43,
+        "likes": 0,
+        "dislikes": 0,
+        "thumbnailPath": "/lazy-static/thumbnails/e168149b-3191-4b44-aace-acd997b37a5e.jpg",
+        "previewPath": "/lazy-static/thumbnails/63cb509e-464a-4381-bd53-2c92b63ddd69.jpg",
+        "thumbnails": [
+          {
+            "height": 157,
+            "width": 280,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/e168149b-3191-4b44-aace-acd997b37a5e.jpg"
+          },
+          {
+            "height": 480,
+            "width": 850,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/04d78948-7d5f-4c40-91e9-eb3ba69b81b9.jpg"
+          },
+          {
+            "height": 720,
+            "width": 1280,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/9672b023-98f4-4592-8464-93ab9546bd25.jpg"
+          },
+          {
+            "height": 1400,
+            "width": 1400,
+            "aspectRatio": "1:1",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/43892766-1ca5-4c21-89d8-9f6ec82e0c8f.jpg"
+          },
+          {
+            "height": 1080,
+            "width": 1920,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/63cb509e-464a-4381-bd53-2c92b63ddd69.jpg"
+          }
+        ],
+        "embedPath": "/videos/embed/gd7hhTfxWoG8dvMg3UFHYx",
+        "createdAt": "2026-08-01T06:58:11.989Z",
+        "updatedAt": "2026-08-01T08:32:45.913Z",
+        "publishedAt": "2026-08-01T06:58:11.989Z",
+        "originallyPublishedAt": null,
+        "isLive": false,
+        "account": {
+          "id": 126743,
+          "displayName": "Pele",
+          "name": "pele",
+          "url": "https://tube.tchncs.de/accounts/pele",
+          "host": "tube.tchncs.de",
+          "avatars": [
+            {
+              "width": 120,
+              "path": "/lazy-static/avatars/5fe3fad0-7d67-4162-8b60-12f8d479d762.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/5fe3fad0-7d67-4162-8b60-12f8d479d762.png",
+              "createdAt": "2026-04-01T05:13:59.359Z",
+              "updatedAt": "2026-04-02T19:10:10.497Z"
+            },
+            {
+              "width": 1500,
+              "path": "/lazy-static/avatars/74ba09ac-cb5d-48a9-b4d4-62d3251f0bdf.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/74ba09ac-cb5d-48a9-b4d4-62d3251f0bdf.png",
+              "createdAt": "2026-04-01T05:13:59.361Z",
+              "updatedAt": "2026-04-02T22:54:36.957Z"
+            },
+            {
+              "width": 600,
+              "path": "/lazy-static/avatars/08eb898c-c77a-43be-aff6-ea01395cbb26.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/08eb898c-c77a-43be-aff6-ea01395cbb26.png",
+              "createdAt": "2026-04-01T05:13:59.391Z",
+              "updatedAt": "2026-04-01T05:13:59.391Z"
+            },
+            {
+              "width": 48,
+              "path": "/lazy-static/avatars/506d5dad-e3b6-41c1-9cca-f0892c87ff97.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/506d5dad-e3b6-41c1-9cca-f0892c87ff97.png",
+              "createdAt": "2026-04-01T05:13:59.413Z",
+              "updatedAt": "2026-04-01T06:00:43.602Z"
+            }
+          ]
+        },
+        "channel": {
+          "id": 2773,
+          "name": "the_experiment",
+          "displayName": "The Experiment",
+          "url": "https://tube.tchncs.de/video-channels/the_experiment",
+          "host": "tube.tchncs.de",
+          "avatars": [
+            {
+              "width": 120,
+              "path": "/lazy-static/avatars/6dd72edd-54b6-4c83-ad2b-165b19c5f70b.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/6dd72edd-54b6-4c83-ad2b-165b19c5f70b.png",
+              "createdAt": "2026-04-01T05:11:15.412Z",
+              "updatedAt": "2026-04-01T11:03:06.138Z"
+            },
+            {
+              "width": 1500,
+              "path": "/lazy-static/avatars/b48c7395-6d5f-4847-a97f-fa95226cc65b.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/b48c7395-6d5f-4847-a97f-fa95226cc65b.png",
+              "createdAt": "2026-04-01T05:11:15.414Z",
+              "updatedAt": "2026-04-02T13:20:28.700Z"
+            },
+            {
+              "width": 600,
+              "path": "/lazy-static/avatars/1f2827bd-4b43-4651-b8de-dbb70fe91beb.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/1f2827bd-4b43-4651-b8de-dbb70fe91beb.png",
+              "createdAt": "2026-04-01T05:11:15.415Z",
+              "updatedAt": "2026-04-01T05:11:15.415Z"
+            },
+            {
+              "width": 48,
+              "path": "/lazy-static/avatars/ce22334a-d148-4ca1-aec1-9514adeca411.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/ce22334a-d148-4ca1-aec1-9514adeca411.png",
+              "createdAt": "2026-04-01T05:11:15.436Z",
+              "updatedAt": "2026-04-01T05:11:45.338Z"
+            }
+          ]
+        },
+        "comments": 0
+      },
+      {
+        "id": 71175,
+        "uuid": "fa9791c3-64a0-4e19-a2c0-8db9595f43e0",
+        "shortUUID": "wWLdeSbPbyqNuj8eNRCBPw",
+        "url": "https://skeptikon.fr/videos/watch/fa9791c3-64a0-4e19-a2c0-8db9595f43e0",
+        "name": "MLM ou arnaque pyramidale ? 4/4, avec Manon Lasne — SHOCKING #31",
+        "category": {
+          "id": 13,
+          "label": "Education"
+        },
+        "licence": {
+          "id": null,
+          "label": "Unknown"
+        },
+        "language": {
+          "id": null,
+          "label": "Unknown"
+        },
+        "privacy": {
+          "id": 1,
+          "label": "Public"
+        },
+        "nsfw": false,
+        "nsfwFlags": 0,
+        "nsfwSummary": null,
+        "truncatedDescription": "Chapitre 4 : Épuisement et désillusion.\n…",
+        "description": "Chapitre 4 : Épuisement et désillusion.\n…",
+        "isLocal": false,
+        "duration": 3523,
+        "aspectRatio": 1.7778,
+        "views": 8,
+        "viewers": 0,
+        "downloads": 22,
+        "likes": 1,
+        "dislikes": 0,
+        "thumbnailPath": "/lazy-static/thumbnails/cc95cc38-8496-4e99-ae1a-0dd8b4da7e91.jpg",
+        "previewPath": "/lazy-static/thumbnails/3cc33c0b-afd6-489e-8e60-d4926bdb0cf5.jpg",
+        "thumbnails": [
+          {
+            "height": 157,
+            "width": 280,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/cc95cc38-8496-4e99-ae1a-0dd8b4da7e91.jpg"
+          },
+          {
+            "height": 1080,
+            "width": 1920,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/3cc33c0b-afd6-489e-8e60-d4926bdb0cf5.jpg"
+          },
+          {
+            "height": 1400,
+            "width": 1400,
+            "aspectRatio": "1:1",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/4aa111e1-4d30-4b37-9a9c-c9dba4dfe2bf.jpg"
+          },
+          {
+            "height": 720,
+            "width": 1280,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/3dc4f1e2-d3ca-4742-8746-dd532732d53a.jpg"
+          },
+          {
+            "height": 480,
+            "width": 850,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/727e9249-311f-4558-b7da-428ba647ca15.jpg"
+          }
+        ],
+        "embedPath": "/videos/embed/wWLdeSbPbyqNuj8eNRCBPw",
+        "createdAt": "2026-07-31T20:12:19.223Z",
+        "updatedAt": "2026-08-01T11:31:43.432Z",
+        "publishedAt": "2026-07-31T20:12:19.223Z",
+        "originallyPublishedAt": "2026-07-30T22:00:00.000Z",
+        "isLive": false,
+        "account": {
+          "id": 3946,
+          "displayName": "Méta de Choc",
+          "name": "metadechoc",
+          "url": "https://skeptikon.fr/accounts/metadechoc",
+          "host": "skeptikon.fr",
+          "avatars": [
+            {
+              "width": 120,
+              "path": "/lazy-static/avatars/cc728c42-f640-486d-ab3f-a67ee5a3eba9.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/cc728c42-f640-486d-ab3f-a67ee5a3eba9.jpg",
+              "createdAt": "2026-04-06T02:56:35.096Z",
+              "updatedAt": "2026-04-07T07:51:24.196Z"
+            },
+            {
+              "width": 48,
+              "path": "/lazy-static/avatars/9f8ebed1-de2c-4739-a9ae-b68195300438.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/9f8ebed1-de2c-4739-a9ae-b68195300438.jpg",
+              "createdAt": "2026-04-06T02:56:35.135Z",
+              "updatedAt": "2026-04-06T03:02:16.671Z"
+            },
+            {
+              "width": 600,
+              "path": "/lazy-static/avatars/b4400e9b-499e-47f9-a6e1-5f9f3b9f9afa.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/b4400e9b-499e-47f9-a6e1-5f9f3b9f9afa.jpg",
+              "createdAt": "2026-04-06T02:56:35.207Z",
+              "updatedAt": "2026-04-06T02:56:35.207Z"
+            },
+            {
+              "width": 1500,
+              "path": "/lazy-static/avatars/207d4341-3d66-49a0-b28c-b19720e358af.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/207d4341-3d66-49a0-b28c-b19720e358af.jpg",
+              "createdAt": "2026-04-06T02:56:35.259Z",
+              "updatedAt": "2026-05-17T04:13:40.907Z"
+            }
+          ]
+        },
+        "channel": {
+          "id": 131,
+          "name": "metadechoc_channel",
+          "displayName": "SHOCKING !",
+          "url": "https://skeptikon.fr/video-channels/metadechoc_channel",
+          "host": "skeptikon.fr",
+          "avatars": [
+            {
+              "width": 120,
+              "path": "/lazy-static/avatars/ca1babbd-dd8e-4524-a0d0-ce2bbe86b79b.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/ca1babbd-dd8e-4524-a0d0-ce2bbe86b79b.png",
+              "createdAt": "2026-04-05T19:14:30.316Z",
+              "updatedAt": "2026-04-07T07:51:24.175Z"
+            },
+            {
+              "width": 48,
+              "path": "/lazy-static/avatars/ba9a4d73-a6ef-4fde-bddb-455da3dae5a3.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/ba9a4d73-a6ef-4fde-bddb-455da3dae5a3.png",
+              "createdAt": "2026-04-05T19:14:30.342Z",
+              "updatedAt": "2026-04-05T20:59:37.384Z"
+            },
+            {
+              "width": 600,
+              "path": "/lazy-static/avatars/aec21674-c5c2-42e5-a28b-6ff825c7d03a.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/aec21674-c5c2-42e5-a28b-6ff825c7d03a.png",
+              "createdAt": "2026-04-05T19:14:30.361Z",
+              "updatedAt": "2026-04-05T19:14:30.361Z"
+            },
+            {
+              "width": 1500,
+              "path": "/lazy-static/avatars/39f0a414-84fa-4c38-ae44-f2cac8352eae.png",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/39f0a414-84fa-4c38-ae44-f2cac8352eae.png",
+              "createdAt": "2026-04-05T19:14:30.362Z",
+              "updatedAt": "2026-04-28T08:10:00.481Z"
+            }
+          ]
+        },
+        "comments": 0
+      },
+      {
+        "id": 70845,
+        "uuid": "9d681381-bb70-49be-a35d-776b6279de37",
+        "shortUUID": "krmR8fa3U7ZDH1BXzueg2Z",
+        "url": "https://video.tedomum.net/videos/watch/9d681381-bb70-49be-a35d-776b6279de37",
+        "name": "The Origins: Fragments of the Hunt",
+        "category": {
+          "id": 14,
+          "label": "Activism"
+        },
+        "licence": {
+          "id": 6,
+          "label": "Attribution - Non Commercial - No Derivatives"
+        },
+        "language": {
+          "id": "en",
+          "label": "English"
+        },
+        "privacy": {
+          "id": 1,
+          "label": "Public"
+        },
+        "nsfw": true,
+        "nsfwFlags": 0,
+        "nsfwSummary": "The film includes a scened in which a sp…",
+        "truncatedDescription": "The silent documentary film “The Origins…",
+        "description": "The silent documentary film “The Origins…",
+        "isLocal": false,
+        "duration": 3517,
+        "aspectRatio": 1.7778,
+        "views": 16,
+        "viewers": 0,
+        "downloads": 0,
+        "likes": 0,
+        "dislikes": 0,
+        "thumbnailPath": "/lazy-static/thumbnails/39d762a6-7f17-4e52-a0e1-b964584eaffd.jpg",
+        "previewPath": "/lazy-static/thumbnails/292d664b-ecc9-42c3-839b-5fd189ed6117.jpg",
+        "thumbnails": [
+          {
+            "height": 1080,
+            "width": 1920,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/292d664b-ecc9-42c3-839b-5fd189ed6117.jpg"
+          },
+          {
+            "height": 1400,
+            "width": 1400,
+            "aspectRatio": "1:1",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/204a8d84-7d32-41bd-a72f-89a2ebae1d15.jpg"
+          },
+          {
+            "height": 720,
+            "width": 1280,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/58c0c752-c656-4289-9462-d9f96fc2b712.jpg"
+          },
+          {
+            "height": 480,
+            "width": 850,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/a48bb76d-f434-4e74-83ab-9f3dea881d8e.jpg"
+          },
+          {
+            "height": 157,
+            "width": 280,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/39d762a6-7f17-4e52-a0e1-b964584eaffd.jpg"
+          }
+        ],
+        "embedPath": "/videos/embed/krmR8fa3U7ZDH1BXzueg2Z",
+        "createdAt": "2026-03-14T18:18:15.796Z",
+        "updatedAt": "2026-07-23T20:57:24.415Z",
+        "publishedAt": "2026-03-14T18:18:15.796Z",
+        "originallyPublishedAt": "2017-12-31T22:00:00.000Z",
+        "isLive": false,
+        "account": {
+          "id": 1140796,
+          "displayName": "Mikko Ijäs",
+          "name": "mikkoijas",
+          "url": "https://video.tedomum.net/accounts/mikkoijas",
+          "host": "video.tedomum.net",
+          "avatars": [
+            {
+              "width": 120,
+              "path": "/lazy-static/avatars/e57755fa-b58a-473e-baa6-336c3d9bf976.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/e57755fa-b58a-473e-baa6-336c3d9bf976.jpg",
+              "createdAt": "2026-07-09T16:33:31.563Z",
+              "updatedAt": "2026-07-09T16:33:31.563Z"
+            },
+            {
+              "width": 48,
+              "path": "/lazy-static/avatars/c08cda7a-ed7a-427d-9a41-f971f4d0efe8.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/c08cda7a-ed7a-427d-9a41-f971f4d0efe8.jpg",
+              "createdAt": "2026-07-09T16:33:31.585Z",
+              "updatedAt": "2026-07-09T16:33:31.585Z"
+            },
+            {
+              "width": 600,
+              "path": "/lazy-static/avatars/77426c7a-c725-4ecd-b118-2138cdc909fe.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/77426c7a-c725-4ecd-b118-2138cdc909fe.jpg",
+              "createdAt": "2026-07-09T16:33:31.606Z",
+              "updatedAt": "2026-07-09T16:33:31.606Z"
+            },
+            {
+              "width": 1500,
+              "path": "/lazy-static/avatars/7e65a3d2-3bbe-437d-994e-3e7ae23b766a.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/7e65a3d2-3bbe-437d-994e-3e7ae23b766a.jpg",
+              "createdAt": "2026-07-09T16:33:31.614Z",
+              "updatedAt": "2026-07-09T16:33:31.614Z"
+            }
+          ]
+        },
+        "channel": {
+          "id": 4173,
+          "name": "mikkoijas_films",
+          "displayName": "Mikko Ijäs",
+          "url": "https://video.tedomum.net/video-channels/mikkoijas_films",
+          "host": "video.tedomum.net",
+          "avatars": [
+            {
+              "width": 120,
+              "path": "/lazy-static/avatars/f236f5bb-697f-42e1-95fc-866330e6d862.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/f236f5bb-697f-42e1-95fc-866330e6d862.jpg",
+              "createdAt": "2026-07-09T16:33:31.929Z",
+              "updatedAt": "2026-07-09T16:33:31.929Z"
+            },
+            {
+              "width": 48,
+              "path": "/lazy-static/avatars/0e557a99-a5de-464a-813b-d0341e2215a7.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/0e557a99-a5de-464a-813b-d0341e2215a7.jpg",
+              "createdAt": "2026-07-09T16:33:31.956Z",
+              "updatedAt": "2026-07-09T16:33:31.956Z"
+            },
+            {
+              "width": 600,
+              "path": "/lazy-static/avatars/4bd107d5-8bb3-469c-93fb-4fe21c073c76.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/4bd107d5-8bb3-469c-93fb-4fe21c073c76.jpg",
+              "createdAt": "2026-07-09T16:33:31.978Z",
+              "updatedAt": "2026-07-09T16:33:31.978Z"
+            },
+            {
+              "width": 1500,
+              "path": "/lazy-static/avatars/83c6c9bf-64f8-44b4-b39e-cbaa39140212.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/83c6c9bf-64f8-44b4-b39e-cbaa39140212.jpg",
+              "createdAt": "2026-07-09T16:33:31.992Z",
+              "updatedAt": "2026-07-09T16:33:31.992Z"
+            }
+          ]
+        },
+        "comments": 0
+      },
+      {
+        "id": 70872,
+        "uuid": "b6dd339b-be5d-4265-bfaf-7568c3b88580",
+        "shortUUID": "ozFVQEXLxEgu8XqKZm1ph5",
+        "url": "https://tube.aquilenet.fr/videos/watch/b6dd339b-be5d-4265-bfaf-7568c3b88580",
+        "name": "Militante FN  - Les gens pensent ce que c'est des maghrébins qui nous agressent ...",
+        "category": {
+          "id": 11,
+          "label": "News & Politics"
+        },
+        "licence": {
+          "id": 1,
+          "label": "Attribution"
+        },
+        "language": {
+          "id": "fr",
+          "label": "French"
+        },
+        "privacy": {
+          "id": 1,
+          "label": "Public"
+        },
+        "nsfw": true,
+        "nsfwFlags": 0,
+        "nsfwSummary": null,
+        "truncatedDescription": "Je voulais une version propre avec sous-…",
+        "description": "Je voulais une version propre avec sous-…",
+        "isLocal": false,
+        "duration": 19,
+        "aspectRatio": 1.7778,
+        "views": 24,
+        "viewers": 0,
+        "downloads": 2,
+        "likes": 0,
+        "dislikes": 0,
+        "thumbnailPath": "/lazy-static/thumbnails/2581622b-9099-43ca-a828-0c15b87d1539.jpg",
+        "previewPath": "/lazy-static/thumbnails/12625d6c-e8ca-45d0-bf95-6dbd25a50bdb.jpg",
+        "thumbnails": [
+          {
+            "height": 157,
+            "width": 280,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/2581622b-9099-43ca-a828-0c15b87d1539.jpg"
+          },
+          {
+            "height": 480,
+            "width": 850,
+            "aspectRatio": "16:9",
+            "fileUrl": "https://framatube.org/lazy-static/thumbnails/12625d6c-e8ca-45d0-bf95-6dbd25a50bdb.jpg"
+          }
+        ],
+        "embedPath": "/videos/embed/ozFVQEXLxEgu8XqKZm1ph5",
+        "createdAt": "2025-01-02T23:39:55.015Z",
+        "updatedAt": "2026-07-31T09:41:23.205Z",
+        "publishedAt": "2025-01-02T23:39:55.015Z",
+        "originallyPublishedAt": null,
+        "isLive": false,
+        "account": {
+          "id": 1125441,
+          "displayName": "Drenghel",
+          "name": "drenghel",
+          "url": "https://tube.aquilenet.fr/accounts/drenghel",
+          "host": "tube.aquilenet.fr",
+          "avatars": [
+            {
+              "width": 120,
+              "path": "/lazy-static/avatars/26014dc9-dc40-4d45-8bba-4a5783d2a1bc.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/26014dc9-dc40-4d45-8bba-4a5783d2a1bc.jpg",
+              "createdAt": "2026-05-28T05:09:11.407Z",
+              "updatedAt": "2026-06-27T09:47:22.438Z"
+            },
+            {
+              "width": 48,
+              "path": "/lazy-static/avatars/3f7d0ea8-9456-4f60-befe-ce9487c648b9.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/3f7d0ea8-9456-4f60-befe-ce9487c648b9.jpg",
+              "createdAt": "2026-05-28T05:09:11.438Z",
+              "updatedAt": "2026-05-28T18:30:39.647Z"
+            },
+            {
+              "width": 600,
+              "path": "/lazy-static/avatars/73a33553-9602-4434-9a0b-526adf8fce3f.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/73a33553-9602-4434-9a0b-526adf8fce3f.jpg",
+              "createdAt": "2026-05-28T05:09:11.455Z",
+              "updatedAt": "2026-05-28T05:09:11.455Z"
+            },
+            {
+              "width": 1500,
+              "path": "/lazy-static/avatars/c2eb8334-8086-462d-89a6-416fc0a00bea.jpg",
+              "fileUrl": "https://framatube.org/lazy-static/avatars/c2eb8334-8086-462d-89a6-416fc0a00bea.jpg",
+              "createdAt": "2026-05-28T05:09:11.458Z",
+              "updatedAt": "2026-07-12T21:09:02.550Z"
+            }
+          ]
+        },
+        "channel": {
+          "id": 4007,
+          "name": "drenghel_channel",
+          "displayName": "Main drenghel channel",
+          "url": "https://tube.aquilenet.fr/video-channels/drenghel_channel",
+          "host": "tube.aquilenet.fr",
+          "avatars": []
+        },
+        "comments": 0
+      }
+    ]
+  },
+  "expect": {
+    "kept": 4,
+    "removed": 2
+  }
+}

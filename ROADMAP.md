@@ -17,7 +17,15 @@ translations.
 * Commit the working tree.
 * Get the Arabic draft read by a fluent speaker, then flip `reviewed: true`
   in `design-system/locales/ar.js`. Until then the picker calls it a draft.
-* Swap the OTA dev keys for production keys. (owner only — [docs/OTA_KEYS.md](docs/OTA_KEYS.md))
+* ~~Swap the OTA dev keys for production keys.~~ **Done 2026-08-01** — the
+  production pair is baked and verified byte-identical in `core/src/ota.rs` and
+  `extension/bg/ota.js`; `dev-keys.env` is gone; the release base matches the
+  real remote (`Xeno-legit/Oath-light`). **What's left is not a code change:**
+  confirm the active private seed is set as the `OTA_SIGNING_KEY` repository
+  secret and that the spare is stored offline. Public keys are already in the
+  repo by design — there is nothing key-shaped left to upload. Verify a held
+  seed with `OTA_SIGNING_KEY=… node scripts/ota/check-seed.mjs` (prints a
+  verdict, never the seed). (owner only — [docs/OTA_KEYS.md](docs/OTA_KEYS.md))
 * Smoke-test the Firefox force-install against a real admin Firefox.
 * **Verify the Edge browser lock on a real machine** — `browser_lock.rs` kills
   Edge on sight while the extension isn't running in it, and the only way back
@@ -40,6 +48,10 @@ translations.
   vulnerable hours to cover now and wait a minute.
 * Pre-Alpha launch test — everything, full scale.
 
+▶ The machine-bound items above are one sitting, written out station by station
+in [docs/ALPHA_VERIFICATION.md](docs/ALPHA_VERIFICATION.md) — ordered to fail
+fastest, with pass/fail lines and a results table.
+
 ## Needs the sites actually open
 
 ▶ Written blind these would look right and quietly do nothing. Do them in a session where the pages can be loaded and checked.
@@ -52,14 +64,24 @@ translations.
   stripping those would gut ordinary gaming Twitch for no NSFW gain. Kick:
   `is_mature`, its only signal, so gambling streams go with it. A labelled
   channel opened directly can't be stripped (the flag isn't in an array), so it
-  hard-blocks the tab instead — off the same label, no DOM selectors. Covered by
-  `tests/test-graylist-inject.cjs` against live-captured fixtures.
-* Instagram, TikTok, YouTube Shorts.
-  * None has a per-item label — nothing to strip. The question is which
-    *surfaces* to block (Explore, Reels, /shorts), which is a product decision
-    first, not a capture problem.
-  * YouTube already runs forced Restricted Mode, which covers Shorts at the cost
-    of removing comments platform-wide. Decide that trade before adding more.
+  hard-blocks the tab instead — off the same label, no DOM selectors. Both are
+  also wired into the keyword search filter (Twitch `?term=`, Kick's web route
+  `?query=`) as the backstop for the unlabelled tail, and Twitch's "Pools, Hot
+  Tubs, and Beaches" category is blocked as a whole surface, since the streams
+  in it are understood by category rather than labelled. Covered by
+  `tests/test-graylist-inject.cjs` and `test-path-keywords.cjs` against
+  live-captured fixtures. Residual: Kick doesn't flag per-channel VODs or clips
+  at all (Twitch labels all three types), mitigated by the channel-page block.
+* ~~Instagram, TikTok, YouTube Shorts.~~ **Done 2026-08-01.** Confirmed by
+  capture, not assumption: a live TikTok feed item carries 38 fields and not one
+  maturity flag, so there is nothing to strip on either platform. They join the
+  **enforce** tier instead — explicit hashtag and search surfaces blocked, feeds,
+  profiles and DMs untouched. Instagram needed two routes, both verified live and
+  neither guessable: `/explore/tags/<t>/` now 302s to `/popular/<t>/`, and search
+  is `/explore/search/keyword/?q=`. Shorts rides the forced Restricted Mode
+  already in place — no new code, and the comments trade-off is unchanged.
+  * Residual, and it is not closable by label reading: an **unlabelled** video in
+    a feed. That is on-screen-AI work, tracked under "Needs a GPU".
 * Telegram Web, WhatsApp link previews, Discord embed media.
   * Discord media should wait for image scoring below.
 

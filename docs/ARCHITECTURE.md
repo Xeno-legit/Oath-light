@@ -146,7 +146,14 @@ React components change monthly.
 - Config-driven scrubber, one `RULES` entry per host. Labels in use: Reddit
   `over_18`, X `possibly_sensitive`, Pixiv `xRestrict`, Mastodon `sensitive`,
   Bluesky `labels`, Tumblr `is_nsfw`, boorus `rating`, NexusMods
-  `contains_adult_content`, Mangadex `contentRating`, Writing.com `crating`.
+  `contains_adult_content`, Mangadex `contentRating`, Writing.com `crating`,
+  Twitch `contentClassificationLabels`, Kick `is_mature`.
+- **Label selection is per-platform, not "strip everything flagged."** Twitch
+  publishes seven label ids and only `SexualThemes` is matched — `MatureGame`
+  ("Mature-rated game") alone would strip a large share of ordinary gaming
+  Twitch for no NSFW gain. Where a platform publishes only one broad flag
+  (Kick's `is_mature`) the collateral is accepted because there is no finer
+  signal to use.
 - **Depth-first removal** at the finest array level: X buries
   `possibly_sensitive` under `instructions[] → entries[]`, so cleaning
   `entries[]` first lets the batch, its cursor and its safe items survive
@@ -159,6 +166,21 @@ React components change monthly.
   listing items removed by their own rating marker, content pages hard-blocked
   by a page-level rating read — which closes the "adult preference already
   enabled server-side" leak that item-hiding can't reach.
+- **Page-level blocking has two drivers.** The DOM one above, and a
+  JSON-label-driven one for pages where the flagged object isn't an array
+  element and so can't be stripped without leaving a broken page — a Twitch or
+  Kick channel, where the label sits on a named child (`data.user.stream`,
+  `livestream`). `checkPageBlock()` in `graylist-inject.js` fires the tab block
+  off the same verified label the stripper reads, with no DOM selectors to rot.
+  Precision comes from **ownership**: these payloads also carry recommended
+  channels, so the walker tracks the nearest self-identifying owner and fires
+  only when the flagged object belongs to the channel being viewed. Ownership
+  identity is per-platform and load-bearing — Twitch's label-carrying operation
+  identifies its user by `displayName` with no `login` at all.
+- **Whole-surface blocks** exist for the case where the entire grid is the
+  adult surface and per-item labels are therefore absent by design: itch.io
+  `/games/nsfw`, ScribbleHub's adult genres, and Twitch's "Pools, Hot Tubs, and
+  Beaches" category.
 
 **Triage rule for a new platform:** filter in place only when there is real SFW
 value *and* a per-item label exists. Mostly-NSFW or unlabelled platforms go to

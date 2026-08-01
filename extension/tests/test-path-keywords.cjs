@@ -150,6 +150,52 @@ function run() {
     runner.ok(r && r.blocked === expectBlocked, label, url + ' → ' + JSON.stringify(r));
   }
 
+  // ── Live video: the keyword backstop for the unlabelled tail ─────────────
+  // Twitch and Kick are stripped per item by their own labels
+  // (graylist-inject.js), but live streaming is where those labels are least
+  // reliable — nothing is labelled until a human does it. This layer is the
+  // backstop, and the param names are the load-bearing detail: Twitch ?term=,
+  // Kick's WEB route ?query= (its internal API's `searched_word` never appears
+  // in the address bar, so keying on it would match nothing).
+  const LIVE_GRAYLIST = [
+    ['https://www.twitch.tv/search?term=hentai', true, 'twitch NSFW search is blocked'],
+    ['https://www.twitch.tv/search?term=minecraft', false, 'twitch ordinary search is untouched'],
+    ['https://www.twitch.tv/jynxzi', false, 'twitch ordinary channel is untouched'],
+    ['https://www.twitch.tv/directory', false, 'twitch directory browsing is untouched'],
+    ['https://kick.com/search?query=porn', true, 'kick NSFW search is blocked'],
+    ['https://kick.com/search?query=minecraft', false, 'kick ordinary search is untouched'],
+    ['https://kick.com/destiny', false, 'kick ordinary channel is untouched'],
+  ];
+  for (const [url, expectBlocked, label] of LIVE_GRAYLIST) {
+    const r = shouldBlockUrl(url);
+    runner.ok(r && r.blocked === expectBlocked, label, url + ' → ' + JSON.stringify(r));
+  }
+
+  // ── Short-video platforms: the adult SEARCH and HASHTAG surfaces ─────────
+  // These two publish no per-item label (verified live — a TikTok item object
+  // has 38 fields and no maturity flag), so the enumerable adult surfaces are
+  // all there is to act on. Instagram's tag route 302s from /explore/tags/<t>/
+  // to /popular/<t>/, so both forms are pinned here: the navigation layer can
+  // see either depending on how the user arrived.
+  const SHORTVIDEO_GRAYLIST = [
+    ['https://www.instagram.com/explore/tags/porn/', true, 'instagram adult hashtag (legacy route) is blocked'],
+    ['https://www.instagram.com/popular/porn/', true, 'instagram adult hashtag (post-redirect route) is blocked'],
+    ['https://www.instagram.com/explore/search/keyword/?q=hentai', true, 'instagram adult search is blocked'],
+    ['https://www.instagram.com/explore/tags/minecraft/', false, 'instagram ordinary hashtag is untouched'],
+    ['https://www.instagram.com/popular/minecraft/', false, 'instagram ordinary hashtag (redirected) is untouched'],
+    ['https://www.instagram.com/someuser/', false, 'instagram ordinary profile is untouched'],
+    ['https://www.instagram.com/direct/inbox/', false, 'instagram DMs are untouched'],
+    ['https://www.tiktok.com/tag/hentai', true, 'tiktok adult hashtag is blocked'],
+    ['https://www.tiktok.com/search?q=porn', true, 'tiktok adult search is blocked'],
+    ['https://www.tiktok.com/tag/minecraft', false, 'tiktok ordinary hashtag is untouched'],
+    ['https://www.tiktok.com/search?q=minecraft', false, 'tiktok ordinary search is untouched'],
+    ['https://www.tiktok.com/@someuser', false, 'tiktok ordinary profile is untouched'],
+  ];
+  for (const [url, expectBlocked, label] of SHORTVIDEO_GRAYLIST) {
+    const r = shouldBlockUrl(url);
+    runner.ok(r && r.blocked === expectBlocked, label, url + ' → ' + JSON.stringify(r));
+  }
+
   // Leave the shared sandbox as we found it for any later suite.
   setSettings(sandbox, null);
   return runner.summary();

@@ -401,6 +401,36 @@ const GRAYLIST_SEARCH_ROUTES = new Map([
   ['newgrounds.com',  (u) => u.searchParams.get('terms') || u.searchParams.get('q')],
   ['itaku.ee',        (u) => u.searchParams.get('search') || u.searchParams.get('q')],
   ['gamebanana.com',  (u) => u.searchParams.get('_sSearchString') || u.searchParams.get('q')],
+  // Live video. The per-item stripper reads each platform's own label, but live
+  // streaming is exactly where that label is least reliable — suggestive content
+  // is what streamers don't flag, and on Twitch nothing is labelled until a
+  // human does it. The keyword filter is the backstop for that unlabelled tail,
+  // and these are the two platforms with the largest one.
+  // Param names verified live: Twitch uses ?term=, Kick's WEB route uses ?query=
+  // (its internal API takes `searched_word`, which the address bar never uses —
+  // keying on that would have quietly matched nothing).
+  ['twitch.tv',       (u) => pathStartsWith(u, '/search') ? u.searchParams.get('term') : null],
+  ['kick.com',        (u) => pathStartsWith(u, '/search') ? u.searchParams.get('query') : null],
+
+  // ── Short-video platforms with NO per-item label ─────────────────────────
+  // Instagram and TikTok publish nothing to strip. Verified, not assumed: a live
+  // TikTok /api/explore/item_list/ item carries 38 fields and not one maturity
+  // flag (isReviewing/privateItem/isAd are about publication state, not content).
+  // So unlike every other graylist platform there is no ground truth to read, and
+  // the keyword filter on the ENUMERABLE adult surfaces — search and hashtags —
+  // is the whole of what can be done deterministically.
+  //
+  // Instagram's routes were both verified live and neither is guessable:
+  //   • /explore/tags/<tag>/ now 302s to /popular/<tag>/, so BOTH are keyed —
+  //     the navigation layer sees the pre-redirect URL, the post-redirect one, or
+  //     (on an in-app transition) only the latter.
+  //   • search is /explore/search/keyword/?q= — login-walled when logged out,
+  //     which is precisely why it has to be keyed for the logged-in case.
+  ['instagram.com',   (u) => pathSegmentAfter(u, '/explore/tags/') ||
+                             pathSegmentAfter(u, '/popular/') ||
+                             (pathStartsWith(u, '/explore/search') ? u.searchParams.get('q') : null)],
+  ['tiktok.com',      (u) => pathSegmentAfter(u, '/tag/') ||
+                             (pathStartsWith(u, '/search') ? u.searchParams.get('q') : null)],
   // "Trusted" hosts whose on-site search can surface explicit galleries (§1.3).
   ['wikimedia.org',   (u) => u.searchParams.get('search')],
   ['archive.org',     (u) => u.searchParams.get('query') || u.searchParams.get('q')],

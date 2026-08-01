@@ -416,6 +416,33 @@
         return val;
       }
     },
+    // Twitch — page-level block for ONE surface: the category Twitch itself
+    // created to quarantine swimwear/suggestive streaming.
+    //
+    // Everything else on Twitch is handled by the per-item stripper reading
+    // `contentClassificationLabels` (graylist-inject.js → S.twitch). This surface
+    // is the hole in that approach: the streams inside it overwhelmingly do NOT
+    // carry a SexualThemes label — the whole point of the category is that the
+    // content is understood from the category, not the label — so item-stripping
+    // walks straight past them. Same shape as itch.io's /games/nsfw and
+    // ScribbleHub's adult genre browse: when the entire grid is the adult
+    // surface, block the surface.
+    //
+    // Deliberately just this one. ASMR and IRL carry real suggestive tails too,
+    // but they're overwhelmingly ordinary content — blocking them would be the
+    // Restricted-Mode mistake of trading a large amount of legitimate use for a
+    // small amount of filtering.
+    //
+    // Both URL forms are covered: the modern /directory/category/<slug> and the
+    // legacy /directory/game/<url-encoded name>.
+    'twitch.tv': {
+      pagePath: /^\/directory\/(?:category|game)\//i,
+      pageLabel: () => {
+        let p = window.location.pathname || '';
+        try { p = decodeURIComponent(p); } catch (_) {}
+        return /\/directory\/(?:category|game)\/pools[,\s-]*hot[\s-]*tubs?[,\s-]*(?:and[\s-]*)?beaches/i.test(p);
+      }
+    },
     // Steam — page-level block only (no JSON feed; mostly age-gated SSR pages).
     'steampowered.com': {
       pagePath: /^\/(agecheck|app|sub|bundle)\//i,

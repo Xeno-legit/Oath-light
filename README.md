@@ -84,8 +84,8 @@ per-item NSFW label** and removes flagged items before they render — ground
 truth rather than heuristics, and it survives redesigns because the underlying
 API fields stay stable.
 
-- **42 platforms**: 26 via JSON/API interception, 10 via server-rendered DOM
-  filtering with whole-page blocking of adult content pages, 5 via forced
+- **44 platforms**: 26 via JSON/API interception, 10 via server-rendered DOM
+  filtering with whole-page blocking of adult content pages, 7 via forced
   safe-mode enforcement, and Discord via age-restricted channel and server
   blocking.
 - Labels used include Reddit `over_18`, X `possibly_sensitive`, Pixiv
@@ -181,16 +181,25 @@ Blocking stops a request; it doesn't stop an urge.
 Attributes below are publicly documented and structurally stable. Vendor pricing
 and features change; verify independently before relying on them.
 
-| Attribute | Oath Light | Covenant Eyes | BlockerX | Cold Turkey | Net Nanny |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| License | GPLv3 (open source) | Proprietary | Proprietary | Proprietary | Proprietary |
-| Cost | Free | Subscription | Freemium | Freemium | Subscription |
-| Per-item filtering on mixed platforms | Yes | No | No | No | No |
-| Multilingual native-script keyword engine | Yes (41 languages) | Limited | Limited | User lists | Cloud analysis |
-| On-device AI screen protection | Yes | No | No | No | No |
-| Local-only processing, no reporting | Yes | No | Optional | Yes | No |
-| Tamper resistance / delayed uninstall | Yes | Yes | Yes | Yes (Pro) | Yes |
-| Open codebase for audit | Yes | No | No | No | No |
+Compared against the five products that actually lead an axis, rather than the
+best-known names. Each of these is the frontier at something: Canopy at generic
+in-page image AI, Covenant Eyes at human accountability, Cold Turkey at session
+lock strength, Tech Lockdown at OS-level enforcement, PixelCage at shipping local
+screen AI. Where a competitor leads, the table says so.
+
+| Attribute | Oath Light | Canopy | Covenant Eyes | Cold Turkey | Tech Lockdown | PixelCage |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| License | GPLv3 (open source) | Proprietary | Proprietary | Proprietary | Proprietary | Proprietary |
+| Cost | Free | Subscription | Subscription | One-time | Subscription | One-time |
+| Per-item filtering on mixed platforms | **Yes (44 platforms)** | No (generic image AI) | No | No | No | No |
+| Multilingual native-script keyword engine | **Yes (41 languages)** | No | Limited | User lists | Category lists | No |
+| On-device AI screen protection | Yes | No (cloud filter) | No (uploads screenshots) | No | No | Yes |
+| Local-only processing, no reporting | Yes | No | No | Yes | No | Yes |
+| Tamper resistance / delayed uninstall | Yes | Yes | Yes | Yes (Pro) | Yes (MDM) | No |
+| Clock-tamper immunity | **Yes** | No | No | No | No | No |
+| Session lock strength | Strong | Moderate | Moderate | **Strongest** | Strong (MDM) | None |
+| Whole-network reach without admin rights | No | **Yes** | No | No | **Yes** | No |
+| Open codebase for audit | Yes | No | No | No | No | No |
 
 ## Covered graylist platforms
 
@@ -205,8 +214,11 @@ artstation, flickr, sketchfab, 500px, gamebanana, wattpad, fanbox, twitch, kick.
 fanfiction.net, scribblehub, itch.io, steam, webtoons, tapas, ko-fi,
 writing.com.
 
-**Forced safe mode (5):** youtube (Restricted Mode), spotify, character.ai,
-poe.com, huggingface.co — the platform keeps working, its adult search does not.
+**Forced safe mode (7):** youtube (Restricted Mode), spotify, instagram, tiktok,
+character.ai, poe.com, huggingface.co — the platform keeps working, its adult
+search does not. Instagram and TikTok publish no per-item label to strip
+(verified live), so their explicit hashtag and search surfaces are what gets
+blocked; feeds, profiles and DMs are untouched.
 
 **Sub-unit blocking (1):** discord (age-restricted channels and servers).
 

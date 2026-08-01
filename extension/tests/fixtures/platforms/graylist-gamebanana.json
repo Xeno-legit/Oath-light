@@ -1,0 +1,502 @@
+{
+  "_meta": {
+    "platform": "gamebanana",
+    "field": "_sInitialVisibility",
+    "url": "https://gamebanana.com/apiv11/Mod/Index?_nPage=1&_nPerpage=4",
+    "itemsPath": "_aRecords",
+    "captured": "2026-08-01",
+    "flaggedAreDerived": false,
+    "why": "Both clean and flagged items are live captures. If gamebanana renames `_sInitialVisibility`, the flagged item stops being stripped and this test fails."
+  },
+  "payload": {
+    "_aMetadata": {
+      "_nRecordCount": 6
+    },
+    "_aRecords": [
+      {
+        "_idRow": 699453,
+        "_sModelName": "Mod",
+        "_sSingularTitle": "Mod",
+        "_sIconClasses": "SubmissionType Mod",
+        "_sName": "I AM SQUIDWARD charted",
+        "_sProfileUrl": "https://gamebanana.com/mods/699453",
+        "_tsDateAdded": 1785584606,
+        "_tsDateModified": 1785584606,
+        "_bHasFiles": true,
+        "_aTags": [],
+        "_aPreviewMedia": {
+          "_aImages": [
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sFile": "6a6ddb000b908.jpg",
+              "_sFile220": "220-90_6a6ddb000b908.jpg",
+              "_hFile220": 117,
+              "_wFile220": 220,
+              "_sFile530": "530-90_6a6ddb000b908.jpg",
+              "_hFile530": 282,
+              "_wFile530": 530,
+              "_sFile100": "100-90_6a6ddb000b908.jpg",
+              "_hFile100": 53,
+              "_wFile100": 100
+            },
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sCaption": "the UI and the note splashes doesn't come with the mod lol",
+              "_sFile": "6a6ddb3d3a352.jpg",
+              "_sFile100": "100-90_6a6ddb3d3a352.jpg",
+              "_hFile100": 59,
+              "_wFile100": 100
+            }
+          ]
+        },
+        "_aSubmitter": {
+          "_idRow": 1902195,
+          "_sName": "ShadowSonicGod",
+          "_bIsOnline": false,
+          "_bHasRipe": false,
+          "_sProfileUrl": "https://gamebanana.com/members/1902195",
+          "_sAvatarUrl": "https://images.gamebanana.com/static/img/defaults/avatar.gif",
+          "_sHdAvatarUrl": "https://images.gamebanana.com/img/av/6302402cb9f87.png"
+        },
+        "_aGame": {
+          "_idRow": 8694,
+          "_sName": "Friday Night Funkin'",
+          "_sProfileUrl": "https://gamebanana.com/games/8694",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/games/62082c1edaf3d.png"
+        },
+        "_aRootCategory": {
+          "_sName": "Mod Folders",
+          "_sProfileUrl": "https://gamebanana.com/mods/cats/43771",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/ModCategory/69a336265b2e0.png"
+        },
+        "_aSubCategory": {
+          "_sName": "Psych Mod Folders",
+          "_sProfileUrl": "https://gamebanana.com/mods/cats/28367",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/ModCategory/67a10235dcf42.png"
+        },
+        "_sVersion": "",
+        "_bIsObsolete": false,
+        "_sInitialVisibility": "show",
+        "_bHasContentRatings": false,
+        "_bWasFeatured": false,
+        "_bIsOwnedByAccessor": false
+      },
+      {
+        "_idRow": 697312,
+        "_sModelName": "Mod",
+        "_sSingularTitle": "Mod",
+        "_sIconClasses": "SubmissionType Mod",
+        "_sName": "HEY STINKY!",
+        "_sProfileUrl": "https://gamebanana.com/mods/697312",
+        "_tsDateAdded": 1784981980,
+        "_tsDateModified": 1785584393,
+        "_bHasFiles": true,
+        "_aTags": [],
+        "_aPreviewMedia": {
+          "_aImages": [
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sCaption": "Main Menu",
+              "_sFile": "6a64a7f62b300.jpg",
+              "_sFile220": "220-90_6a64a7f62b300.jpg",
+              "_hFile220": 138,
+              "_wFile220": 220,
+              "_sFile530": "530-90_6a64a7f62b300.jpg",
+              "_hFile530": 331,
+              "_wFile530": 530,
+              "_sFile100": "100-90_6a64a7f62b300.jpg",
+              "_hFile100": 63,
+              "_wFile100": 100
+            },
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sCaption": "Play Menu",
+              "_sFile": "6a64a7f625d72.jpg",
+              "_sFile100": "100-90_6a64a7f625d72.jpg",
+              "_hFile100": 63,
+              "_wFile100": 100
+            },
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sCaption": "The School",
+              "_sFile": "6a64a7f767050.jpg",
+              "_sFile100": "100-90_6a64a7f767050.jpg",
+              "_hFile100": 63,
+              "_wFile100": 100
+            },
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sCaption": "Locked Swinging Door",
+              "_sFile": "6a64a8e8ebeeb.jpg",
+              "_sFile100": "100-90_6a64a8e8ebeeb.jpg",
+              "_hFile100": 63,
+              "_wFile100": 100
+            },
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sCaption": "The Phone",
+              "_sFile": "6a64a8e8f39da.jpg",
+              "_sFile100": "100-90_6a64a8e8f39da.jpg",
+              "_hFile100": 63,
+              "_wFile100": 100
+            },
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sCaption": "Playtime",
+              "_sFile": "6a64a8e910e91.jpg",
+              "_sFile100": "100-90_6a64a8e910e91.jpg",
+              "_hFile100": 63,
+              "_wFile100": 100
+            }
+          ]
+        },
+        "_aSubmitter": {
+          "_idRow": 3035224,
+          "_sName": "larpeyesaata27747438.exe",
+          "_bIsOnline": true,
+          "_bHasRipe": false,
+          "_sProfileUrl": "https://gamebanana.com/members/3035224",
+          "_sAvatarUrl": "https://images.gamebanana.com/img/av/6a5f517411c6f.png",
+          "_sHdAvatarUrl": "https://images.gamebanana.com/img/av/6a688b4e38e43.png",
+          "_sUpicUrl": "https://images.gamebanana.com/img/upic/6a5f516d576da.png"
+        },
+        "_aGame": {
+          "_idRow": 6476,
+          "_sName": "Baldi's Basics",
+          "_sProfileUrl": "https://gamebanana.com/games/6476",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/games/62ec28fd3038e.png"
+        },
+        "_aRootCategory": {
+          "_sName": "Decompile",
+          "_sProfileUrl": "https://gamebanana.com/mods/cats/4605",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/ModCategory/62eceb0bd7175.png"
+        },
+        "_sVersion": "v1.3",
+        "_tsDateUpdated": 1785584381,
+        "_bIsObsolete": false,
+        "_sInitialVisibility": "show",
+        "_bHasContentRatings": false,
+        "_nLikeCount": 2,
+        "_nPostCount": 23,
+        "_bWasFeatured": false,
+        "_aStudio": {
+          "_sName": "Larper Studios",
+          "_sBannerUrl": "https://images.gamebanana.com/img/banners/studios/6a53ee56c67b2.png",
+          "_sProfileUrl": "https://gamebanana.com/studios/39335",
+          "_sFlagUrl": "https://images.gamebanana.com/img/flags/studios/6a53ee710bfd3.png"
+        },
+        "_nViewCount": 753,
+        "_bIsOwnedByAccessor": false
+      },
+      {
+        "_idRow": 699450,
+        "_sModelName": "Mod",
+        "_sSingularTitle": "Mod",
+        "_sIconClasses": "SubmissionType Mod",
+        "_sName": "Blissful Erect Sky Reborn Cover",
+        "_sProfileUrl": "https://gamebanana.com/mods/699450",
+        "_tsDateAdded": 1785584246,
+        "_tsDateModified": 1785584246,
+        "_bHasFiles": true,
+        "_aTags": [],
+        "_aPreviewMedia": {
+          "_aImages": [
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sCaption": "Thumbnail",
+              "_sFile": "6a6dd88bb6b79.jpg",
+              "_sFile220": "220-90_6a6dd88bb6b79.jpg",
+              "_hFile220": 124,
+              "_wFile220": 220,
+              "_sFile530": "530-90_6a6dd88bb6b79.jpg",
+              "_hFile530": 298,
+              "_wFile530": 530,
+              "_sFile100": "100-90_6a6dd88bb6b79.jpg",
+              "_hFile100": 56,
+              "_wFile100": 100
+            },
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sCaption": "Gameplay",
+              "_sFile": "6a6dd895ad1fd.jpg",
+              "_sFile100": "100-90_6a6dd895ad1fd.jpg",
+              "_hFile100": 48,
+              "_wFile100": 100
+            },
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sCaption": "Freeplay",
+              "_sFile": "6a6dd89dee274.jpg",
+              "_sFile100": "100-90_6a6dd89dee274.jpg",
+              "_hFile100": 48,
+              "_wFile100": 100
+            }
+          ]
+        },
+        "_aSubmitter": {
+          "_idRow": 3932044,
+          "_sName": "DzakkiPro",
+          "_bIsOnline": true,
+          "_bHasRipe": false,
+          "_sProfileUrl": "https://gamebanana.com/members/3932044",
+          "_sAvatarUrl": "https://images.gamebanana.com/img/av/68959b945a8dc.png",
+          "_sUpicUrl": "https://images.gamebanana.com/img/upic/6936d939e0b4d.png"
+        },
+        "_aGame": {
+          "_idRow": 8694,
+          "_sName": "Friday Night Funkin'",
+          "_sProfileUrl": "https://gamebanana.com/games/8694",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/games/62082c1edaf3d.png"
+        },
+        "_aRootCategory": {
+          "_sName": "Mod Folders",
+          "_sProfileUrl": "https://gamebanana.com/mods/cats/43771",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/ModCategory/69a336265b2e0.png"
+        },
+        "_aSubCategory": {
+          "_sName": "Base Game Mod Folders",
+          "_sProfileUrl": "https://gamebanana.com/mods/cats/29202",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/ModCategory/68796321e4997.png"
+        },
+        "_sVersion": "0.8.4+",
+        "_bIsObsolete": false,
+        "_sInitialVisibility": "show",
+        "_bHasContentRatings": false,
+        "_bWasFeatured": false,
+        "_bIsOwnedByAccessor": false
+      },
+      {
+        "_idRow": 650634,
+        "_sModelName": "Mod",
+        "_sSingularTitle": "Mod",
+        "_sIconClasses": "SubmissionType Mod",
+        "_sName": "QOL Lock",
+        "_sProfileUrl": "https://gamebanana.com/mods/650634",
+        "_tsDateAdded": 1770149407,
+        "_tsDateModified": 1785583212,
+        "_bHasFiles": true,
+        "_aTags": [],
+        "_aPreviewMedia": {
+          "_aImages": [
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sFile": "6995649268824.jpg",
+              "_sFile220": "220-90_6995649268824.jpg",
+              "_hFile220": 124,
+              "_wFile220": 220,
+              "_sFile530": "530-90_6995649268824.jpg",
+              "_hFile530": 298,
+              "_wFile530": 530,
+              "_sFile100": "100-90_6995649268824.jpg",
+              "_hFile100": 56,
+              "_wFile100": 100
+            },
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sFile": "6a10fb7166650.jpg",
+              "_sFile100": "100-90_6a10fb7166650.jpg",
+              "_hFile100": 56,
+              "_wFile100": 100
+            }
+          ]
+        },
+        "_aSubmitter": {
+          "_idRow": 5146349,
+          "_sName": "civo",
+          "_bIsOnline": false,
+          "_bHasRipe": false,
+          "_sProfileUrl": "https://gamebanana.com/members/5146349",
+          "_sAvatarUrl": "https://images.gamebanana.com/img/av/6987b97b0ec01.png",
+          "_sUpicUrl": "https://images.gamebanana.com/img/upic/698cd2d3158b4.png"
+        },
+        "_aGame": {
+          "_idRow": 20948,
+          "_sName": "Deadlock",
+          "_sProfileUrl": "https://gamebanana.com/games/20948",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/games/69ca8632eca6d.png"
+        },
+        "_aRootCategory": {
+          "_sName": "Quality of Life/Fixes",
+          "_sProfileUrl": "https://gamebanana.com/mods/cats/46154",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/ModCategory/6a1c6a5d65e73.png"
+        },
+        "_sVersion": "3.19",
+        "_tsDateUpdated": 1785583333,
+        "_bIsObsolete": false,
+        "_sInitialVisibility": "show",
+        "_bHasContentRatings": false,
+        "_nLikeCount": 242,
+        "_nPostCount": 243,
+        "_bWasFeatured": true,
+        "_nViewCount": 170150,
+        "_bIsOwnedByAccessor": false
+      },
+      {
+        "_idRow": 699452,
+        "_sModelName": "Mod",
+        "_sSingularTitle": "Mod",
+        "_sIconClasses": "SubmissionType Mod",
+        "_sName": "Remielle Dan OG NSFW Lewd Order Switch",
+        "_sProfileUrl": "https://gamebanana.com/mods/699452",
+        "_tsDateAdded": 1785584574,
+        "_tsDateModified": 1785584574,
+        "_bHasFiles": true,
+        "_aTags": [],
+        "_aPreviewMedia": {
+          "_aImages": [
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sFile": "6a6ddad080e3f.jpg",
+              "_sFile220": "220-90_6a6ddad080e3f.jpg",
+              "_hFile220": 176,
+              "_wFile220": 220,
+              "_sFile530": "530-90_6a6ddad080e3f.jpg",
+              "_hFile530": 424,
+              "_wFile530": 530,
+              "_sFile100": "100-90_6a6ddad080e3f.jpg",
+              "_hFile100": 80,
+              "_wFile100": 100
+            },
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sFile": "6a6ddbb355ef2.jpg",
+              "_sFile100": "100-90_6a6ddbb355ef2.jpg",
+              "_hFile100": 64,
+              "_wFile100": 100
+            }
+          ]
+        },
+        "_aSubmitter": {
+          "_idRow": 2437196,
+          "_sName": "kongxinrumeng",
+          "_bIsOnline": false,
+          "_bHasRipe": false,
+          "_sProfileUrl": "https://gamebanana.com/members/2437196",
+          "_sAvatarUrl": "https://images.gamebanana.com/img/av/6679c24a9f53a.jpg"
+        },
+        "_aGame": {
+          "_idRow": 19567,
+          "_sName": "Zenless Zone Zero",
+          "_sProfileUrl": "https://gamebanana.com/games/19567",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/games/657d72ea51567.png"
+        },
+        "_aRootCategory": {
+          "_sName": "Character Skins",
+          "_sProfileUrl": "https://gamebanana.com/mods/cats/30305",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/ModCategory/66a1928c3e239.gif"
+        },
+        "_aSubCategory": {
+          "_sName": "Remielle Dan",
+          "_sProfileUrl": "https://gamebanana.com/mods/cats/47714",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/ModCategory/6a68e4b7a6ab0.png"
+        },
+        "_sVersion": "",
+        "_bIsObsolete": false,
+        "_sInitialVisibility": "hide",
+        "_bHasContentRatings": true,
+        "_bWasFeatured": false,
+        "_bIsOwnedByAccessor": false
+      },
+      {
+        "_idRow": 699216,
+        "_sModelName": "Mod",
+        "_sSingularTitle": "Mod",
+        "_sIconClasses": "SubmissionType Mod",
+        "_sName": "Remielle2 uncensored",
+        "_sProfileUrl": "https://gamebanana.com/mods/699216",
+        "_tsDateAdded": 1785518439,
+        "_tsDateModified": 1785584392,
+        "_bHasFiles": true,
+        "_aTags": [],
+        "_aPreviewMedia": {
+          "_aImages": [
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sFile": "6a6dda781c3a7.jpg",
+              "_sFile220": "220-90_6a6dda781c3a7.jpg",
+              "_hFile220": 156,
+              "_wFile220": 220,
+              "_sFile530": "530-90_6a6dda781c3a7.jpg",
+              "_hFile530": 375,
+              "_wFile530": 530,
+              "_sFile100": "100-90_6a6dda781c3a7.jpg",
+              "_hFile100": 71,
+              "_wFile100": 100
+            },
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sFile": "6a6cd8b4c21a8.jpg",
+              "_sFile100": "100-90_6a6cd8b4c21a8.jpg",
+              "_hFile100": 66,
+              "_wFile100": 100
+            },
+            {
+              "_sType": "screenshot",
+              "_sBaseUrl": "https://images.gamebanana.com/img/ss/mods",
+              "_sFile": "6a6cd8b54d9f5.jpg",
+              "_sFile100": "100-90_6a6cd8b54d9f5.jpg",
+              "_hFile100": 49,
+              "_wFile100": 100
+            }
+          ]
+        },
+        "_aSubmitter": {
+          "_idRow": 2896620,
+          "_sName": "Apowatson",
+          "_bIsOnline": true,
+          "_bHasRipe": false,
+          "_sProfileUrl": "https://gamebanana.com/members/2896620",
+          "_sAvatarUrl": "https://images.gamebanana.com/img/av/694577a7259a0.jpg",
+          "_sHdAvatarUrl": "https://images.gamebanana.com/img/av/69a3f5d178880.jpg"
+        },
+        "_aGame": {
+          "_idRow": 19567,
+          "_sName": "Zenless Zone Zero",
+          "_sProfileUrl": "https://gamebanana.com/games/19567",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/games/657d72ea51567.png"
+        },
+        "_aRootCategory": {
+          "_sName": "Character Skins",
+          "_sProfileUrl": "https://gamebanana.com/mods/cats/30305",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/ModCategory/66a1928c3e239.gif"
+        },
+        "_aSubCategory": {
+          "_sName": "Remielle Dan",
+          "_sProfileUrl": "https://gamebanana.com/mods/cats/47714",
+          "_sIconUrl": "https://images.gamebanana.com/img/ico/ModCategory/6a68e4b7a6ab0.png"
+        },
+        "_sVersion": "1",
+        "_tsDateUpdated": 1785584377,
+        "_bIsObsolete": false,
+        "_sInitialVisibility": "warn",
+        "_bHasContentRatings": true,
+        "_nLikeCount": 109,
+        "_nPostCount": 7,
+        "_bWasFeatured": false,
+        "_nViewCount": 7354,
+        "_bIsOwnedByAccessor": false
+      }
+    ]
+  },
+  "expect": {
+    "kept": 4,
+    "removed": 2
+  }
+}

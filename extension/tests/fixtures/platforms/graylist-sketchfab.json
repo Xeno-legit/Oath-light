@@ -1,0 +1,548 @@
+{
+  "_meta": {
+    "platform": "sketchfab",
+    "field": "isAgeRestricted",
+    "url": "https://api.sketchfab.com/v3/models?count=4",
+    "itemsPath": "results",
+    "captured": "2026-08-01",
+    "flaggedAreDerived": true,
+    "why": "Clean items are a live capture. The public endpoint would not serve a flagged item, so the flagged one is a real item with ONLY `isAgeRestricted` flipped. The rename canary still holds: the field name is asserted present in the LIVE clean capture."
+  },
+  "payload": {
+    "results": [
+      {
+        "uri": "https://api.sketchfab.com/v3/models/3526092c8b684226be6756ee7370440d",
+        "uid": "3526092c8b684226be6756ee7370440d",
+        "name": "PONTE RIO PIRAPÓ 1970",
+        "staffpickedAt": null,
+        "viewCount": 8,
+        "likeCount": 0,
+        "animationCount": 0,
+        "viewerUrl": "https://sketchfab.com/3d-models/none-3526092c8b684226be6756ee7370440d",
+        "embedUrl": "https://sketchfab.com/models/3526092c8b684226be6756ee7370440d/embed",
+        "commentCount": 0,
+        "isDownloadable": false,
+        "publishedAt": "2022-01-19T11:51:05.404590",
+        "tags": [],
+        "categories": [],
+        "thumbnails": {
+          "images": [
+            {
+              "uid": "efb00f8035da4c779cbdfad22d44df8e",
+              "size": 41152,
+              "width": 1920,
+              "url": "https://media.sketchfab.com/models/35260…",
+              "height": 1080
+            },
+            {
+              "uid": "4e9779ae734a485290b1170816d2b878",
+              "size": 13375,
+              "width": 1024,
+              "url": "https://media.sketchfab.com/models/35260…",
+              "height": 576
+            },
+            {
+              "uid": "16acd0ddd28d44758b3d36c6df8bb8fb",
+              "size": 6989,
+              "width": 720,
+              "url": "https://media.sketchfab.com/models/35260…",
+              "height": 405
+            },
+            {
+              "uid": "cf136bc556514b5594c36583053c462a",
+              "size": 1714,
+              "width": 256,
+              "url": "https://media.sketchfab.com/models/35260…",
+              "height": 144
+            },
+            {
+              "uid": "27859612935049eb8be252d67e032076",
+              "size": 724,
+              "width": 64,
+              "url": "https://media.sketchfab.com/models/35260…",
+              "height": 36
+            }
+          ]
+        },
+        "user": {
+          "uid": "d8162170736d4678bfa8e7dab4ed9cc3",
+          "username": "diegodferri",
+          "displayName": "diegodferri",
+          "profileUrl": "https://sketchfab.com/diegodferri",
+          "account": "basic",
+          "avatar": {
+            "uri": "https://api.sketchfab.com/v3/avatars/3ef1bd11d3eb4b57a0b353e8f2e5fc3e",
+            "images": [
+              {
+                "size": 680,
+                "width": 32,
+                "url": "https://media.sketchfab.com/avatars/3ef1…",
+                "height": 32
+              },
+              {
+                "size": 1253,
+                "width": 48,
+                "url": "https://media.sketchfab.com/avatars/3ef1…",
+                "height": 48
+              },
+              {
+                "size": 2797,
+                "width": 90,
+                "url": "https://media.sketchfab.com/avatars/3ef1…",
+                "height": 90
+              },
+              {
+                "size": 3215,
+                "width": 100,
+                "url": "https://media.sketchfab.com/avatars/3ef1…",
+                "height": 100
+              }
+            ]
+          },
+          "uri": "https://api.sketchfab.com/v3/users/d8162170736d4678bfa8e7dab4ed9cc3"
+        },
+        "description": "",
+        "faceCount": 131486,
+        "createdAt": "2022-01-19T11:39:30.400544",
+        "vertexCount": 65639,
+        "isAgeRestricted": false,
+        "soundCount": 0,
+        "isProtected": false,
+        "license": null,
+        "price": null,
+        "archives": {}
+      },
+      {
+        "uri": "https://api.sketchfab.com/v3/models/9227575a0dad4db9ac54b3a0399c95d3",
+        "uid": "9227575a0dad4db9ac54b3a0399c95d3",
+        "name": "MIHATA_Otwock_2025",
+        "staffpickedAt": null,
+        "viewCount": 15,
+        "likeCount": 0,
+        "animationCount": 0,
+        "viewerUrl": "https://sketchfab.com/3d-models/none-9227575a0dad4db9ac54b3a0399c95d3",
+        "embedUrl": "https://sketchfab.com/models/9227575a0dad4db9ac54b3a0399c95d3/embed",
+        "commentCount": 0,
+        "isDownloadable": false,
+        "publishedAt": "2025-07-22T13:58:06.922242",
+        "tags": [
+          {
+            "name": "pamir",
+            "slug": "pamir",
+            "uri": "https://api.sketchfab.com/v3/tags/pamir"
+          }
+        ],
+        "categories": [],
+        "thumbnails": {
+          "images": [
+            {
+              "uid": "d5f8e974ede24820b464d5ae5df47560",
+              "size": 82964,
+              "width": 1920,
+              "url": "https://media.sketchfab.com/models/92275…",
+              "height": 1080
+            },
+            {
+              "uid": "6f2cfdbc766f4dd3878bf684d2ba30d0",
+              "size": 23422,
+              "width": 1024,
+              "url": "https://media.sketchfab.com/models/92275…",
+              "height": 576
+            },
+            {
+              "uid": "ada98bf867b54092b6a36b00250aff01",
+              "size": 12554,
+              "width": 720,
+              "url": "https://media.sketchfab.com/models/92275…",
+              "height": 405
+            },
+            {
+              "uid": "5df1a92830da4fef92216ce0c61bd444",
+              "size": 2351,
+              "width": 256,
+              "url": "https://media.sketchfab.com/models/92275…",
+              "height": 144
+            },
+            {
+              "uid": "4d7915b4f188480f84a8f65df0daa3a4",
+              "size": 838,
+              "width": 64,
+              "url": "https://media.sketchfab.com/models/92275…",
+              "height": 36
+            }
+          ]
+        },
+        "user": {
+          "uid": "924b7694df064679acfe0a1b205a35d2",
+          "username": "drewprojekt",
+          "displayName": "DrewProjekt",
+          "profileUrl": "https://sketchfab.com/drewprojekt",
+          "account": "basic",
+          "avatar": {
+            "uri": "https://api.sketchfab.com/v3/avatars/8c72967a620040ef95e7e7690d204fa5",
+            "images": [
+              {
+                "size": 707,
+                "width": 32,
+                "url": "https://media.sketchfab.com/avatars/8c72…",
+                "height": 32
+              },
+              {
+                "size": 1078,
+                "width": 48,
+                "url": "https://media.sketchfab.com/avatars/8c72…",
+                "height": 48
+              },
+              {
+                "size": 2607,
+                "width": 90,
+                "url": "https://media.sketchfab.com/avatars/8c72…",
+                "height": 90
+              },
+              {
+                "size": 3073,
+                "width": 100,
+                "url": "https://media.sketchfab.com/avatars/8c72…",
+                "height": 100
+              }
+            ]
+          },
+          "uri": "https://api.sketchfab.com/v3/users/924b7694df064679acfe0a1b205a35d2"
+        },
+        "description": "Building exported from MiTek Pamir.",
+        "faceCount": 8238,
+        "createdAt": "2025-07-22T13:57:40.621926",
+        "vertexCount": 6341,
+        "isAgeRestricted": false,
+        "soundCount": 0,
+        "isProtected": false,
+        "license": null,
+        "price": null,
+        "archives": {}
+      },
+      {
+        "uri": "https://api.sketchfab.com/v3/models/329e8849f9424fb49117e3a9ad274992",
+        "uid": "329e8849f9424fb49117e3a9ad274992",
+        "name": "MIHATA_POMORZE_Zbychowo",
+        "staffpickedAt": null,
+        "viewCount": 5,
+        "likeCount": 0,
+        "animationCount": 0,
+        "viewerUrl": "https://sketchfab.com/3d-models/none-329e8849f9424fb49117e3a9ad274992",
+        "embedUrl": "https://sketchfab.com/models/329e8849f9424fb49117e3a9ad274992/embed",
+        "commentCount": 0,
+        "isDownloadable": false,
+        "publishedAt": "2024-10-01T13:31:55.253141",
+        "tags": [
+          {
+            "name": "pamir",
+            "slug": "pamir",
+            "uri": "https://api.sketchfab.com/v3/tags/pamir"
+          }
+        ],
+        "categories": [],
+        "thumbnails": {
+          "images": [
+            {
+              "uid": "36d874b9a47e4b50aac1c913c5fa1b2f",
+              "size": 89133,
+              "width": 1920,
+              "url": "https://media.sketchfab.com/models/329e8…",
+              "height": 1080
+            },
+            {
+              "uid": "f6fd21503bee42b790a52bb82165625a",
+              "size": 30147,
+              "width": 1024,
+              "url": "https://media.sketchfab.com/models/329e8…",
+              "height": 576
+            },
+            {
+              "uid": "54805af7ba2c4a429263fe3ef50c4b0d",
+              "size": 16887,
+              "width": 720,
+              "url": "https://media.sketchfab.com/models/329e8…",
+              "height": 405
+            },
+            {
+              "uid": "57695b55ecd64b3490eb99aba105f1ea",
+              "size": 3092,
+              "width": 256,
+              "url": "https://media.sketchfab.com/models/329e8…",
+              "height": 144
+            },
+            {
+              "uid": "14e16587a01346afba35e41b32fea93d",
+              "size": 825,
+              "width": 64,
+              "url": "https://media.sketchfab.com/models/329e8…",
+              "height": 36
+            }
+          ]
+        },
+        "user": {
+          "uid": "924b7694df064679acfe0a1b205a35d2",
+          "username": "drewprojekt",
+          "displayName": "DrewProjekt",
+          "profileUrl": "https://sketchfab.com/drewprojekt",
+          "account": "basic",
+          "avatar": {
+            "uri": "https://api.sketchfab.com/v3/avatars/8c72967a620040ef95e7e7690d204fa5",
+            "images": [
+              {
+                "size": 707,
+                "width": 32,
+                "url": "https://media.sketchfab.com/avatars/8c72…",
+                "height": 32
+              },
+              {
+                "size": 1078,
+                "width": 48,
+                "url": "https://media.sketchfab.com/avatars/8c72…",
+                "height": 48
+              },
+              {
+                "size": 2607,
+                "width": 90,
+                "url": "https://media.sketchfab.com/avatars/8c72…",
+                "height": 90
+              },
+              {
+                "size": 3073,
+                "width": 100,
+                "url": "https://media.sketchfab.com/avatars/8c72…",
+                "height": 100
+              }
+            ]
+          },
+          "uri": "https://api.sketchfab.com/v3/users/924b7694df064679acfe0a1b205a35d2"
+        },
+        "description": "Building exported from MiTek Pamir.",
+        "faceCount": 5816,
+        "createdAt": "2024-10-01T13:31:30.685970",
+        "vertexCount": 4852,
+        "isAgeRestricted": false,
+        "soundCount": 0,
+        "isProtected": false,
+        "license": null,
+        "price": null,
+        "archives": {}
+      },
+      {
+        "uri": "https://api.sketchfab.com/v3/models/954caa4e63bb4d29a6864ca4e1620e48",
+        "uid": "954caa4e63bb4d29a6864ca4e1620e48",
+        "name": "p_Radzyński_Marcin",
+        "staffpickedAt": null,
+        "viewCount": 9,
+        "likeCount": 0,
+        "animationCount": 0,
+        "viewerUrl": "https://sketchfab.com/3d-models/none-954caa4e63bb4d29a6864ca4e1620e48",
+        "embedUrl": "https://sketchfab.com/models/954caa4e63bb4d29a6864ca4e1620e48/embed",
+        "commentCount": 0,
+        "isDownloadable": false,
+        "publishedAt": "2024-01-24T10:05:13.289260",
+        "tags": [
+          {
+            "name": "pamir",
+            "slug": "pamir",
+            "uri": "https://api.sketchfab.com/v3/tags/pamir"
+          }
+        ],
+        "categories": [],
+        "thumbnails": {
+          "images": [
+            {
+              "uid": "896988639de44f32b8baf4df4e2544c2",
+              "size": 126989,
+              "width": 1920,
+              "url": "https://media.sketchfab.com/models/954ca…",
+              "height": 1080
+            },
+            {
+              "uid": "1a6ec103a8fd418fbd315d76a37fe3d2",
+              "size": 39550,
+              "width": 1024,
+              "url": "https://media.sketchfab.com/models/954ca…",
+              "height": 576
+            },
+            {
+              "uid": "aea25ce693c9466db6379448c21a96bf",
+              "size": 21461,
+              "width": 720,
+              "url": "https://media.sketchfab.com/models/954ca…",
+              "height": 405
+            },
+            {
+              "uid": "5aba5f0fa85b46b9a0c1e24ef28c940c",
+              "size": 3460,
+              "width": 256,
+              "url": "https://media.sketchfab.com/models/954ca…",
+              "height": 144
+            },
+            {
+              "uid": "87d6c82dbdcf4656a17d94be3a712c14",
+              "size": 876,
+              "width": 64,
+              "url": "https://media.sketchfab.com/models/954ca…",
+              "height": 36
+            }
+          ]
+        },
+        "user": {
+          "uid": "924b7694df064679acfe0a1b205a35d2",
+          "username": "drewprojekt",
+          "displayName": "DrewProjekt",
+          "profileUrl": "https://sketchfab.com/drewprojekt",
+          "account": "basic",
+          "avatar": {
+            "uri": "https://api.sketchfab.com/v3/avatars/8c72967a620040ef95e7e7690d204fa5",
+            "images": [
+              {
+                "size": 707,
+                "width": 32,
+                "url": "https://media.sketchfab.com/avatars/8c72…",
+                "height": 32
+              },
+              {
+                "size": 1078,
+                "width": 48,
+                "url": "https://media.sketchfab.com/avatars/8c72…",
+                "height": 48
+              },
+              {
+                "size": 2607,
+                "width": 90,
+                "url": "https://media.sketchfab.com/avatars/8c72…",
+                "height": 90
+              },
+              {
+                "size": 3073,
+                "width": 100,
+                "url": "https://media.sketchfab.com/avatars/8c72…",
+                "height": 100
+              }
+            ]
+          },
+          "uri": "https://api.sketchfab.com/v3/users/924b7694df064679acfe0a1b205a35d2"
+        },
+        "description": "Building exported from MiTek Pamir.",
+        "faceCount": 7320,
+        "createdAt": "2024-01-24T10:04:25.271252",
+        "vertexCount": 5800,
+        "isAgeRestricted": false,
+        "soundCount": 0,
+        "isProtected": false,
+        "license": null,
+        "price": null,
+        "archives": {}
+      },
+      {
+        "uri": "https://api.sketchfab.com/v3/models/3526092c8b684226be6756ee7370440d",
+        "uid": "3526092c8b684226be6756ee7370440d",
+        "name": "PONTE RIO PIRAPÓ 1970",
+        "staffpickedAt": null,
+        "viewCount": 8,
+        "likeCount": 0,
+        "animationCount": 0,
+        "viewerUrl": "https://sketchfab.com/3d-models/none-3526092c8b684226be6756ee7370440d",
+        "embedUrl": "https://sketchfab.com/models/3526092c8b684226be6756ee7370440d/embed",
+        "commentCount": 0,
+        "isDownloadable": false,
+        "publishedAt": "2022-01-19T11:51:05.404590",
+        "tags": [],
+        "categories": [],
+        "thumbnails": {
+          "images": [
+            {
+              "uid": "efb00f8035da4c779cbdfad22d44df8e",
+              "size": 41152,
+              "width": 1920,
+              "url": "https://media.sketchfab.com/models/35260…",
+              "height": 1080
+            },
+            {
+              "uid": "4e9779ae734a485290b1170816d2b878",
+              "size": 13375,
+              "width": 1024,
+              "url": "https://media.sketchfab.com/models/35260…",
+              "height": 576
+            },
+            {
+              "uid": "16acd0ddd28d44758b3d36c6df8bb8fb",
+              "size": 6989,
+              "width": 720,
+              "url": "https://media.sketchfab.com/models/35260…",
+              "height": 405
+            },
+            {
+              "uid": "cf136bc556514b5594c36583053c462a",
+              "size": 1714,
+              "width": 256,
+              "url": "https://media.sketchfab.com/models/35260…",
+              "height": 144
+            },
+            {
+              "uid": "27859612935049eb8be252d67e032076",
+              "size": 724,
+              "width": 64,
+              "url": "https://media.sketchfab.com/models/35260…",
+              "height": 36
+            }
+          ]
+        },
+        "user": {
+          "uid": "d8162170736d4678bfa8e7dab4ed9cc3",
+          "username": "diegodferri",
+          "displayName": "diegodferri",
+          "profileUrl": "https://sketchfab.com/diegodferri",
+          "account": "basic",
+          "avatar": {
+            "uri": "https://api.sketchfab.com/v3/avatars/3ef1bd11d3eb4b57a0b353e8f2e5fc3e",
+            "images": [
+              {
+                "size": 680,
+                "width": 32,
+                "url": "https://media.sketchfab.com/avatars/3ef1…",
+                "height": 32
+              },
+              {
+                "size": 1253,
+                "width": 48,
+                "url": "https://media.sketchfab.com/avatars/3ef1…",
+                "height": 48
+              },
+              {
+                "size": 2797,
+                "width": 90,
+                "url": "https://media.sketchfab.com/avatars/3ef1…",
+                "height": 90
+              },
+              {
+                "size": 3215,
+                "width": 100,
+                "url": "https://media.sketchfab.com/avatars/3ef1…",
+                "height": 100
+              }
+            ]
+          },
+          "uri": "https://api.sketchfab.com/v3/users/d8162170736d4678bfa8e7dab4ed9cc3"
+        },
+        "description": "",
+        "faceCount": 131486,
+        "createdAt": "2022-01-19T11:39:30.400544",
+        "vertexCount": 65639,
+        "isAgeRestricted": true,
+        "soundCount": 0,
+        "isProtected": false,
+        "license": null,
+        "price": null,
+        "archives": {}
+      }
+    ],
+    "next": null
+  },
+  "expect": {
+    "kept": 4,
+    "removed": 1
+  }
+}
