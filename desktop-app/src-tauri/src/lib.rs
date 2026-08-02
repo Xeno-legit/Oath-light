@@ -2097,20 +2097,39 @@ fn enforce_browser_lock(
         // one on the machine; that made the protection weakest on exactly the
         // stock consumer PC it exists for, and made "uninstall your other
         // browsers" a working bypass. See `browser_lock`'s module doc — the
-        // recovery path is the restore window, which is available here too.
-        st.locked_out = true;
-
-        // Read the profiles directly rather than leaning on `st.installed`: the
-        // decision needs "every profile has it" (a second profile without the
-        // extension is a fully usable unprotected browser), plus whether we
-        // could read them at all — neither of which `installed` distinguishes.
+        // Read the profiles directly: a browser is protected if all currently
+        // running profiles carry the extension. If an active running profile lacks
+        // the extension, the browser is locked out and killed.
         let facts = match profiles::cached_profiles(def) {
-            Some(list) => browser_lock::BrowserFacts {
-                protected: !list.is_empty() && list.iter().all(|p| p.installed),
-                ground_truth: true,
-            },
+            Some(list) => {
+                if list.is_empty() {
+                    browser_lock::BrowserFacts {
+                        protected: false,
+                        ground_truth: true,
+                    }
+                } else {
+                    let running_dirs = profiles::detect_running_profiles(def);
+                    let protected = if running_dirs.is_empty() {
+                        list.iter().all(|p| p.installed)
+                    } else {
+                        list.iter().all(|p| {
+                            let dir_name = std::path::Path::new(&p.profile_dir)
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_default();
+                            !running_dirs.contains(&dir_name) || p.installed
+                        })
+                    };
+                    browser_lock::BrowserFacts {
+                        protected,
+                        ground_truth: true,
+                    }
+                }
+            }
             None => browser_lock::BrowserFacts { protected: false, ground_truth: false },
         };
+        st.locked_out = !facts.protected;
+
         if locks.decide(&st.key, facts) == browser_lock::LockDecision::Kill && st.running {
             condemned.push(def);
         }

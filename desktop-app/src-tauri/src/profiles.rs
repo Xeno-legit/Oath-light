@@ -23,7 +23,7 @@
 
 use crate::browsers::{BrowserDef, Engine, EXTENSION_ID, GECKO_EXTENSION_ID, STORE_EXTENSION_ID};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -96,6 +96,49 @@ pub fn cached_profiles(def: &BrowserDef) -> Option<Vec<ProfileExt>> {
 pub fn invalidate_cache() {
     cache().lock().unwrap().clear();
 }
+
+/// Inspect running browser processes to detect which profile directories are currently active.
+/// Chromium processes include `--profile-directory="<dir>"` (e.g. `--profile-directory="Default"`).
+pub fn detect_running_profiles(def: &BrowserDef) -> HashSet<String> {
+    use sysinfo::{ProcessRefreshKind, System, UpdateKind};
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(
+        ProcessRefreshKind::new().with_cmd(UpdateKind::Always)
+    );
+
+    let process_names: HashSet<String> = def.process_names.iter().map(|n| n.to_lowercase()).collect();
+    let mut running_dirs = HashSet::new();
+
+    for proc in sys.processes().values() {
+        let name = proc.name().to_lowercase();
+        if !process_names.contains(&name) {
+            continue;
+        }
+        for arg in proc.cmd() {
+            if let Some(val) = arg.strip_prefix("--profile-directory=") {
+                let dir = val.trim_matches('"').trim();
+                if !dir.is_empty() {
+                    running_dirs.insert(dir.to_string());
+                }
+            }
+        }
+    }
+
+    // Fallback: if browser processes are running but none contained `--profile-directory`,
+    // check `Local State` for `profile.last_used`.
+    if running_dirs.is_empty() {
+        if let Some(udd) = user_data_dir(def.key) {
+            if let Some(v) = read_json(&udd.join("Local State")) {
+                if let Some(last_used) = v.get("profile").and_then(|p| p.get("last_used")).and_then(|u| u.as_str()) {
+                    running_dirs.insert(last_used.to_string());
+                }
+            }
+        }
+    }
+
+    running_dirs
+}
+
 
 #[cfg(target_os = "windows")]
 fn user_data_dir(key: &str) -> Option<PathBuf> {
