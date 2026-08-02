@@ -208,8 +208,8 @@ const NativeMessagingBridge = (function () {
         break;
 
       case 'set_blocking':
-        // Desktop app pushed the blocking settings (redirect target + reminder
-        // schedule). Cache them and re-arm the reminder loop.
+        // Desktop app pushed the blocking settings (redirect target +
+        // vulnerable-hours window). Cache them and re-arm the escalation loop.
         handleSetBlocking(msg);
         break;
 
@@ -243,8 +243,16 @@ const NativeMessagingBridge = (function () {
     console.log('[OathLight] blocking settings received — redirect:',
       settings.redirectLinkOn ? (settings.redirectUrl || '(blank)') : 'off');
     try { await chrome.storage.local.set({ ppBlocking: settings }); } catch (_) {}
-    // Re-arm the reminder loop to reflect the new schedule immediately.
-    if (typeof armReminderAlarm === 'function') armReminderAlarm();
+    // Voice layer (UX Direction §1/§2): the worker keeps its own OL_STRINGS
+    // instance, so it has to follow the same push the pages do (they read
+    // `ppBlocking` through voice-sync.js). `voice` is the user's onboarding
+    // choice; `serious` is backend-owned and overrides it inside `t()`.
+    applyVoiceSettings(settings);
+    // Lockdown schedule-from-vulnerable-hours (4.4 v2): arm/disarm the
+    // escalation alarm to match whatever the desktop just pushed. (There used
+    // to be a second re-arm here for the in-page reminder loop; reminders now
+    // fire from the desktop app — see src-tauri/src/reminder.rs.)
+    if (typeof reconcileLockdownEscalationAlarm === 'function') reconcileLockdownEscalationAlarm();
     // Apply the opt-in YouTube Restricted Mode DNR toggle (default OFF) the
     // moment the desktop app pushes it — same channel as the redirect link.
     if (typeof applyYouTubeRestrictRuleset === 'function') applyYouTubeRestrictRuleset();
@@ -255,13 +263,45 @@ const NativeMessagingBridge = (function () {
     const d = (msg.display && typeof msg.display === 'object') ? msg.display : msg;
     const display = {};
     if (d.theme) display.theme = d.theme;
-    if (d.style) display.style = d.style;
-    if (d.bg) display.bg = d.bg;
-    if (typeof d.intensity !== 'undefined') display.intensity = d.intensity;
+    // No `style`: the palette axis is gone (see theme-sync.js). Forwarding a
+    // key no page reads would just keep it alive in every profile's storage.
+    // Same now goes for `bg` and `intensity`: the animated atmosphere they
+    // described no longer exists on any surface.
+    if (d.look) display.look = d.look;
+    if (d.neutral) display.neutral = d.neutral;
+    // `density` and `motion` are deliberately not forwarded — they scale the
+    // desktop window's own spacing and its interaction animations, neither of
+    // which the extension's pages share.
     if (Object.keys(display).length === 0) return;
     // Store the object plus mirrored top-level keys (blocked.js reads either).
     await chrome.storage.local.set({ display, ...display });
   }
+
+  // ─ Voice / Serious Mode for the worker's own OL_STRINGS ────
+  // The pages get this through voice-sync.js; the service worker has no DOM
+  // and no access to that file, so it configures its own copy here. Safe to
+  // call with a partial/absent settings object — both setters ignore junk.
+  function applyVoiceSettings(settings) {
+    const S = typeof globalThis !== 'undefined' ? globalThis.OL_STRINGS : null;
+    if (!S) return;
+    const s = settings && typeof settings === 'object' ? settings : {};
+    // Locale before voice: `t()` resolves locale first, then voice within it.
+    // The worker has no DOM, so there is no `dir` to apply here — direction
+    // only matters on the pages, and voice-sync.js sets it there.
+    S.setLocale(s.locale || S.defaultLocale);
+    S.setVoice(s.voice || S.defaultVoice);
+    S.setSeriousMode(!!s.serious);
+  }
+
+  // MV3 service workers are killed and restarted constantly; re-hydrate the
+  // voice from the last push on every cold start so a notification fired
+  // before the desktop reconnects still speaks in the right register.
+  (async function restoreVoice() {
+    try {
+      const { ppBlocking } = await chrome.storage.local.get(['ppBlocking']);
+      applyVoiceSettings(ppBlocking);
+    } catch (_) { /* storage unavailable — defaults are already correct */ }
+  })();
 
   // ─ Handle blocklist updates from desktop ───────────────────
   async function handleBlocklistUpdate(msg) {
@@ -346,12 +386,22 @@ const NativeMessagingBridge = (function () {
     return send({ type: 'open_panic' });
   }
 
+  // ─ Lockdown schedule-from-vulnerable-hours (plan 4.4 v2) ───
+  // Tells the desktop app the vulnerable-hours window is currently active and
+  // how many minutes remain in it — see vulnerable-window.js's `maybeEscalateLockdown`.
+  // Only ever called while the desktop-owned `escalate_vulnerable_hours`
+  // setting is on (opt-in, off by default).
+  function sendVulnerableWindowActive(remainingMin) {
+    return send({ type: 'vulnerable_window_active', remainingMin });
+  }
+
   // ─ Public API ──────────────────────────────────────────────
   return {
     connect,
     sendStatsUpdate,
     sendBlocklistUpdate,
     sendOpenPanic,
+    sendVulnerableWindowActive,
     isConnected: () => isConnected
   };
 })();

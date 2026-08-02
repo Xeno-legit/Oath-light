@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Oath Light</title>
+<!--
+  reminder.html — the vulnerable-hours nudge card (see src-tauri/src/reminder.rs).
+
+  Deliberately self-contained: no store, no bridge, no imports. This window is
+  built, shown and closed entirely by the Rust side, and the only thing it ever
+  receives is a title and a body on the query string. Keeping it dependency-free
+  means a nudge can never be delayed by, or fail because of, anything else in
+  the renderer booting.
+
+  It has no buttons on purpose. There is nothing here to act on and nothing to
+  dismiss — it fades in, sits for twelve seconds, and the backend closes it.
+  Adding an action to this card would make it an interruption; it is meant to
+  be noticed and then ignored.
+-->
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #16181d;
+    --edge: #262a33;
+    --ink: #f2f4f8;
+    --muted: #a6adbb;
+    --accent: #7aa2f7;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      color-scheme: light;
+      --bg: #ffffff;
+      --edge: #e3e6ec;
+      --ink: #14161a;
+      --muted: #5c6473;
+      --accent: #3b6fd4;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+    /* Click-through is not available here, so the next best thing: the card
+       never takes focus (the window is built with focused(false)) and text
+       selection is off, so an accidental click does nothing at all. */
+    user-select: none;
+    cursor: default;
+  }
+  body {
+    font: 400 14px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+    color: var(--ink);
+    display: flex;
+    padding: 6px;
+  }
+  .card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    padding: 16px 18px;
+    background: var(--bg);
+    border: 1px solid var(--edge);
+    border-left: 3px solid var(--accent);
+    border-radius: 12px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .35);
+    opacity: 0;
+    transform: translateY(8px);
+    animation: in .28s cubic-bezier(.2, .8, .3, 1) forwards;
+  }
+  @keyframes in { to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .card { animation: none; opacity: 1; transform: none; }
+  }
+  .title {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .body {
+    font-size: 15px;
+    color: var(--ink);
+    /* Long quotes must never be clipped by the fixed window height. */
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+  }
+  .mark {
+    font-size: 11px;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="title" id="title"></div>
+    <div class="body" id="body"></div>
+    <div class="mark">Oath Light</div>
+  </div>
+<script>
+  // textContent, never innerHTML — the values arrive on a query string, and
+  // this card should not be the one place in the app where copy can inject
+  // markup. Both fall back to sane defaults so a malformed URL still shows
+  // something rather than an empty box.
+  (function () {
+    var q = new URLSearchParams(location.search);
+    document.getElementById('title').textContent = q.get('title') || 'Oath Light';
+    document.getElementById('body').textContent = q.get('body') || '';
+  })();
+</script>
+</body>
+</html>

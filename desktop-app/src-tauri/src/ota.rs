@@ -39,12 +39,12 @@ use tauri::{AppHandle, Emitter, Manager};
 /// assets" CDN the plan describes.
 ///
 /// Repo slug taken from this repository's `origin` remote
-/// (github.com/Xeno-legit/Oath-Light). TODO(owner): if the project moves to a
+/// (github.com/Xeno-legit/Oath-light). TODO(owner): if the project moves to a
 /// dedicated org/repo before Alpha, update this const AND the matching
 /// `_config.baseUrl` in `extension/bg/ota.js` — they must always point at the
 /// same release stream, or desktop and extension will drift.
 pub const OTA_RELEASE_BASE: &str =
-    "https://github.com/Xeno-legit/Oath-Light/releases/latest/download";
+    "https://github.com/Xeno-legit/Oath-light/releases/latest/download";
 
 pub const MANIFEST_ASSET: &str = "lists-manifest.json";
 pub const MANIFEST_SIG_ASSET: &str = "lists-manifest.json.sig";
@@ -552,7 +552,7 @@ mod tests {
     fn sig_verify_interop_with_noble_ed25519() {
         let pub_hex = "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29";
         let msg = b"oathlight-ota-interop-fixture-v1";
-        let sig_hex = "63e68cf09095be3a32cf1987fd8629c8376b859cb2dfea87d6ea950d11138d4796bf6b80dcf3b966cb0f479736da259ff09b869657f63cd9263490c541365d05";
+        let sig_hex = "ee436c3dcfa795d53bffc8322f679298addd609103a438f33a4aed3c0d0e946a61cbf3f34e505ab3fe710b00e75edbd8b8c56359bd7c7d59fa69db9d17b79405";
         assert!(verify_sig_any(msg, sig_hex, &[pub_hex]).is_ok());
         // And the same signature over different bytes must fail.
         assert!(verify_sig_any(b"oathlight-ota-interop-fixture-v2", sig_hex, &[pub_hex]).is_err());

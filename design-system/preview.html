@@ -1,0 +1,1537 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oath Light — Design System Editor</title>
+<!-- suppresses the browser's automatic favicon request (a 404 on file://
+     with no server is otherwise the one unavoidable "console error") -->
+<link rel="icon" href="data:,">
+
+<!-- The single source of truth this editor exists to tune. Everything
+     below reads its live values via getComputedStyle() and writes edits
+     back as inline custom properties on <html> — tokens.css itself is
+     never touched until the owner explicitly copies/downloads the
+     reconstructed export back over it. -->
+<link rel="stylesheet" href="./tokens.css">
+
+<style>
+  /* ============================================================
+     EDITOR CHROME
+     This is the editor's own UI, not a "surface" — it deliberately
+     still consumes --ol-* tokens wherever sensible (dogfooding), but
+     a few structural values (fixed sidebar width, scrollbar sizing)
+     are plain CSS because they're layout mechanics, not design tokens.
+     ============================================================ */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    font-family: var(--ol-font-ui);
+    background: var(--ol-bg-0);
+    color: var(--ol-text-1);
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input { font-family: inherit; color: inherit; }
+
+  .ds-app { display: flex; height: 100vh; }
+
+  /* ---------- sidebar (fixed, own scroll) ---------- */
+  .ds-sidebar {
+    width: 360px; flex: 0 0 360px;
+    height: 100vh; overflow-y: auto;
+    background: var(--ol-bg-1);
+    border-right: 1px solid var(--ol-border);
+    padding: var(--ol-space-5);
+  }
+  .ds-sidebar h1 {
+    font-family: var(--ol-font-ui);
+    font-size: var(--ol-size-xl);
+    font-weight: var(--ol-weight-regular);
+    margin: 0 0 2px;
+  }
+  .ds-sidebar .ds-tag {
+    font-size: var(--ol-size-xs);
+    color: var(--ol-text-3);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    font-weight: var(--ol-weight-bold);
+    margin-bottom: var(--ol-space-5);
+  }
+
+  .ds-row { display: flex; gap: var(--ol-space-2); margin-bottom: var(--ol-space-4); flex-wrap: wrap; }
+  .ds-block { margin-bottom: var(--ol-space-5); }
+  .ds-block > .ds-block-label {
+    font-size: var(--ol-size-xs);
+    font-weight: var(--ol-weight-bold);
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ol-text-3);
+    margin-bottom: var(--ol-space-2);
+    display: block;
+  }
+
+  /* segmented control, used for theme / voice */
+  .ds-seg {
+    display: inline-flex; padding: 3px; gap: 2px;
+    background: var(--ol-bg-2); border: 1px solid var(--ol-border);
+    border-radius: var(--ol-radius-sm);
+  }
+  .ds-seg button {
+    border: none; background: none; cursor: pointer;
+    padding: 6px 12px; border-radius: calc(var(--ol-radius-sm) - 3px);
+    font-size: var(--ol-size-sm); font-weight: var(--ol-weight-bold);
+    color: var(--ol-text-3);
+    transition: background var(--ol-duration-base) var(--ol-ease-standard),
+                color var(--ol-duration-base) var(--ol-ease-standard);
+  }
+  .ds-seg button.on { background: var(--ol-bg-3); color: var(--ol-text-1); }
+  .ds-seg button:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* toggle switch used for serious mode */
+  .ds-switch-row { display: flex; align-items: center; justify-content: space-between; gap: var(--ol-space-3); }
+  .ds-switch-row .ds-switch-txt { font-size: var(--ol-size-sm); font-weight: var(--ol-weight-semibold); }
+  .ds-switch-row .ds-switch-sub { font-size: var(--ol-size-xs); color: var(--ol-text-3); margin-top: 2px; }
+  .ds-switch {
+    width: 40px; height: 23px; border-radius: var(--ol-radius-pill);
+    background: var(--ol-bg-3); border: 1px solid var(--ol-border);
+    position: relative; cursor: pointer; flex: 0 0 40px;
+    transition: background var(--ol-duration-base) var(--ol-ease-standard);
+  }
+  .ds-switch::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 17px; height: 17px; border-radius: 50%; background: #fff;
+    transition: transform var(--ol-duration-base) var(--ol-ease-standard);
+  }
+  .ds-switch.on { background: var(--ol-danger); border-color: var(--ol-danger); }
+  .ds-switch.on::after { transform: translateX(17px); }
+
+  .ds-btnrow { display: flex; gap: var(--ol-space-2); flex-wrap: wrap; }
+  .ds-btn {
+    border: 1px solid var(--ol-border); background: var(--ol-bg-2);
+    color: var(--ol-text-1); border-radius: var(--ol-radius-sm);
+    padding: 7px 12px; font-size: var(--ol-size-sm); font-weight: var(--ol-weight-bold);
+    cursor: pointer;
+    transition: border-color var(--ol-duration-base) var(--ol-ease-standard);
+  }
+  .ds-btn:hover { border-color: var(--ol-border-strong); }
+  .ds-btn.primary { background: var(--ol-accent); color: var(--ol-bg-0); border-color: var(--ol-accent); }
+  .ds-btn.warn { background: transparent; color: var(--ol-danger); border-color: var(--ol-danger); }
+
+  .ds-status {
+    font-size: var(--ol-size-xs); color: var(--ol-ok);
+    min-height: 1.4em; margin-top: var(--ol-space-2);
+  }
+
+  /* ---------- token group <details> ---------- */
+  .ds-group { border: 1px solid var(--ol-border); border-radius: var(--ol-radius-sm); margin-bottom: var(--ol-space-3); overflow: hidden; }
+  .ds-group > summary {
+    cursor: pointer; list-style: none; padding: var(--ol-space-3);
+    font-size: var(--ol-size-sm); font-weight: var(--ol-weight-bold);
+    background: var(--ol-bg-2);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .ds-group > summary::-webkit-details-marker { display: none; }
+  .ds-group > summary .ds-count { color: var(--ol-text-3); font-weight: var(--ol-weight-regular); }
+  .ds-group-body { padding: var(--ol-space-3); display: flex; flex-direction: column; gap: var(--ol-space-3); }
+
+  .ds-control { display: flex; flex-direction: column; gap: 4px; }
+  .ds-control label { font-size: 12px; font-weight: var(--ol-weight-semibold); color: var(--ol-text-2); }
+  .ds-control .ds-token-name { font-size: 10.5px; color: var(--ol-text-3); font-family: monospace; }
+  .ds-control-row { display: flex; align-items: center; gap: 6px; }
+  .ds-control input[type="color"] {
+    width: 30px; height: 26px; padding: 0; border: 1px solid var(--ol-border); border-radius: 6px; background: none; cursor: pointer; flex: 0 0 auto;
+  }
+  .ds-control input[type="text"] {
+    flex: 1; min-width: 0; padding: 5px 7px; border-radius: 6px;
+    border: 1px solid var(--ol-border); background: var(--ol-bg-0); color: var(--ol-text-1);
+    font-size: 12px; font-family: monospace;
+  }
+  .ds-control input[type="range"] { flex: 1; min-width: 0; }
+  .ds-control input[type="number"] {
+    width: 64px; padding: 5px 6px; border-radius: 6px;
+    border: 1px solid var(--ol-border); background: var(--ol-bg-0); color: var(--ol-text-1);
+    font-size: 12px; font-family: monospace;
+  }
+  .ds-control .ds-unit { font-size: 11px; color: var(--ol-text-3); width: 28px; flex: 0 0 auto; }
+
+  /* ---------- preview pane ---------- */
+  .ds-preview { flex: 1; min-width: 0; height: 100vh; overflow-y: auto; background: var(--ol-bg-0); }
+  .ds-preview-inner { max-width: 980px; margin: 0 auto; padding: var(--ol-space-8) var(--ol-space-6) 120px; }
+
+  .ds-section { margin-bottom: var(--ol-space-8); }
+  .ds-section-title {
+    font-size: var(--ol-size-xs); font-weight: var(--ol-weight-bold);
+    letter-spacing: .1em; text-transform: uppercase; color: var(--ol-accent);
+    margin-bottom: var(--ol-space-4);
+    display: flex; align-items: center; gap: var(--ol-space-2);
+  }
+  .ds-section-title::after { content: ''; flex: 1; height: 1px; background: var(--ol-border-strong); }
+
+  /* scrollbars, non-token, purely mechanical */
+  .ds-sidebar::-webkit-scrollbar, .ds-preview::-webkit-scrollbar { width: 10px; }
+  .ds-sidebar::-webkit-scrollbar-thumb, .ds-preview::-webkit-scrollbar-thumb { background: var(--ol-border-strong); border-radius: 20px; }
+</style>
+</head>
+<body>
+
+<div class="ds-app">
+
+  <!-- ============================================================
+       SIDEBAR — controls, built dynamically from OL_TOKENS below
+       ============================================================ -->
+  <aside class="ds-sidebar">
+    <h1>Oath Light</h1>
+    <div class="ds-tag">Design token editor</div>
+
+    <div class="ds-block">
+      <span class="ds-block-label">Theme</span>
+      <div class="ds-seg" id="ds-theme-seg">
+        <button type="button" data-theme-btn="dark">Dark</button>
+        <button type="button" data-theme-btn="light">Light</button>
+      </div>
+    </div>
+
+    <div class="ds-block">
+      <span class="ds-block-label">Voice</span>
+      <div class="ds-seg" id="ds-voice-seg">
+        <button type="button" data-voice-btn="companion">Companion</button>
+        <button type="button" data-voice-btn="serious">Drill Sergeant</button>
+      </div>
+    </div>
+
+    <div class="ds-block">
+      <div class="ds-switch-row">
+        <div>
+          <div class="ds-switch-txt">Serious Mode</div>
+          <div class="ds-switch-sub">Previews the [data-serious] hook + forces the hard voice</div>
+        </div>
+        <div class="ds-switch" id="ds-serious-toggle"></div>
+      </div>
+    </div>
+
+    <div class="ds-block">
+      <span class="ds-block-label">Export</span>
+      <div class="ds-btnrow">
+        <button type="button" class="ds-btn primary" id="ds-copy-btn">Copy tokens.css</button>
+        <button type="button" class="ds-btn" id="ds-download-btn">Download tokens.css</button>
+        <button type="button" class="ds-btn warn" id="ds-reset-btn">Reset all</button>
+      </div>
+      <div class="ds-status" id="ds-status"></div>
+      <textarea id="ds-export-preview" spellcheck="false" style="display:none; width:100%; height:160px; margin-top:8px; font-family:monospace; font-size:11px; background:var(--ol-bg-0); color:var(--ol-text-2); border:1px solid var(--ol-border); border-radius:8px; padding:8px;" readonly></textarea>
+    </div>
+
+    <div id="ds-groups"></div>
+  </aside>
+
+  <!-- ============================================================
+       PREVIEW — this content is also the component reference for
+       the eventual UI rebuild. Everything in here is styled only
+       with --ol-* custom properties (plus this file's own .ds-*
+       chrome classes, which themselves resolve to --ol-* values).
+       ============================================================ -->
+  <main class="ds-preview">
+    <div class="ds-preview-inner">
+
+      <section class="ds-section">
+        <div class="ds-section-title">Color</div>
+        <div id="ds-swatch-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(120px,1fr)); gap: var(--ol-space-3);"></div>
+      </section>
+
+      <section class="ds-section">
+        <div class="ds-section-title">Type scale</div>
+        <div id="ds-type-scale"></div>
+        <div style="margin-top: var(--ol-space-5); display:flex; gap: var(--ol-space-5); flex-wrap:wrap; align-items:baseline;" id="ds-weight-row"></div>
+        <div style="margin-top: var(--ol-space-5); font-family: var(--ol-font-ui); font-size: var(--ol-size-2xl); color: var(--ol-text-1);">
+          Past-you outranks present-you.
+        </div>
+      </section>
+
+      <section class="ds-section">
+        <div class="ds-section-title">Spacing</div>
+        <div id="ds-space-ruler" style="display:flex; flex-direction:column; gap: 8px;"></div>
+      </section>
+
+      <section class="ds-section">
+        <div class="ds-section-title">Radii</div>
+        <div id="ds-radius-ruler" style="display:flex; gap: var(--ol-space-4); flex-wrap:wrap; align-items:flex-end;"></div>
+      </section>
+
+      <section class="ds-section">
+        <div class="ds-section-title">Shadow / Elevation</div>
+        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap: var(--ol-space-5);">
+          <div>
+            <div style="height:110px; background: var(--ol-bg-2); border:1px solid var(--ol-border); border-radius: var(--ol-radius-md); box-shadow: var(--ol-shadow-sm);"></div>
+            <div class="ds-spec-label">shadow-sm — cards, buttons</div>
+          </div>
+          <div>
+            <div style="height:110px; background: var(--ol-bg-2); border:1px solid var(--ol-border); border-radius: var(--ol-radius-md); box-shadow: var(--ol-shadow-md);"></div>
+            <div class="ds-spec-label">shadow-md — modals, hover lift</div>
+          </div>
+          <div>
+            <!-- blur needs something behind it to be visible: colored blobs
+                 under a translucent panel that backdrop-filters them -->
+            <div style="position:relative; height:110px; border-radius: var(--ol-radius-md); overflow:hidden; border:1px solid var(--ol-border);
+                        background: radial-gradient(circle at 22% 30%, var(--ol-accent) 0 16px, transparent 18px),
+                                    radial-gradient(circle at 72% 40%, var(--ol-ok) 0 20px, transparent 22px),
+                                    radial-gradient(circle at 48% 78%, var(--ol-danger) 0 13px, transparent 15px),
+                                    var(--ol-bg-2);">
+              <div style="position:absolute; inset:14px; border-radius: calc(var(--ol-radius-md) - 6px);
+                          background: var(--ol-bg-1);
+                          box-shadow: var(--ol-shadow-sm), inset 0 1px 0 var(--ol-hairline);
+                          border:1px solid var(--ol-border);
+                          display:grid; place-items:center; font-size: var(--ol-size-sm); font-weight: var(--ol-weight-bold);">
+                opaque panel
+              </div>
+            </div>
+            <div class="ds-spec-label">hairline — the lit top edge that lifts a surface</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="ds-section">
+        <div class="ds-section-title">Motion &amp; hover</div>
+        <div style="font-size: var(--ol-size-sm); color: var(--ol-text-2); margin-bottom: var(--ol-space-3);">
+          Hover the chip and the card. Press Play to race the three durations
+          (all <code>ease-standard</code>) and compare the two easings (both at
+          <code>duration-slow</code>).
+        </div>
+        <div style="display:flex; gap: var(--ol-space-4); align-items:center; flex-wrap:wrap; margin-bottom: var(--ol-space-4);">
+          <div id="ds-motion-chip" class="ds-hover-chip">Hover me</div>
+          <div class="ol-card ds-hover-card" style="padding: var(--ol-space-3) var(--ol-space-4); font-size: var(--ol-size-sm); font-weight: var(--ol-weight-semibold);">
+            Hover-lift card — transform + shadow-md
+          </div>
+        </div>
+        <div id="ds-motion-track" style="display:flex; flex-direction:column; gap:10px; margin-bottom: var(--ol-space-3);">
+          <div class="ds-track"><span class="ds-lane-label">duration-fast</span><div class="ds-lane"><div class="ds-dot" style="transition: left var(--ol-duration-fast) var(--ol-ease-standard);"></div></div></div>
+          <div class="ds-track"><span class="ds-lane-label">duration-base</span><div class="ds-lane"><div class="ds-dot" style="transition: left var(--ol-duration-base) var(--ol-ease-standard);"></div></div></div>
+          <div class="ds-track"><span class="ds-lane-label">duration-slow</span><div class="ds-lane"><div class="ds-dot" style="transition: left var(--ol-duration-slow) var(--ol-ease-standard);"></div></div></div>
+          <div class="ds-track"><span class="ds-lane-label">ease-standard</span><div class="ds-lane"><div class="ds-dot" style="transition: left var(--ol-duration-slow) var(--ol-ease-standard);"></div></div></div>
+          <div class="ds-track"><span class="ds-lane-label">ease-spring</span><div class="ds-lane"><div class="ds-dot" style="transition: left var(--ol-duration-slow) var(--ol-ease-spring);"></div></div></div>
+        </div>
+        <button type="button" class="ds-btn" id="ds-motion-play">Play</button>
+      </section>
+
+      <section class="ds-section">
+        <div class="ds-section-title">Buttons</div>
+        <div style="display:flex; gap: var(--ol-space-3); flex-wrap:wrap;">
+          <button class="ol-btn ol-btn-primary">Primary action</button>
+          <button class="ol-btn ol-btn-ghost">Ghost action</button>
+          <button class="ol-btn ol-btn-danger">Danger action</button>
+        </div>
+      </section>
+
+      <section class="ds-section" style="display:grid; grid-template-columns: 1fr 1fr; gap: var(--ol-space-5);">
+        <div class="ol-card">
+          <div style="font-weight: var(--ol-weight-bold); font-size: var(--ol-size-md); margin-bottom: var(--ol-space-2);">Card title</div>
+          <div style="color: var(--ol-text-2); font-size: var(--ol-size-sm); line-height: var(--ol-leading-normal); margin-bottom: var(--ol-space-4);">
+            Cards are the base surface for grouped content — bg-2, a hairline border, and shadow-sm.
+          </div>
+          <div style="display:flex; align-items:center; gap: var(--ol-space-3);">
+            <div class="ol-switch on"></div>
+            <span class="ol-chip">Chip / badge</span>
+          </div>
+        </div>
+
+        <div class="ol-card">
+          <label style="display:block; font-size: var(--ol-size-sm); font-weight: var(--ol-weight-semibold); margin-bottom: var(--ol-space-2);">Text input</label>
+          <input class="ol-input" type="text" placeholder="e.g. example.com">
+        </div>
+      </section>
+
+      <section class="ds-section" style="display:flex; flex-direction:column; gap: var(--ol-space-3);">
+        <div class="ol-banner ol-banner-ok" data-ol-key="status.protected" data-ol-fallback="Protection active"></div>
+        <div class="ol-banner ol-banner-warn" data-ol-key="status.ext_missing" data-ol-fallback="Extension missing — fix"></div>
+      </section>
+
+      <section class="ds-section">
+        <div class="ds-section-title">Blocked page — hero mock</div>
+        <div class="ol-hero">
+          <div class="ol-hero-headline" data-ol-key="blocked.headline" data-ol-fallback="Take a deep breath"></div>
+          <div class="ol-hero-body" data-ol-key="blocked.body" data-ol-fallback="This page was blocked to help you stay focused on your goals."></div>
+          <div style="display:flex; gap: var(--ol-space-3); margin-top: var(--ol-space-5);">
+            <button class="ol-btn ol-btn-primary" data-ol-key="blocked.cta_leave" data-ol-fallback="Return to Safety"></button>
+            <button class="ol-btn ol-btn-ghost" data-ol-key="blocked.cta_panic" data-ol-fallback="I need help right now"></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="ds-section">
+        <div class="ds-section-title">Pending change — friction countdown</div>
+        <div class="ol-card ol-friction-card">
+          <div class="ol-friction-label" data-ol-key="friction.pending_label" data-ol-fallback="Pending change"></div>
+          <div class="ol-friction-count" id="ds-friction-count">—</div>
+          <button class="ol-btn ol-btn-primary" style="margin-top: var(--ol-space-4);" data-ol-key="friction.keep" data-ol-fallback="Keep protection on"></button>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+</div>
+
+<!-- ============================================================
+     COMPONENT REFERENCE CSS
+     These .ol-* classes are the "upcoming UI rebuild" component
+     reference the task calls for — every value here is an --ol-*
+     token, nothing hardcoded. Kept in this file (not tokens.css)
+     because tokens.css is data-only; a components.css sharing these
+     class names is exactly what the real rebuild would add per-surface.
+     ============================================================ -->
+<style>
+  .ol-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: var(--ol-space-2);
+    padding: 11px 18px;
+    border-radius: var(--ol-radius-sm);
+    font-family: var(--ol-font-ui);
+    font-size: var(--ol-size-base);
+    font-weight: var(--ol-weight-bold);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: transform var(--ol-duration-fast) var(--ol-ease-standard),
+                box-shadow var(--ol-duration-base) var(--ol-ease-standard),
+                background var(--ol-duration-base) var(--ol-ease-standard),
+                border-color var(--ol-duration-base) var(--ol-ease-standard);
+  }
+  .ol-btn:active { transform: scale(.97); }
+  .ol-btn-primary { background: var(--ol-accent); color: var(--ol-bg-0); box-shadow: var(--ol-shadow-sm); }
+  .ol-btn-ghost { background: var(--ol-bg-2); border-color: var(--ol-border); color: var(--ol-text-1); }
+  .ol-btn-ghost:hover { border-color: var(--ol-border-strong); }
+  .ol-btn-danger { background: var(--ol-danger); color: #ffffff; }
+
+  .ol-card {
+    background: var(--ol-bg-1);
+    border: 1px solid var(--ol-border);
+    border-radius: var(--ol-radius-lg);
+    padding: var(--ol-space-5);
+    box-shadow: var(--ol-shadow-sm);
+  }
+
+  .ol-switch {
+    width: 44px; height: 26px; border-radius: var(--ol-radius-pill);
+    background: var(--ol-bg-3); border: 1px solid var(--ol-border);
+    position: relative; flex: 0 0 44px;
+  }
+  .ol-switch::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 20px; height: 20px; border-radius: 50%; background: #ffffff;
+    transition: transform var(--ol-duration-base) var(--ol-ease-standard);
+  }
+  .ol-switch.on { background: var(--ol-accent); border-color: var(--ol-accent); }
+  .ol-switch.on::after { transform: translateX(18px); }
+
+  .ol-chip {
+    display: inline-flex; align-items: center;
+    font-size: var(--ol-size-sm); font-weight: var(--ol-weight-semibold);
+    padding: 5px 12px; border-radius: var(--ol-radius-pill);
+    background: var(--ol-bg-2); border: 1px solid var(--ol-border);
+    color: var(--ol-text-2);
+  }
+
+  .ol-input {
+    width: 100%; box-sizing: border-box;
+    background: var(--ol-bg-2); border: 1px solid var(--ol-border);
+    border-radius: var(--ol-radius-sm);
+    padding: 11px 14px;
+    font-family: var(--ol-font-ui); font-size: var(--ol-size-base); color: var(--ol-text-1);
+    outline: none;
+    transition: border-color var(--ol-duration-base) var(--ol-ease-standard);
+  }
+  .ol-input::placeholder { color: var(--ol-text-3); }
+  .ol-input:focus { border-color: var(--ol-focus-ring); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ol-focus-ring) 35%, transparent); }
+
+  .ol-banner {
+    display: flex; align-items: center; gap: var(--ol-space-3);
+    padding: var(--ol-space-3) var(--ol-space-4);
+    border-radius: var(--ol-radius-sm);
+    font-size: var(--ol-size-sm); font-weight: var(--ol-weight-semibold);
+    border: 1px solid transparent;
+  }
+  .ol-banner-ok {
+    background: color-mix(in oklab, var(--ol-ok) 14%, transparent);
+    border-color: color-mix(in oklab, var(--ol-ok) 40%, transparent);
+    color: var(--ol-ok);
+  }
+  .ol-banner-warn {
+    background: color-mix(in oklab, var(--ol-warn) 14%, transparent);
+    border-color: color-mix(in oklab, var(--ol-warn) 40%, transparent);
+    color: var(--ol-warn);
+  }
+
+  .ol-hero {
+    background: var(--ol-bg-1);
+    border: 1px solid var(--ol-border);
+    border-radius: var(--ol-radius-xl);
+    padding: var(--ol-space-8);
+    text-align: center;
+  }
+  .ol-hero-headline {
+    font-family: var(--ol-font-ui);
+    font-size: var(--ol-size-4xl);
+    line-height: var(--ol-leading-tight);
+    color: var(--ol-text-1);
+  }
+  .ol-hero-body {
+    font-size: var(--ol-size-md);
+    line-height: var(--ol-leading-relaxed);
+    color: var(--ol-text-2);
+    max-width: 46ch; margin: var(--ol-space-3) auto 0;
+  }
+
+  /* ---------- specimen-only styles (spacing gap, shadow labels,
+     hover + motion demos) — editor chrome, not rebuild components ---------- */
+  .ds-spec-label { font-size: 11px; color: var(--ol-text-3); font-family: monospace; margin-top: 8px; }
+
+  .ds-space-obj {
+    width: 34px; height: 26px; flex: 0 0 34px;
+    background: var(--ol-bg-3); border: 1px solid var(--ol-border-strong);
+    border-radius: 6px;
+  }
+  /* the gap element's width IS the space token — tinted so the distance
+     between the two objects reads as the thing being measured */
+  .ds-space-gap { height: 26px; background: color-mix(in oklab, var(--ol-accent) 22%, transparent); }
+
+  .ds-hover-chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 8px 14px; border-radius: var(--ol-radius-pill);
+    background: var(--ol-bg-2); border: 1px solid var(--ol-border);
+    font-size: var(--ol-size-sm); font-weight: var(--ol-weight-bold); cursor: default;
+    transition: background var(--ol-duration-base) var(--ol-ease-standard),
+                transform var(--ol-duration-base) var(--ol-ease-standard),
+                border-color var(--ol-duration-base) var(--ol-ease-standard);
+  }
+  .ds-hover-chip:hover { transform: translateY(-2px); background: var(--ol-bg-3); border-color: var(--ol-border-strong); }
+
+  .ds-hover-card {
+    cursor: default;
+    transition: transform var(--ol-duration-base) var(--ol-ease-standard),
+                box-shadow var(--ol-duration-base) var(--ol-ease-standard);
+  }
+  .ds-hover-card:hover { transform: translateY(-3px); box-shadow: var(--ol-shadow-md); }
+
+  .ds-track { display: flex; align-items: center; gap: 14px; }
+  .ds-lane-label { width: 110px; flex: 0 0 110px; font-size: 11px; color: var(--ol-text-3); font-family: monospace; }
+  .ds-lane {
+    position: relative; flex: 1; height: 26px; max-width: 420px;
+    border-radius: var(--ol-radius-pill);
+    background: var(--ol-bg-1); border: 1px dashed var(--ol-border-strong);
+  }
+  /* `left` (not transform) so each dot's inline transition — which carries
+     its own duration/easing token — is the only thing animating it */
+  .ds-dot {
+    position: absolute; top: 2px; left: 2px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--ol-accent);
+  }
+  #ds-motion-track.play .ds-dot { left: calc(100% - 22px); }
+
+  .ol-friction-card { text-align: left; }
+  .ol-friction-label {
+    font-size: var(--ol-size-xs); font-weight: var(--ol-weight-bold);
+    letter-spacing: .08em; text-transform: uppercase; color: var(--ol-warn);
+  }
+  .ol-friction-count {
+    font-size: var(--ol-size-3xl); font-weight: var(--ol-weight-black);
+    font-variant-numeric: tabular-nums;
+    color: var(--ol-text-1); margin-top: var(--ol-space-2);
+  }
+</style>
+
+<!-- ============================================================
+     SCRIPTS
+     tokens.js: token manifest (metadata only).
+     strings.js: voice/strings layer, written by a sibling agent —
+     loaded the same way every other surface loads it. If this file
+     is ever missing, every data-ol-key element below falls back to
+     its data-ol-fallback text via the t() helper — see below.
+     ============================================================ -->
+<script src="./tokens.js"></script>
+<script src="./strings.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  /* ============================================================
+     0. STRINGS HELPER — degrades to hardcoded fallback text if
+        strings.js didn't load, or a key isn't present in it.
+        OL_STRINGS.t() itself already returns the bare key on a miss;
+        we detect that case and swap in our own fallback instead of
+        showing a raw dotted key in the UI.
+     ============================================================ */
+  function t(key, fallback, params) {
+    try {
+      if (typeof OL_STRINGS !== 'undefined' && typeof OL_STRINGS.t === 'function') {
+        var val = OL_STRINGS.t(key, params);
+        if (val && val !== key) return val;
+      }
+    } catch (e) { /* fall through to hardcoded fallback */ }
+    if (params) {
+      return String(fallback).replace(/\{([a-zA-Z0-9_]+)\}/g, function (m, k) {
+        return Object.prototype.hasOwnProperty.call(params, k) ? String(params[k]) : m;
+      });
+    }
+    return fallback;
+  }
+
+  function refreshStrings() {
+    document.querySelectorAll('[data-ol-key]').forEach(function (el) {
+      el.textContent = t(el.getAttribute('data-ol-key'), el.getAttribute('data-ol-fallback') || '');
+    });
+  }
+
+  /* ============================================================
+     1. STATE — theme / serious / voice + per-theme token overrides.
+        Overrides are keyed by theme so switching themes swaps which
+        set applies, per the spec. Persisted to localStorage so the
+        owner can iterate across sessions.
+     ============================================================ */
+  var STORAGE_KEY = 'oathlight_ds_v1';
+
+  var state = {
+    theme: 'dark',
+    voice: 'companion',
+    serious: false,
+    overrides: { dark: {}, light: {} },
+  };
+
+  function loadState() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      var parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        state.theme = parsed.theme === 'light' ? 'light' : 'dark';
+        state.voice = parsed.voice === 'serious' ? 'serious' : 'companion';
+        state.serious = !!parsed.serious;
+        state.overrides = {
+          dark: (parsed.overrides && parsed.overrides.dark) || {},
+          light: (parsed.overrides && parsed.overrides.light) || {},
+        };
+      }
+    } catch (e) { /* ignore corrupt storage, start fresh */ }
+  }
+
+  function saveState() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) { /* storage full/unavailable — editing still works this session */ }
+  }
+
+  loadState();
+
+  /* Tokens that [data-serious] in tokens.css overrides directly. While
+     serious mode is active we deliberately do NOT apply a stored inline
+     override for these specific names — inline styles win over every
+     stylesheet rule regardless of specificity, so a stored accent/radius/
+     duration override would silently hide the serious-mode CSS and the
+     "preview serious mode" toggle would stop meaning anything. Removing
+     the inline property for just these names lets the [data-serious]
+     rule in tokens.css show through, while every other override still
+     applies normally. */
+  var SERIOUS_LOCKED = {
+    '--ol-accent': 1, '--ol-accent-2': 1, '--ol-accent-3': 1,
+    '--ol-radius-sm': 1, '--ol-radius-md': 1, '--ol-radius-lg': 1, '--ol-radius-xl': 1,
+    '--ol-duration-fast': 1, '--ol-duration-base': 1, '--ol-duration-slow': 1,
+  };
+
+  /* ============================================================
+     2. DEFAULTS PROBES — hidden elements that never receive inline
+        overrides, used purely to read each theme's *stylesheet*
+        default for a token (tokens.css's [data-theme="light"] rule
+        is an unscoped attribute selector, so it applies to any
+        element carrying that attribute, not just <html>).
+     ============================================================ */
+  var probeDark = document.createElement('div');
+  probeDark.style.display = 'none';
+  var probeLight = document.createElement('div');
+  probeLight.style.display = 'none';
+  probeLight.setAttribute('data-theme', 'light');
+  document.body.appendChild(probeDark);
+  document.body.appendChild(probeLight);
+
+  var DEFAULTS = { dark: {}, light: {} };
+  (OL_TOKENS || []).forEach(function (tok) {
+    DEFAULTS.dark[tok.name] = getComputedStyle(probeDark).getPropertyValue(tok.name).trim();
+    DEFAULTS.light[tok.name] = getComputedStyle(probeLight).getPropertyValue(tok.name).trim();
+  });
+
+  function effectiveValue(theme, name) {
+    var ov = state.overrides[theme] && state.overrides[theme][name];
+    if (ov !== undefined && ov !== null && ov !== '') return ov;
+    return DEFAULTS[theme][name];
+  }
+
+  /* ============================================================
+     3. APPLY STATE TO THE DOM
+     ============================================================ */
+  var root = document.documentElement;
+
+  function applyOverridesToDOM() {
+    var theme = state.theme;
+    (OL_TOKENS || []).forEach(function (tok) {
+      var locked = state.serious && SERIOUS_LOCKED[tok.name];
+      var ov = state.overrides[theme] && state.overrides[theme][tok.name];
+      if (!locked && ov !== undefined && ov !== null && ov !== '') {
+        root.style.setProperty(tok.name, ov);
+      } else {
+        root.style.removeProperty(tok.name);
+      }
+    });
+  }
+
+  function applyThemeAttr() {
+    if (state.theme === 'light') root.setAttribute('data-theme', 'light');
+    else root.removeAttribute('data-theme'); // :root already holds dark defaults
+  }
+
+  function applySeriousAttr() {
+    if (state.serious) root.setAttribute('data-serious', '');
+    else root.removeAttribute('data-serious');
+    try {
+      if (typeof OL_STRINGS !== 'undefined') OL_STRINGS.setSeriousMode(state.serious);
+    } catch (e) { /* strings.js absent — visuals still update */ }
+  }
+
+  function applyVoice() {
+    try {
+      if (typeof OL_STRINGS !== 'undefined') OL_STRINGS.setVoice(state.voice);
+    } catch (e) { /* strings.js absent — fallback text already showing */ }
+  }
+
+  /* ============================================================
+     4. CONTROLS — built dynamically from OL_TOKENS
+     ============================================================ */
+  var GROUP_LABEL = { color: 'Color', type: 'Typography', space: 'Spacing', radius: 'Radii', shadow: 'Shadow / Elevation', motion: 'Motion' };
+  var GROUP_ORDER = ['color', 'type', 'space', 'radius', 'shadow', 'motion'];
+
+  // parses a value into #rrggbb, or null if it can't be represented by
+  // <input type=color> (e.g. any real alpha transparency)
+  function parseHexColor(value) {
+    value = (value || '').trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(value)) return value.toLowerCase();
+    if (/^#[0-9a-fA-F]{3}$/.test(value)) {
+      return '#' + value.slice(1).split('').map(function (c) { return c + c; }).join('').toLowerCase();
+    }
+    var m = value.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/i);
+    if (m) {
+      var a = m[4] === undefined ? 1 : parseFloat(m[4]);
+      if (a < 1) return null;
+      return '#' + [m[1], m[2], m[3]].map(function (n) {
+        var h = parseInt(n, 10).toString(16);
+        return h.length < 2 ? '0' + h : h;
+      }).join('');
+    }
+    return null;
+  }
+
+  function splitUnit(value) {
+    var m = (value || '').trim().match(/^(-?[\d.]+)([a-z%]*)$/i);
+    if (!m) return null;
+    return { num: parseFloat(m[1]), unit: m[2] || '' };
+  }
+
+  function rangeBoundsFor(name, num) {
+    if (/weight/.test(name)) return { min: 100, max: 900, step: 10 };
+    if (/leading/.test(name)) return { min: 1, max: 2.2, step: 0.01 };
+    if (/duration/.test(name)) return { min: 0, max: 1000, step: 10 };
+    if (/blur/.test(name)) return { min: 0, max: 40, step: 1 };
+    if (/radius/.test(name)) return { min: 0, max: (num > 200 ? num * 1.5 : 80), step: 1 };
+    if (/space/.test(name)) return { min: 0, max: Math.max(num * 3, 80), step: 1 };
+    if (/size/.test(name)) return { min: 8, max: 64, step: 0.5 };
+    return { min: 0, max: Math.max(num * 3, 100), step: 1 };
+  }
+
+  function onTokenEdit(name, value) {
+    state.overrides[state.theme][name] = value;
+    saveState();
+    applyOverridesToDOM();
+    refreshColorSwatches();
+  }
+
+  var controlEls = {}; // name -> { refresh(value) }
+
+  function buildControl(tok) {
+    var wrap = document.createElement('div');
+    wrap.className = 'ds-control';
+    var label = document.createElement('label');
+    label.textContent = tok.label;
+    var nameEl = document.createElement('div');
+    nameEl.className = 'ds-token-name';
+    nameEl.textContent = tok.name;
+    var row = document.createElement('div');
+    row.className = 'ds-control-row';
+    wrap.appendChild(label);
+    wrap.appendChild(row);
+    wrap.appendChild(nameEl);
+
+    if (tok.type === 'color') {
+      var colorInput = document.createElement('input');
+      colorInput.type = 'color';
+      var textInput = document.createElement('input');
+      textInput.type = 'text';
+
+      function refresh(value) {
+        var hex = parseHexColor(value);
+        if (hex) {
+          colorInput.style.display = '';
+          textInput.style.display = 'none';
+          colorInput.value = hex;
+        } else {
+          colorInput.style.display = 'none';
+          textInput.style.display = '';
+          textInput.value = value;
+        }
+      }
+      colorInput.addEventListener('input', function () { onTokenEdit(tok.name, colorInput.value); });
+      textInput.addEventListener('input', function () { onTokenEdit(tok.name, textInput.value); });
+      row.appendChild(colorInput);
+      row.appendChild(textInput);
+      controlEls[tok.name] = { refresh: refresh };
+
+    } else if (tok.type === 'length' || tok.type === 'number') {
+      var range = document.createElement('input');
+      range.type = 'range';
+      var num = document.createElement('input');
+      num.type = 'number';
+      var unitEl = document.createElement('span');
+      unitEl.className = 'ds-unit';
+      var currentUnit = '';
+
+      function refresh(value) {
+        var parsed = splitUnit(value) || { num: 0, unit: '' };
+        currentUnit = parsed.unit;
+        var bounds = rangeBoundsFor(tok.name, parsed.num);
+        range.min = bounds.min; range.max = bounds.max; range.step = bounds.step;
+        range.value = parsed.num;
+        num.step = bounds.step;
+        num.value = parsed.num;
+        unitEl.textContent = currentUnit || '—';
+      }
+      function commit(n) {
+        onTokenEdit(tok.name, n + currentUnit);
+      }
+      range.addEventListener('input', function () { num.value = range.value; commit(parseFloat(range.value)); });
+      num.addEventListener('input', function () {
+        var v = parseFloat(num.value);
+        if (isNaN(v)) return;
+        range.value = v;
+        commit(v);
+      });
+      row.appendChild(range);
+      row.appendChild(num);
+      row.appendChild(unitEl);
+      controlEls[tok.name] = { refresh: refresh };
+
+    } else {
+      var text = document.createElement('input');
+      text.type = 'text';
+      text.addEventListener('input', function () { onTokenEdit(tok.name, text.value); });
+      row.appendChild(text);
+      controlEls[tok.name] = { refresh: function (value) { text.value = value; } };
+    }
+
+    return wrap;
+  }
+
+  function buildSidebarGroups() {
+    var host = document.getElementById('ds-groups');
+    var byGroup = {};
+    (OL_TOKENS || []).forEach(function (tok) {
+      (byGroup[tok.group] = byGroup[tok.group] || []).push(tok);
+    });
+    GROUP_ORDER.forEach(function (g) {
+      var toks = byGroup[g];
+      if (!toks || !toks.length) return;
+      var details = document.createElement('details');
+      details.className = 'ds-group';
+      var summary = document.createElement('summary');
+      summary.innerHTML = '<span>' + (GROUP_LABEL[g] || g) + '</span><span class="ds-count">' + toks.length + '</span>';
+      details.appendChild(summary);
+      var body = document.createElement('div');
+      body.className = 'ds-group-body';
+      toks.forEach(function (tok) { body.appendChild(buildControl(tok)); });
+      details.appendChild(body);
+      host.appendChild(details);
+    });
+  }
+
+  function refreshControlsFromComputedStyle() {
+    var computed = getComputedStyle(root);
+    (OL_TOKENS || []).forEach(function (tok) {
+      var val = computed.getPropertyValue(tok.name).trim();
+      var ctrl = controlEls[tok.name];
+      if (ctrl) ctrl.refresh(val);
+    });
+  }
+
+  /* ============================================================
+     5. PREVIEW CONTENT GENERATED FROM THE MANIFEST
+        (color swatches, type scale, spacing/radius rulers)
+     ============================================================ */
+  function refreshColorSwatches() {
+    var host = document.getElementById('ds-swatch-grid');
+    host.innerHTML = '';
+    var computed = getComputedStyle(root);
+    (OL_TOKENS || []).filter(function (t) { return t.group === 'color'; }).forEach(function (tok) {
+      var val = computed.getPropertyValue(tok.name).trim();
+      var box = document.createElement('div');
+      box.style.cssText = 'border:1px solid var(--ol-border); border-radius: var(--ol-radius-sm); overflow:hidden; background: var(--ol-bg-1);';
+      box.innerHTML =
+        '<div style="height:44px; background:' + val + ';"></div>' +
+        '<div style="padding:6px 8px;">' +
+          '<div style="font-size:11px; font-weight:700;">' + tok.label + '</div>' +
+          '<div style="font-size:10px; color:var(--ol-text-3); font-family:monospace; word-break:break-all;">' + val + '</div>' +
+        '</div>';
+      host.appendChild(box);
+    });
+  }
+
+  function buildTypeScale() {
+    var host = document.getElementById('ds-type-scale');
+    (OL_TOKENS || []).filter(function (t) { return t.group === 'type' && /^--ol-size-/.test(t.name); }).forEach(function (tok) {
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex; align-items:baseline; gap:14px; margin-bottom:6px;';
+      row.innerHTML =
+        '<span style="width:110px; flex:0 0 110px; font-size:11px; color:var(--ol-text-3); font-family:monospace;">' + tok.name.replace('--ol-size-', '') + '</span>' +
+        '<span style="font-size: var(' + tok.name + '); font-weight: var(--ol-weight-bold); line-height: var(--ol-leading-tight);">The quiet after the storm</span>';
+      host.appendChild(row);
+    });
+
+    var weightHost = document.getElementById('ds-weight-row');
+    (OL_TOKENS || []).filter(function (t) { return /^--ol-weight-/.test(t.name); }).forEach(function (tok) {
+      var span = document.createElement('span');
+      span.style.cssText = 'font-size: var(--ol-size-lg); font-weight: var(' + tok.name + ');';
+      span.textContent = tok.name.replace('--ol-weight-', '');
+      weightHost.appendChild(span);
+    });
+  }
+
+  function buildSpaceRuler() {
+    // Each space token is shown as the GAP between two real objects — the
+    // tinted strip in the middle IS the token's value, so what you see is
+    // literally what a layout using it would get.
+    var host = document.getElementById('ds-space-ruler');
+    (OL_TOKENS || []).filter(function (t) { return t.group === 'space'; }).forEach(function (tok) {
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex; align-items:center; gap:14px;';
+      row.innerHTML =
+        '<span style="width:90px; flex:0 0 90px; font-size:11px; color:var(--ol-text-3); font-family:monospace;">' + tok.name.replace('--ol-', '') + '</span>' +
+        '<span style="display:inline-flex; align-items:center;">' +
+          '<span class="ds-space-obj"></span>' +
+          '<span class="ds-space-gap" style="width: var(' + tok.name + ');"></span>' +
+          '<span class="ds-space-obj"></span>' +
+        '</span>';
+      host.appendChild(row);
+    });
+  }
+
+  function buildRadiusRuler() {
+    var host = document.getElementById('ds-radius-ruler');
+    (OL_TOKENS || []).filter(function (t) { return t.group === 'radius'; }).forEach(function (tok) {
+      var col = document.createElement('div');
+      col.style.cssText = 'display:flex; flex-direction:column; align-items:center; gap:6px;';
+      col.innerHTML =
+        '<div style="width:64px; height:64px; background:var(--ol-bg-2); border:1px solid var(--ol-border); border-radius: var(' + tok.name + ');"></div>' +
+        '<span style="font-size:10.5px; color:var(--ol-text-3); font-family:monospace;">' + tok.name.replace('--ol-', '') + '</span>';
+      host.appendChild(col);
+    });
+  }
+
+  /* ============================================================
+     6. FRICTION COUNTDOWN — a live, decrementing sample so this
+        component reads as a real "time remaining" state, not a
+        static label.
+     ============================================================ */
+  var friction_target = Date.now() + (22 * 60 + 15) * 60000; // ~22h15m from load
+  function tickFriction() {
+    var remainMs = Math.max(0, friction_target - Date.now());
+    var totalMin = Math.floor(remainMs / 60000);
+    var hours = Math.floor(totalMin / 60);
+    var minutes = totalMin % 60;
+    var el = document.getElementById('ds-friction-count');
+    if (!el) return;
+    if (hours > 0) {
+      el.textContent = t('friction.time_remaining_hm', '{hours}h {minutes}m remaining — protection active', { hours: hours, minutes: minutes });
+    } else {
+      el.textContent = t('friction.time_remaining_m', '{minutes}m remaining — protection active', { minutes: minutes });
+    }
+  }
+
+  /* ============================================================
+     8. EXPORT — reconstructs a complete tokens.css from the
+        manifest + current computed values per theme. The @font-face
+        header and the [data-serious] block are preserved verbatim:
+        there is no per-token UI for editing "the serious deltas"
+        specifically (SERIOUS_LOCKED tokens are previewed, not
+        independently authored here), and the font declarations are
+        static binary assets, not tokens — nothing to reconstruct.
+     ============================================================ */
+  // Read lazily (not at IIFE top-level): these <script type="x-ol-verbatim">
+  // blocks are defined further down the document than this <script>, so
+  // reading them eagerly here would run before they exist in the DOM.
+  function headerAndFonts() { return document.getElementById('ol-export-header-fonts').textContent; }
+  function seriousBlock() { return document.getElementById('ol-export-serious').textContent; }
+
+  function cssLine(name, value) { return '  ' + name + ': ' + value + ';'; }
+
+  function buildRootBlock() {
+    var byGroup = {};
+    (OL_TOKENS || []).forEach(function (tok) { (byGroup[tok.group] = byGroup[tok.group] || []).push(tok); });
+    var GROUP_COMMENT = {
+      color: '  /* ---- color ---- */',
+      type: '  /* ---- typography ---- */',
+      space: '  /* ---- spacing ---- */',
+      radius: '  /* ---- radii ---- */',
+      shadow: '  /* ---- shadows / elevation ---- */',
+      motion: '  /* ---- motion ---- */',
+    };
+    var lines = [
+      '/* ============================================================',
+      '   DARK THEME (default) — app is dark-first, so :root carries these.',
+      '   Values regenerated by design-system/preview.html\'s export. Any',
+      '   token without a stored override falls back to its tokens.css',
+      '   stylesheet default; anything the owner edited in the sidebar is',
+      '   baked in here as a literal value.',
+      '   ============================================================ */',
+      ':root {',
+    ];
+    GROUP_ORDER.forEach(function (g) {
+      var toks = byGroup[g];
+      if (!toks || !toks.length) return;
+      lines.push(GROUP_COMMENT[g]);
+      toks.forEach(function (tok) { lines.push(cssLine(tok.name, effectiveValue('dark', tok.name))); });
+      lines.push('');
+    });
+    if (lines[lines.length - 1] === '') lines.pop();
+    lines.push('}');
+    return lines.join('\n');
+  }
+
+  function buildLightBlock() {
+    var lines = ['[data-theme="light"] {'];
+    (OL_TOKENS || []).forEach(function (tok) {
+      var dark = effectiveValue('dark', tok.name);
+      var light = effectiveValue('light', tok.name);
+      if (light !== dark) lines.push(cssLine(tok.name, light));
+    });
+    lines.push('}');
+    return lines.join('\n');
+  }
+
+  function buildExport() {
+    return [
+      headerAndFonts().trim(),
+      '',
+      buildRootBlock(),
+      '',
+      buildLightBlock(),
+      '',
+      seriousBlock().trim(),
+      '',
+    ].join('\n');
+  }
+
+  var statusEl = document.getElementById('ds-status');
+  var statusTimer = null;
+  function setStatus(msg) {
+    statusEl.textContent = msg;
+    if (statusTimer) clearTimeout(statusTimer);
+    statusTimer = setTimeout(function () { statusEl.textContent = ''; }, 3500);
+  }
+
+  function showExportPreview(text) {
+    var box = document.getElementById('ds-export-preview');
+    box.value = text;
+    box.style.display = 'block';
+  }
+
+  document.getElementById('ds-copy-btn').addEventListener('click', function () {
+    var text = buildExport();
+    showExportPreview(text);
+    try {
+      navigator.clipboard.writeText(text).then(function () {
+        setStatus('Copied tokens.css to clipboard.');
+      }, function () {
+        setStatus('Clipboard blocked — select the text below and copy manually.');
+      });
+    } catch (e) {
+      setStatus('Clipboard unavailable — select the text below and copy manually.');
+    }
+  });
+
+  document.getElementById('ds-download-btn').addEventListener('click', function () {
+    var text = buildExport();
+    showExportPreview(text);
+    try {
+      var blob = new Blob([text], { type: 'text/css' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'tokens.css';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      setStatus('Downloaded tokens.css.');
+    } catch (e) {
+      setStatus('Download failed — select the text below and copy manually.');
+    }
+  });
+
+  document.getElementById('ds-reset-btn').addEventListener('click', function () {
+    state.overrides = { dark: {}, light: {} };
+    saveState();
+    renderAll();
+    setStatus('Reset to Noir defaults.');
+  });
+
+  /* ============================================================
+     6b. MOTION RACE — Play slides every lane's dot to the far end;
+         each dot's inline transition carries a different duration/
+         easing token, so one click compares them all side by side.
+         (With serious mode on, the same click visibly snaps faster —
+         that's the [data-serious] duration overrides doing their job.)
+     ============================================================ */
+  var motionTrack = document.getElementById('ds-motion-track');
+  var motionPlay = document.getElementById('ds-motion-play');
+  motionPlay.addEventListener('click', function () {
+    var on = motionTrack.classList.toggle('play');
+    motionPlay.textContent = on ? 'Reset' : 'Play';
+  });
+
+  /* ============================================================
+     9. TOP-LEVEL TOGGLES (theme / voice / serious)
+     ============================================================ */
+  function updateThemeSeg() {
+    document.querySelectorAll('[data-theme-btn]').forEach(function (b) {
+      b.classList.toggle('on', b.getAttribute('data-theme-btn') === state.theme);
+    });
+  }
+  function updateVoiceSeg() {
+    document.querySelectorAll('[data-voice-btn]').forEach(function (b) {
+      b.classList.toggle('on', b.getAttribute('data-voice-btn') === state.voice);
+      b.disabled = state.serious; // serious mode forces the hard voice, matching the real app
+    });
+  }
+  function updateSeriousSwitch() {
+    document.getElementById('ds-serious-toggle').classList.toggle('on', state.serious);
+  }
+
+  document.querySelectorAll('[data-theme-btn]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      state.theme = b.getAttribute('data-theme-btn');
+      saveState();
+      renderAll();
+    });
+  });
+  document.querySelectorAll('[data-voice-btn]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      if (state.serious) return;
+      state.voice = b.getAttribute('data-voice-btn');
+      saveState();
+      applyVoice();
+      updateVoiceSeg();
+      refreshStrings();
+    });
+  });
+  document.getElementById('ds-serious-toggle').addEventListener('click', function () {
+    state.serious = !state.serious;
+    saveState();
+    renderAll();
+  });
+
+  /* ============================================================
+     10. FULL RENDER PASS — called after any state change
+     ============================================================ */
+  function renderAll() {
+    applyThemeAttr();
+    applySeriousAttr();
+    applyVoice();
+    applyOverridesToDOM();
+    updateThemeSeg();
+    updateVoiceSeg();
+    updateSeriousSwitch();
+    refreshControlsFromComputedStyle();
+    refreshColorSwatches();
+    refreshStrings();
+  }
+
+  /* ============================================================
+     11. BOOT
+     ============================================================ */
+  buildSidebarGroups();
+  buildTypeScale();
+  buildSpaceRuler();
+  buildRadiusRuler();
+  renderAll();
+  tickFriction();
+  setInterval(tickFriction, 1000);
+})();
+</script>
+
+<!-- ============================================================
+     VERBATIM EXPORT FRAGMENTS
+     Read by the export builder above via textContent so the strings
+     live in the DOM (easy to keep in sync by eye) rather than buried
+     in a JS string literal. type="x-ol-verbatim" keeps the browser
+     from parsing this as CSS or executing it as script.
+     ============================================================ -->
+<script type="x-ol-verbatim" id="ol-export-header-fonts">/* ============================================================
+   OATH LIGHT — DESIGN TOKENS
+   Single source of truth for color, type, spacing, radii, shadow,
+   and motion across all four surfaces:
+
+     - extension/popup_assets/popup.css     (browser action popup)
+     - extension/blocklist_assets/*.css     (blocked page, options)
+     - desktop-app/src/renderer/styles.css  (Tauri desktop renderer)
+     - website (Oath-light.github.io) + store assets
+
+   HOW SURFACES CONSUME THIS FILE
+   -------------------------------
+   The extension has NO BUILD STEP (plain files, no bundler, no npm),
+   so there is no import/copy tooling here either. Each surface pulls
+   this file in the way that fits its own constraints:
+
+     - Desktop renderer: <link rel="stylesheet" href="../../../design-system/tokens.css">
+       or copy tokens.css + fonts/ into the renderer dir if a relative
+       link across the Tauri asset boundary isn't allowed.
+     - Extension (popup/blocked/options): COPY tokens.css and the
+       fonts/ folder verbatim into each *_assets directory (matching
+       the existing popup_assets/fonts, blocklist_assets/fonts
+       pattern). The @font-face `src: url('./fonts/...')` paths are
+       relative to THIS file, so fonts/ must travel alongside it
+       wherever tokens.css is copied.
+     - Website: copy tokens.css + fonts/ into the site's asset dir,
+       same rule as above.
+
+   Any copy MUST stay byte-identical to this file (or be regenerated
+   via design-system/preview.html's "Download tokens.css" export) —
+   do not hand-edit copies independently or the surfaces drift apart
+   again, which is the exact problem this file exists to solve.
+
+   THEMING MODEL
+   -------------
+   :root                    -> DARK theme values (the app is dark-first)
+   [data-theme="light"]     -> light theme overrides
+   [data-serious]           -> Serious Mode hook, layered on top of
+                                whichever theme is active (same
+                                attribute-selector specificity as
+                                [data-theme], source order makes it win)
+
+   Noir is the ONLY built-in theme (owner decision 2026-07-19) — there
+   are no preset palette variants, here or anywhere else. User-custom
+   themes are a runtime feature instead: the app's Themes menu lets the
+   user edit any color token directly, applied as inline custom-property
+   overrides on top of these defaults — the same mechanism preview.html
+   uses for editing. This file always stays Noir.
+
+   All tokens are prefixed --ol- to avoid collisions with per-surface
+   local custom properties.
+   ============================================================ */
+
+/* ============================================================
+   FONT FACES
+   Family: Manrope. One typeface across every surface.
+   Subset declarations copied verbatim from desktop-app's build output
+   so unicode-range coverage (latin, latin-ext, cyrillic, greek,
+   vietnamese) matches exactly. Files copied into ./fonts/.
+   ============================================================ */
+
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/7c1abc78.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/147faed1.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/1c96cabf.woff2') format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/c926b65e.woff2') format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/f1d3ec0b.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/dad320eb.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/7c1abc78.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/147faed1.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/1c96cabf.woff2') format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/c926b65e.woff2') format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/f1d3ec0b.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/dad320eb.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/7c1abc78.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/147faed1.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/1c96cabf.woff2') format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/c926b65e.woff2') format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/f1d3ec0b.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/dad320eb.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/7c1abc78.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/147faed1.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/1c96cabf.woff2') format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/c926b65e.woff2') format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/f1d3ec0b.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/dad320eb.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('./fonts/7c1abc78.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('./fonts/147faed1.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('./fonts/1c96cabf.woff2') format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('./fonts/c926b65e.woff2') format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('./fonts/f1d3ec0b.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('./fonts/dad320eb.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}</script>
+<script type="x-ol-verbatim" id="ol-export-serious">/* ============================================================
+   SERIOUS MODE HOOK
+   One attribute flips the register: harder accent (red, not neutral
+   white/black), tighter radii (less soft/approachable), snappier
+   motion (less soothing). Deliberately does NOT touch bg/text/border
+   — serious mode changes the FEEL, not full repaint, and it must
+   layer on top of either theme. Selector specificity matches
+   [data-theme="..."], so source order (this block last) is what
+   makes it win — keep this block below the theme blocks if this
+   file is hand-edited.
+   ============================================================ */
+[data-serious] {
+  --ol-accent: #ff3b3b;
+  --ol-accent-2: #ff5e3a;
+  --ol-accent-3: #c83a40;
+
+  --ol-radius-sm: 6px;
+  --ol-radius-md: 8px;
+  --ol-radius-lg: 10px;
+  --ol-radius-xl: 14px;
+
+  --ol-duration-fast: 80ms;
+  --ol-duration-base: 120ms;
+  --ol-duration-slow: 200ms;
+}</script>
+
+</body>
+</html>

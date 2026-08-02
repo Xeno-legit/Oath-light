@@ -1,0 +1,140 @@
+# .github/workflows/reproducible-builds.yml — ROADMAP: "Reproducible builds
+# (pin toolchains, publish hashes)".
+#
+# What this proves, and what it deliberately does not.
+#
+# PROVES: the two store zips are a pure function of the commit. The same
+# commit built twice on the same runner, and built on Linux vs. Windows, must
+# produce byte-identical archives with identical SHA-256s. Anyone can clone the
+# tag, run `python scripts/build-extension-zips.py`, and confirm the zip they
+# built is the zip on the store listing — without trusting us. For a filter
+# that runs on every page a person visits, that check being available to a
+# third party is the point.
+#
+# DOES NOT PROVE: anything about the Windows desktop installer. The NSIS
+# installer is not yet reproducible (it embeds timestamps and a compiler
+# fingerprint, and cargo's release profile is not bit-stable across runners).
+# The roadmap says to ship zip reproducibility first if NSIS fights back — it
+# fights back. Rust builds are pinned here so that half is at least stable
+# input-wise, but no hash claim is made for the installer.
+name: Reproducible builds
+
+on:
+  push:
+    branches: [main, 'phase*/**', 'pre-alpha/**']
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  zips:
+    name: Extension zips (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # The repo is developed on Windows with core.autocrlf=true. Left alone,
+      # the Windows runner would check out CRLF text and the Linux runner LF,
+      # and the cross-OS comparison below would fail for a reason that has
+      # nothing to do with the build. Checking out the blob bytes verbatim
+      # means the working tree is the commit on both runners. (The packer also
+      # normalizes text to LF, so this is belt-and-braces — but it keeps the
+      # failure mode honest if that normalization is ever removed.)
+      - name: Check out the commit's bytes, not git's idea of them
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      # Pinned, not "3.x": the packer's output must not move because the
+      # runner image bumped Python. zlib's deflate output is stable across
+      # CPython patch releases, but the pin is what makes that a guarantee
+      # rather than an observation.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.7'
+
+      - name: Build the zips
+        run: python scripts/build-extension-zips.py --sums SHA256SUMS-first.txt
+
+      # Same runner, same source, second time. Catches anything that leaked in
+      # from the environment — a wall-clock timestamp, filesystem iteration
+      # order, a hash seed.
+      - name: Build them again and require identical hashes
+        shell: bash
+        run: |
+          python scripts/build-extension-zips.py --sums SHA256SUMS-second.txt
+          if ! diff -u SHA256SUMS-first.txt SHA256SUMS-second.txt; then
+            echo "::error::Two builds of the same commit produced different zips."
+            exit 1
+          fi
+          echo "Two consecutive builds agree."
+
+      - name: Publish the hashes to the run summary
+        shell: bash
+        run: |
+          {
+            echo "### Extension zip hashes — ${{ matrix.os }}"
+            echo
+            echo '```'
+            cat SHA256SUMS-first.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sha256sums-${{ matrix.os }}
+          path: SHA256SUMS-first.txt
+
+      # On a release, the hashes become an asset alongside the zips so the
+      # published claim is checkable after the fact, not just in a CI log that
+      # ages out.
+      - name: Attach hashes + zips to the release
+        if: github.event_name == 'release' && matrix.os == 'ubuntu-latest'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mv SHA256SUMS-first.txt SHA256SUMS.txt
+          gh release upload "${{ github.event.release.tag_name }}" \
+            SHA256SUMS.txt \
+            oathlight-extension-store.zip \
+            oathlight-extension-firefox.zip \
+            --clobber
+
+  zips-agree-across-os:
+    name: Linux and Windows produce the same zips
+    needs: zips
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sha256sums-*
+
+      - name: Compare
+        run: |
+          linux=sha256sums-ubuntu-latest/SHA256SUMS-first.txt
+          windows=sha256sums-windows-latest/SHA256SUMS-first.txt
+          if ! diff -u "$linux" "$windows"; then
+            echo "::error::Linux and Windows built different zips from the same commit."
+            exit 1
+          fi
+          {
+            echo "### Reproducible across operating systems"
+            echo
+            echo "Linux and Windows built byte-identical zips:"
+            echo
+            echo '```'
+            cat "$linux"
+            echo '```'
+            echo
+            echo "Reproduce locally:"
+            echo
+            echo '```'
+            echo "git clone https://github.com/Xeno-legit/Oath-light.git && cd Oath-light"
+            echo "git checkout ${{ github.sha }}"
+            echo "python scripts/build-extension-zips.py --sums SHA256SUMS.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

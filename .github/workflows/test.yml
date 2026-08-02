@@ -124,10 +124,9 @@ jobs:
     - name: Cache cargo
       uses: Swatinem/rust-cache@v2
       with:
-        workspaces: |
-          desktop-app/guardian
-          desktop-app/native-host
-          desktop-app/src-tauri
+        # A.1 made guardian/native-host/src-tauri members of the single
+        # desktop-app workspace, so all builds share desktop-app/target.
+        workspaces: desktop-app
 
     - name: cargo check (guardian)
       working-directory: desktop-app/guardian
@@ -142,6 +141,11 @@ jobs:
     # `cargo check` only needs them to typecheck/link build scripts, not to
     # actually run inference or capture a screen, so this is not marked
     # continue-on-error: a failure here is a real signal.
+    # tauri-build's build script fails if the externalBin sidecars are not
+    # already staged under src-tauri/binaries, so build them first.
+    - name: Stage Tauri sidecar binaries
+      run: node desktop-app/scripts/bundle-sidecars.mjs
+
     - name: cargo check (src-tauri)
       working-directory: desktop-app/src-tauri
       run: cargo check --locked

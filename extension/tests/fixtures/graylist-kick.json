@@ -1,0 +1,94 @@
+{
+  "_meta": {
+    "source": "https://web.kick.com/api/v1/livestreams/featured?language=en and https://kick.com/api/v2/channels/<slug>, logged out",
+    "captured": "2026-08-01",
+    "why": "Locks `is_mature`, the ONLY adult signal Kick exposes. Verified present on all three surfaces the web app uses: the featured/browse feed, the per-channel object, and /api/search.",
+    "live_counts": { "featured_total": 14, "featured_mature": 3 },
+    "note_on_granularity": "Kick has no per-category labels (no Twitch-style SexualThemes/MatureGame split) — is_mature is one broad flag. The mature streams in this capture are Slots & Casino, so filtering on it necessarily removes gambling and mature-game streams as well as sexual content. That collateral is inherent to the only signal Kick publishes.",
+    "trimmed": "Long strings elided, badge/banner blobs dropped. Structure and flag values verbatim."
+  },
+
+  "featured": {
+    "data": {
+      "livestreams": [
+        {
+          "category": { "id": 15, "name": "Just Chatting", "slug": "just-chatting" },
+          "channel": { "id": 1772249, "slug": "destiny", "username": "Destiny" },
+          "chatroom_id": 1764849,
+          "id": "019fb8d3-a938-73e1-af28-13e21cc9ba30",
+          "is_mature": false,
+          "language": "en",
+          "show_view_count": true,
+          "start_time": "2026-07-31T15:38:27Z",
+          "tags": [],
+          "title": "Talking about DSA stuff with Jonah",
+          "viewer_count": 5226
+        },
+        {
+          "category": { "id": 8549, "name": "IRL", "slug": "irl" },
+          "channel": { "id": 72126, "slug": "garydavid", "username": "garydavid" },
+          "chatroom_id": 72124,
+          "id": "019fb902-2f60-77b9-8601-5e958205f20b",
+          "is_mature": false,
+          "language": "en",
+          "show_view_count": true,
+          "start_time": "2026-07-31T16:29:16Z",
+          "tags": [],
+          "title": "IM UP 1000% on Pokemon",
+          "viewer_count": 544
+        },
+        {
+          "category": { "id": 1552, "name": "Counter-Strike 2", "slug": "counter-strike-2" },
+          "channel": { "id": 72462219, "slug": "starladder", "username": "starladder" },
+          "chatroom_id": 72173773,
+          "id": "019fb937-31b0-78a3-8181-3bdca3691b08",
+          "is_mature": false,
+          "language": "en",
+          "show_view_count": true,
+          "start_time": "2026-07-31T17:27:10Z",
+          "tags": [],
+          "title": "[EN] Fluxo vs Imperial (1-1) BO3 | StarSeries Season 20",
+          "viewer_count": 5032
+        },
+        {
+          "category": { "id": 28, "name": "Slots & Casino", "slug": "slots" },
+          "channel": { "id": 2414, "slug": "cabrzy", "username": "Cabrzy" },
+          "chatroom_id": 2413,
+          "id": "019fb99c-c1b0-79b7-84f1-a99825338cfa",
+          "is_mature": true,
+          "language": "en",
+          "show_view_count": true,
+          "start_time": "2026-07-31T19:18:06Z",
+          "tags": [],
+          "title": "$100K START - $400K GOAL",
+          "viewer_count": 1881
+        },
+        {
+          "category": { "id": 28, "name": "Slots & Casino", "slug": "slots" },
+          "channel": { "id": 30765, "slug": "mascoobs", "username": "Mascoobs" },
+          "chatroom_id": 30764,
+          "id": "019fb9c2-79f0-7f7e-a773-bd6f0d7f417a",
+          "is_mature": true,
+          "language": "en",
+          "show_view_count": true,
+          "start_time": "2026-07-31T19:59:18Z",
+          "tags": [],
+          "title": "FRIDAY DEGEN FUN DAY!!",
+          "viewer_count": 267
+        }
+      ]
+    }
+  },
+
+  "channel": {
+    "_why": "Shape of /api/v2/channels/<slug>. The flag sits on a named child (`livestream`), not inside an array — the page-block case.",
+    "id": 2414,
+    "slug": "cabrzy",
+    "livestream": {
+      "id": 120042181,
+      "slug": "acea62c8-100k-start-400k-goal",
+      "is_mature": true,
+      "title": "$100K START - $400K GOAL"
+    }
+  }
+}

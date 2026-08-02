@@ -2,7 +2,7 @@
 //
 // This file used to be the entire 2,657-line extension monolith. It has been
 // split into cohesive modules under bg/ (blocklists, matching, graylist,
-// native-bridge, reminders) — see each file's header comment. This file now
+// native-bridge, vulnerable-window) — see each file's header comment. This file now
 // keeps only: the shared block handler (handleBlock / recordBlockAndRedirect
 // / getRedirectTarget / isIgnoredUrl), the navigation event listeners, and
 // the runtime.onMessage router.
@@ -15,7 +15,15 @@
 // sequentially into one shared global scope instead — the guard below simply
 // no-ops on Firefox.
 if (typeof importScripts === 'function') {
-  importScripts('bg/blocklists.js', 'bg/matching.js', 'bg/graylist.js', 'bg/native-bridge.js', 'bg/reminders.js', 'bg/noble-ed25519.js', 'bg/ota.js');
+  // strings.js first — it is dependency-free and every module below may reach
+  // for `OL_STRINGS.t()` for user-facing copy (reminder notifications, the
+  // block reason lines). It is DOM-free by design, so it loads in a worker.
+  // Locale tables load immediately after strings.js and before anything that
+  // calls `t()` — each one registers itself onto OL_STRINGS. They are plain
+  // scripts for exactly this reason: a worker cannot lazily import a locale,
+  // so every shipped language is listed here (and in manifest.background.
+  // scripts for Firefox, in the same order).
+  importScripts('strings.js', 'locales/ar.js', 'bg/blocklists.js', 'bg/matching.js', 'bg/graylist.js', 'bg/native-bridge.js', 'bg/vulnerable-window.js', 'bg/noble-ed25519.js', 'bg/ota.js');
 }
 
 // SHARED BLOCK HANDLER — single source of truth for blocking + stats
@@ -55,37 +63,33 @@ async function recordBlockAndRedirect(tabId, url, reason, match, skipTabUpdate =
   const blockedPrefix = chrome.runtime.getURL('blocked.html');
   if (url.startsWith(blockedPrefix)) return null;
 
-  // TEMP (testing): both block destinations — blocked.html AND the user-configured
-  // "Redirect link" — are PAUSED here, because navigating to either can crash/hang
-  // the Playwright automation bridge. While PP_TESTING is true, every block routes
-  // to a light about:blank instead. Set PP_TESTING=false to restore BOTH the normal
-  // block screen and the redirect-link behaviour.
-  const PP_TESTING = false;
-  const blockedUrl = PP_TESTING
-    ? 'about:blank'
-    : blockedPrefix + `?reason=${reason}&match=${encodeURIComponent(match)}`;
-  if (PP_TESTING) console.log('[OathLight][TEST] BLOCK', { reason, match, url });
+  // A `PP_TESTING` flag used to sit here, hard-coded to false, which — when
+  // flipped — routed every block to about:blank and suppressed the redirect
+  // link with it. It was a one-word edit away from turning the entire blocker
+  // into a no-op while still reporting blocks, in shipped store builds. A test
+  // hook that can silently disable the product does not belong in the product;
+  // if the automation bridge ever needs this again it goes behind a build step,
+  // not a constant.
+  const blockedUrl = blockedPrefix + `?reason=${reason}&match=${encodeURIComponent(match)}`;
 
   // Desktop "Redirect link": send the user to the configured URL instead of the
   // block screen. The loop guard (the url isn't already the target) stops an
   // infinite bounce if the redirect destination ever resolves as blocked itself.
-  // (Suppressed entirely while PP_TESTING — see above.)
-  const redirectTarget = PP_TESTING ? null : getRedirectTarget();
+  const redirectTarget = getRedirectTarget();
   const targetUrl = (redirectTarget && !url.startsWith(redirectTarget)) ? redirectTarget : blockedUrl;
-  if (redirectTarget) {
-    console.log('[OathLight] block →', targetUrl === redirectTarget ? 'redirecting to ' + redirectTarget : 'block screen (loop guard)');
-  } else if (!blockingSettings) {
-    console.log('[OathLight] block → block screen (no settings from desktop app yet)');
-  }
 
   if (!skipTabUpdate) {
+    // `tabs.get` is only a cheap pre-check for "already on the block screen";
+    // it throws once the tab is gone, and so would the update. Both failures
+    // mean the same thing — there is nothing left to redirect — so neither is
+    // worth retrying (the old code re-issued the identical update from the
+    // catch and swallowed the result).
     try {
       const tab = await chrome.tabs.get(tabId);
-      if (tab && !tab.url.startsWith(blockedPrefix)) {
-        await chrome.tabs.update(tabId, { url: targetUrl });
-      }
+      if (tab && (tab.url || '').startsWith(blockedPrefix)) return targetUrl;
+      await chrome.tabs.update(tabId, { url: targetUrl });
     } catch (e) {
-      chrome.tabs.update(tabId, { url: targetUrl }).catch(() => {});
+      // Tab closed or navigated away mid-check. Nothing to do.
     }
   }
 

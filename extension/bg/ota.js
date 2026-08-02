@@ -34,14 +34,14 @@
 // stranding clients. Keep these byte-identical to OTA_PUBKEY_*_HEX in
 // desktop-app/core/src/ota.rs.
 const OTA_PUBKEYS_HEX = [
-  '4522971bcbc8b48009e98ffa8dec7fa26d225ae9fd46c94449a88f61a65c85c9', // active
-  '9900bb2b4e3b884c6e2dd0cdfa1b1bdcd075a9077bb79680ad4e63b672fb6c3d', // spare
+  '839a62f44c288c4f339349b0630bf8c870efe5cd6701a3ea31056655d8a6de45', // active
+  'a49202aca120c91a330ca5a803a9ef8b39462d3efea9aa68b011cd1fc1d25a26', // spare
 ];
 
 // GitHub "latest release" asset base — the same repo slug the desktop uses.
 // TODO(owner): if the project moves repos before Alpha, update this AND
 // desktop-app/src-tauri/src/ota.rs's OTA_RELEASE_BASE together.
-const OTA_RELEASE_BASE = 'https://github.com/Xeno-legit/Oath-Light/releases/latest/download';
+const OTA_RELEASE_BASE = 'https://github.com/Xeno-legit/Oath-light/releases/latest/download';
 const MANIFEST_ASSET = 'lists-manifest.json';
 const MANIFEST_SIG_ASSET = 'lists-manifest.json.sig';
 
@@ -301,7 +301,7 @@ function otaDeps() {
 
 // Register the weekly alarm + its handler. Idempotent (chrome.alarms.create
 // with the same name just resets the period), so it's safe to call on both
-// install and startup, mirroring bg/reminders.js's armReminderAlarm pattern.
+// install and startup, mirroring bg/vulnerable-window.js's arm-alarm pattern.
 function armOtaAlarm() {
   try {
     if (typeof chrome === 'undefined' || !chrome.alarms) return;
@@ -334,7 +334,7 @@ const OathLightOTA = {
 if (typeof globalThis !== 'undefined') globalThis.OathLightOTA = OathLightOTA;
 if (typeof module === 'object' && module.exports) module.exports = OathLightOTA;
 
-// ── self-registration (same shape as bg/reminders.js) ────────────────────────
+// ── self-registration (same shape as bg/vulnerable-window.js) ────────────────────────
 // Arm the weekly alarm on install + startup, and run the alarm's check when it
 // fires. Guarded so the file is inert under the Node test harness (no
 // chrome.runtime there) — tests drive runOtaCheck() directly with fake deps.
@@ -343,7 +343,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onInstalle
   chrome.runtime.onStartup.addListener(armOtaAlarm);
   if (chrome.alarms && chrome.alarms.onAlarm) {
     chrome.alarms.onAlarm.addListener((alarm) => {
-      if (alarm && alarm.name === OTA_ALARM) runOtaCheck(otaDeps()).catch(() => {});
+      if (alarm && alarm.name === OTA_ALARM) runOtaCheck(otaDeps()).catch(() => { });
     });
   }
 }

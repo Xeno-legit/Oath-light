@@ -1,196 +1,160 @@
 # Oath Light
 
-Oath Light is a free, open-source content-filtering system that blocks pornographic and
-other NSFW material at the network, page, and platform level. It comprises a Manifest V3
-browser extension for real-time request and content filtering and a Tauri (Rust) desktop
-application for system-level persistence and tamper resistance.
-
-![Oath Light Demonstration](Demogif.gif)
-
-## Core Philosophy
-
-Oath Light is built on the principle of accessible protection. The application is free and
-licensed under the GNU General Public License v3.0. It contains no paid subscriptions, no
-premium tiers, no locked features, and no advertising. The objective is a robust, auditable
-tool available to anyone, without financial or data-collection barriers.
-
-## Architecture
-
-| Component | Technology | Responsibility |
-| :--- | :--- | :--- |
-| Browser extension | Manifest V3 service worker, plain JavaScript (no build step) | URL filtering, keyword detection, SafeSearch enforcement, graylist interception |
-| MAIN-world interceptor | Injected web-accessible script (`graylist-inject.js`) | Strips NSFW items from in-page `fetch`/XHR JSON before render |
-| Desktop application | Tauri 2 (Rust core, web UI) | Persistence, native-messaging bridge, watchdog, uninstall friction |
-| Native messaging host | Rust | Secure channel between the extension and the desktop service |
-
-The extension's blocking logic is deterministic and hostname-based; it does not score pages
-or transmit data for evaluation. All processing is local.
-
-## Protection Layers
-
-Oath Light applies independent, complementary layers. A request is blocked if any layer matches.
-
-### 1. Curated domain blacklist
-- **385,588 curated domains** bundled with the extension, sharded across three JSON files and
-  loaded into the service worker at startup.
-- This list was reduced from an original **545,762 entries** (a 29.3% reduction) by removing
-  every domain the keyword engine already catches; the remainder are domains with no
-  machine-detectable stem (the "solid wall"). See [DOMAINS_HANDOFF.md](DOMAINS_HANDOFF.md).
-- Matching is exact-and-parent: a blocked domain also blocks its subdomains.
-
-### 2. Multilingual keyword engine
-A pattern layer that runs on the lowercased hostname even when the blacklist does not match:
-- **41 languages** plus anime/3D, fetish and leak slang, and adult-gaming terminology.
-- Approximately 600 unambiguous "strong" stems (substring match), explicit compounds, and
-  ambiguous roots guarded by a whitelist of trap words (for example, `sex` is excused inside
-  "essex", `anal` inside "analytics").
-- **Leetspeak normalization** (for example, `p0rn` to `porn`) before matching.
-- **Native-script detection** via vendored RFC-3492 punycode decoding, covering Arabic,
-  Chinese, Cyrillic, Japanese, Korean, Greek, Hebrew, and Bengali terms.
-- **Homoglyph folding** maps Cyrillic, Greek, Coptic, and full-width look-alikes to Latin so
-  that, for example, `pоrn.com` (Cyrillic "о") folds to `porn`.
-- Adult top-level domains (`.xxx`, `.porn`, `.adult`, `.sex`, `.sexy`) are blocked outright.
-
-### 3. Graylist V2 — platform-level interception
-Mixed-content platforms (Reddit, X, Pixiv, and similar) cannot be whole-site blocked without
-removing legitimate use, and cannot be left untouched. Oath Light reads each platform's **own
-per-item NSFW label** and removes the flagged items before they render. This is ground-truth
-filtering rather than heuristics, and it survives site redesigns because the underlying API
-fields are stable.
-
-- **35 platforms covered**: 24 via JSON/API interception, 10 via server-rendered DOM filtering
-  with whole-page blocking of adult content pages, and Discord via age-restricted channel and
-  server blocking.
-- Examples of the labels used: Reddit `over_18`, X `possibly_sensitive`, Pixiv `xRestrict`,
-  Mastodon `sensitive`, Mangadex `contentRating`, NexusMods `contains_adult_content`,
-  Writing.Com content rating (`crating` 18+/GC/XGC).
-
-### 4. SafeSearch and search enforcement
-- SafeSearch is forced on **Google, Bing, DuckDuckGo, and Yahoo** by URL parameter, and the
-  toggle UI is hidden to prevent disabling it.
-- Explicit search queries are blocked, including a keyword filter on Reddit and Patreon search
-  paths.
-
-### 5. Bypass and evasion defense
-- Translation and archive wrappers (`translate.google`, `web.archive.org`) are unwrapped and
-  the real target is re-checked recursively.
-- Known bypass proxies (for example, croxyproxy, 12ft.io, archive.today) are blocked.
-- Raw public-IP navigation is blocked; loopback and private ranges are exempt.
-- An allowlist of approximately 110 mainstream domains is never blocked.
-
-## Desktop Integration
-
-- **System-level persistence** via a lightweight Tauri (Rust) companion application.
-- **Dual-process watchdog**: a secondary process monitors the main service and restarts it,
-  resisting unauthorized termination.
-- **Native messaging**: an authenticated bridge between the extension and the desktop service.
-- **High-friction uninstall**: a configurable waiting period (for example, 48 hours) before
-  removal, with options to reset, cancel, or proceed.
-
-## Comparison with Existing Tools
-
-The following table compares Oath Light against widely used alternatives on attributes that are
-publicly documented and structurally stable. Vendor pricing and feature sets change over time;
-verify current details independently before relying on them.
-
-| Attribute | Oath Light | Covenant Eyes | BlockerX | Cold Turkey Blocker | Net Nanny |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| License | GPLv3 (open source) | Proprietary | Proprietary | Proprietary | Proprietary |
-| Cost model | Free | Subscription | Freemium (paid premium) | Freemium (paid Pro) | Subscription |
-| Primary purpose | NSFW content filter | Accountability and filtering | NSFW blocker and accountability | General website/app blocker | Parental-control suite |
-| Per-item filtering on mixed platforms (Reddit, X, Pixiv) | Yes | No | No | No | No |
-| Multilingual, native-script keyword engine | Yes (41 languages) | Limited | Limited | User-defined lists | Cloud content analysis |
-| Local-only processing, no activity reporting | Yes | No (reports to a partner) | Optional accountability | Yes | No (cloud-based) |
-| Tamper resistance / high-friction uninstall | Yes | Yes | Yes | Yes (Pro) | Yes |
-| Open codebase for audit | Yes | No | No | No | No |
-
-Oath Light's principal differentiators are its open-source GPLv3 licensing at no cost, its
-platform-level per-item NSFW stripping (the graylist), and a multilingual keyword engine with
-native-script and homoglyph handling, all executed locally with no telemetry.
-
-## Covered Graylist Platforms
-
-Each platform below is filtered in place rather than blocked outright.
-
-### API / network-layer interception (24)
-reddit, x / twitter, tumblr, pixiv, mastodon (all instances), imgur, nexusmods, vimeo,
-dailymotion, odysee, patreon, gumroad, minds, itaku, peertube (all instances), lemmy (all
-instances), mangadex, artstation, flickr, sketchfab, 500px, gamebanana, wattpad, fanbox.
-
-### Server-rendered DOM filtering and page blocking (10)
-newgrounds, archiveofourown, fanfiction.net, scribblehub, itch.io, steam, webtoons, tapas,
-ko-fi, writing.com.
-
-### Sub-unit blocking (1)
-discord (age-restricted channels and servers).
-
-Entirely or predominantly adult platforms (for example, image boards) are not graylisted; they
-are blocked outright by the curated blacklist.
-
-## How Blocking Is Applied
-
-| Method | Description | Target |
-| :--- | :--- | :--- |
-| Blacklist | Exact and parent-domain matching against 385,588 curated entries. | Known NSFW domains |
-| Keyword engine | Multilingual stem, compound, leetspeak, native-script, and homoglyph matching on the hostname. | Unlisted NSFW domains |
-| Graylist | Per-item NSFW stripping from JSON and server-rendered pages on mixed platforms. | NSFW items on legitimate sites |
-| Search filter | Forced SafeSearch parameters and explicit-query blocking. | Search engines |
-| Bypass defense | Unwrapping of translation/archive wrappers and blocking of proxies and raw IPs. | Evasion attempts |
-| Host blocking | (Planned) System-level blocks managed by the desktop application. | System-wide |
-
-## Development Status
-
-### Phase 1: Browser extension (Completed)
-- Core deterministic blocking logic and Manifest V3 compliance.
-- Password protection for extension settings.
-- Statistics tracking.
-
-### Phase 2: Domain and keyword engine (Completed)
-- 385,588-domain curated blacklist with a deduplicating pruner.
-- Multilingual keyword engine across 41 languages with native-script and homoglyph handling.
-
-### Phase 3: Desktop integration and Graylist V2 (Near completion)
-- Tauri desktop application, native-messaging bridge, and dual-process watchdog.
-- High-friction uninstall system.
-- Graylist V2 covering 35 mixed-content platforms.
-- Redesigned desktop interface.
-
-### Phase 4: Friction and watchdog systems (In progress)
-- 48-hour uninstall-request workflow.
-- Extension monitoring and optional AI-assisted monitoring.
-
-## Installation
-
-The project is in beta and is currently installed from source.
-
-| Step | Action | Details |
-| :--- | :--- | :--- |
-| 1 | Clone the repository | `git clone https://github.com/Xeno-legit/Oath-Light-NSFW-blocker.git` |
-| 2 | Load the extension | Load the `extension` folder as an unpacked extension in your browser's developer mode. |
-| 3 | Build the desktop app | In `desktop-app`, follow the build instructions in that directory's README. |
-| 4 | Configure | Complete the setup wizard to set a master password and goals. |
-
-## Security and Privacy
-
-- **Local processing**: all blocking logic and content analysis run on the local machine.
-- **Zero telemetry**: no browsing data, statistics, or personal information is transmitted to
-  any external server.
-- **Open source**: the entire codebase is available for audit under GPLv3.
-
-## Contributing
-
-| Area | Process |
-| :--- | :--- |
-| Bug reports | Open a GitHub issue with reproduction steps and environment details. |
-| Feature requests | Open an issue describing the feature and its alignment with the project's goals. |
-| Code changes | Fork the repository, create a feature branch, and open a pull request. |
-| Blocklist updates | Edit the relevant blocklist or keyword file and open a pull request. |
-
-## License
-
-This project is licensed under the GNU General Public License v3.0. See the [LICENSE](LICENSE)
-file for details.
+Oath Light is an open-source, privacy-first, zero-telemetry content blocker and local artificial intelligence protection system. Engineered specifically for Windows desktop environments and modern web browsers, Oath Light delivers comprehensive, multi-layered protection against explicit content, digital addiction, and unauthorized application modification.
 
 ---
 
-Oath Light Blocker is founded and maintained by [Xeno-legit](https://github.com/Xeno-legit).
+## Core Guarantees and Operational Standards
+
+Oath Light operates under three fundamental, unalterable design principles:
+
+* **100% Free Forever**: Oath Light is fully open-source under the GNU General Public License v3.0 (GPLv3). Every feature, artificial intelligence model, network filter, and security rule is completely free. No subscription models, paid features, or premium tiers will ever exist.
+* **Zero Telemetry and Absolute Privacy**: Oath Light processes all data locally on your computer. The software collects zero user metrics, logs no personal identifiers, transmits no browsing analytics, and performs all image screening and DNS filtering on local hardware resources.
+* **Uncompromising Engineering Excellence**: Built with Rust and modern native browser integrations, Oath Light ensures minimal memory footprint, maximum execution speed, rock-solid system stability, and strict tamper resistance.
+
+---
+
+## Downloads and Installation
+
+### Quick Start for Users (Pre-Built Installer)
+
+End users can install Oath Light directly using the official pre-compiled setup package without needing developer tools or build environments.
+
+1. Navigate to the official releases page: [Oath Light GitHub Releases](https://github.com/Xeno-legit/Oath-light/releases).
+2. Download the latest installer executable: `OathLight_Setup.exe`.
+3. Launch `OathLight_Setup.exe` and follow the setup wizard to complete installation.
+4. The installer automatically registers the local DNS filter, deploys background watchdog protection, and configures supported web browsers.
+
+### System Requirements
+
+| Specification | Minimum Requirement | Recommended Specification |
+| :--- | :--- | :--- |
+| **Operating System** | Windows 10 (64-bit, Build 19041+) | Windows 11 (64-bit, Latest Version) |
+| **Processor** | Intel Core i3 (4th Gen) or AMD Ryzen 3 | Intel Core i5 / AMD Ryzen 5 or higher |
+| **System Memory (RAM)** | 4 GB RAM | 8 GB RAM or higher |
+| **Graphics Processing** | Direct3D 11 compatible GPU / iGPU | Dedicated GPU with DirectML support |
+| **Web Browsers** | Chrome, Edge, Brave, Firefox, Opera | Google Chrome or Microsoft Edge |
+
+---
+
+## Competitive Analysis Matrix
+
+Oath Light delivers state-of-the-art protection by combining local machine learning vision models, network-level DNS proxying, and native browser API interception. The table below outlines how Oath Light compares to existing consumer solutions.
+
+| Feature / Architectural Axis | Oath Light | Canopy | Covenant Eyes | Cold Turkey | Tech Lockdown | PixelCage |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Pricing Model** | 100% Free Open Source | Paid Subscription | Paid Subscription | One-Time Purchase | Paid Subscription | One-Time Purchase |
+| **Data Privacy & Telemetry** | Zero Telemetry (100% Local) | Remote Cloud Filtering | Server Screenshot Upload | Local Storage | Cloud / Remote DNS | 100% Local |
+| **Multilingual Domain Matching** | 41 Languages + Homoglyphs | Basic Category List | Standard Blacklists | Manual / Standard Lists | Cloud DNS Categories | None |
+| **Per-Item Platform Stripping** | 44 Platforms (API Interception) | Generic Page Blur | None | Whole-Site Blocking | Whole-Site Blocking | None |
+| **Local AI Screen Inspection** | SigLIP2 + NudeNet Ensemble | Remote / Cloud AI | Screenshot Capture AI | None | None | NudeNet GPU Overlay |
+| **Asymmetric Friction Model** | Enforced 24-Hour Cool-Off | Partner Approval | Partner Reporting | Session Timer Lock | MDM Profile Lock | None |
+| **Clock-Tamper Immunity** | Boot-Anchored Monotonic Timer | None | Server Sync Required | None | None | None |
+| **System-Level DNS Filtering** | Native Local Loopback Proxy | Remote VPN / Proxy | System Proxy | Host File Modifications | Cloud DNS Resolver | None |
+| **Dual-Process Watchdog** | Dual Mutex + Task Scheduler | Service Monitoring | Service Monitoring | System Service | OS MDM Enforcement | None |
+| **Source Availability** | Open Source (GPLv3) | Proprietary | Proprietary | Proprietary | Proprietary | Proprietary |
+
+---
+
+## Architecture and Subsystem Organization
+
+Oath Light uses a modular, multi-tier architecture to separate system-level privileges, background process monitoring, network proxying, and browser extension hooks.
+
+```mermaid
+graph TD
+    SubApp["Desktop Core Application (Tauri v2 + Rust)"]
+    SubDNS["System DNS Proxy (oathlight-dns Crate)"]
+    SubGuard["Watchdog Guardian (oathlightguard.exe)"]
+    SubExt["Browser Extension (Manifest V3 / WebExtension)"]
+    
+    SubApp <-->|Native Messaging Stdio| SubExt
+    SubApp <-->|Dual Mutex Monitoring| SubGuard
+    SubApp -->|Direct IPC & Config| SubDNS
+    SubGuard -->|Process Resuscitation| SubApp
+```
+
+### Component Responsibilities Matrix
+
+| Subsystem Component | Module Location | Technology Stack | Primary Operational Responsibility |
+| :--- | :--- | :--- | :--- |
+| **Desktop Application Core** | `desktop-app/src-tauri` | Tauri v2, Rust, React | Hosts UI, local AI models, Argon2id auth, settings, and IPC interfaces. |
+| **System DNS Proxy** | `dns` | Pure Rust (`oathlight-dns`) | Intercepts port 53 DNS traffic, enforces blocklists, blocks DoH endpoints. |
+| **Watchdog Guardian** | `desktop-app/guardian` | Pure Rust (`oathlightguard`) | Windowless background process maintaining cross-process mutex locks. |
+| **Browser Extension** | `extension` | Manifest V3 / WebExtension | Intercepts platform APIs, strips explicit items, forces safe search. |
+| **Shared Core Engine** | `core` | Pure Rust (`oathlight-core`) | Houses 385k embedded domains, 41-language engine, and event logging. |
+
+---
+
+## Advanced Capabilities and Feature Matrix
+
+### 1. Deterministic Per-Item Platform Stripping (44 Platforms)
+
+Rather than blocking entire websites, Oath Light inspects native JSON network responses and strips explicit posts, videos, comments, and media items prior to browser rendering.
+
+| Filtering Mode | Platform Count | Example Platforms Supported | Detection Mechanism & Target Labels |
+| :--- | :--- | :--- | :--- |
+| **API / JSON Interception** | 26 Platforms | Reddit, X (Twitter), Twitch, Kick, Tumblr, Steam, Danbooru, Gelbooru, Patreon | Parses native API JSON payloads for flags like `over_18`, `possibly_sensitive`, `contentClassificationLabels`, `is_mature`. |
+| **DOM-Tier Filtering** | 10 Platforms | Rule34, E621, Hypnohub, FurAffinity, InkBunny, Newgrounds | Scrubs server-rendered HTML elements and media containers in real time. |
+| **Safe-Mode Enforcement** | 7 Platforms | YouTube, Spotify, Instagram, TikTok, character.ai, poe, huggingface | Forces platform safe search, Restricted Mode, and tags adult search paths. |
+| **Sub-Unit Monitoring** | 1 Platform | Discord | Monitors text and media channels via native client IPC hooks. |
+
+### 2. Local Artificial Intelligence Screening Ensemble
+
+Oath Light runs real-time screen inspection using a local multi-model artificial intelligence ensemble.
+
+| Model Component | Architecture | Processing Framework | Detection Target & Role |
+| :--- | :--- | :--- | :--- |
+| **Image-Guard-2.0** | SigLIP2-base (Vision Transformer) | Local ONNX Runtime (`ort`) | 5-class classification model identifying explicit screen content. |
+| **NudeNet Detector** | NudeNet ONNX Model | Local ONNX Runtime (`ort`) | Object detection model highlighting specific anatomical explicit regions. |
+| **Frame Screen Capture** | Native Desktop Capture | `xcap` Rust Crate | Captures display frames directly from GPU framebuffer memory. |
+| **Overlay Window Defense** | Windows Win32 API | `WDA_EXCLUDEFROMCAPTURE` | Tags action overlay so screening engine never processes its own window. |
+
+### 3. Multilingual Keyword and Homoglyph Engine
+
+The embedded matching engine in `oathlight-core` analyzes domain names and URLs without requiring cloud connectivity.
+
+| Feature Metric | Capability Standard | Description |
+| :--- | :--- | :--- |
+| **Language Coverage** | 41 Languages | Full keyword dictionary supporting international domain variations. |
+| **Punycode Decoding** | Automatic IDN Conversion | Converts internationalized domain names (e.g., `xn--example`) to Unicode strings. |
+| **Homoglyph Folding** | Character Normalization | Maps lookalike characters (e.g., Cyrillic `о` in `pоrn`) to standard ASCII. |
+| **Matching Latency** | Sub-Millisecond (< 1 ms) | Performs zero-network local regex and trie lookups directly in RAM. |
+
+---
+
+## Building from Source (Developer Instructions)
+
+### Developer Prerequisites
+* [Rust Compiler](https://www.rust-lang.org/) (1.77.2 or higher)
+* [Node.js](https://nodejs.org/) (v18 or higher) and `npm`
+* Microsoft Visual Studio C++ Build Tools
+
+### Step-by-Step Build Instructions
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/Xeno-legit/Oath-light.git
+   cd Oath-light/"Oath Light Blocker"
+   ```
+
+2. Install desktop application dependencies:
+   ```bash
+   cd desktop-app
+   npm install
+   ```
+
+3. Launch development mode:
+   ```bash
+   npm run tauri dev
+   ```
+
+4. Compile production installer:
+   ```bash
+   npm run tauri build
+   ```
+
+---
+
+## License
+
+Oath Light is distributed under the terms of the GNU General Public License v3.0 (GPLv3). See the [LICENSE](file:///e:/Programs%20%28Zipped%29/Oath%20Light/Oath%20Light%20Blocker/LICENSE) file for complete licensing details.

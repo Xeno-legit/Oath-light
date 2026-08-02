@@ -1,0 +1,60 @@
+# .github/workflows/list-pr.yml — the community blocklist pipeline (plan 3.6).
+#
+# Runs on any PR that touches the curated lists, and is what makes accepting
+# blocklist contributions from strangers viable: a list PR is reviewed by a
+# script before a human ever looks at it, and the review is published where
+# the contributor can read it and fix their own PR.
+#
+# Why the summary goes to the job summary rather than a PR comment: PRs from
+# forks get a read-only GITHUB_TOKEN, so a comment step would fail for exactly
+# the contributors this pipeline exists to serve. Using `pull_request_target`
+# to get a writable token would run trusted workflow code against an untrusted
+# branch — a well-known escalation footgun, and not worth it to move text from
+# one tab to another. The step summary is visible to everyone, needs no
+# permissions, and cannot be abused.
+name: Blocklist PR
+
+on:
+  pull_request:
+    paths:
+      - 'extension/blocklists/**'
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    name: Review list changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The gate diffs the PR against the base branch, so it needs history
+          # and the base ref present — a shallow clone has neither.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Fetch the base branch
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      # Shape gate first: if the FILES are malformed there's no point diffing.
+      - name: Validate list file shape
+        run: node scripts/ci/validate-blocklists.mjs
+
+      # The real review. Publishes its markdown to the job summary either way,
+      # then fails the job if anything was rejected.
+      - name: Review the diff
+        run: |
+          node scripts/ci/check-list-pr.mjs --base "origin/${{ github.base_ref }}" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "${PIPESTATUS[0]}"
+        shell: bash
+
+      # A list change must not break the matcher. The adversarial suite is the
+      # thing that would notice, so it runs on every list PR rather than only
+      # on code PRs.
+      - name: Run the full extension suite (incl. adversarial)
+        run: node extension/tests/run-all.cjs

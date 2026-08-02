@@ -15,15 +15,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Cool-off window before an uninstall can complete.
 ///
-/// TESTING: currently **10 seconds** — intentionally tiny so the whole flow
-/// (request → cool-off → ready → remove) can be exercised in one sitting.
-/// Product-owner decision: this is NOT a bug; do not "fix" it without checking
-/// with them first. Safe at this size because elapsing only *unlocks* the
-/// explicit "Remove completely" action — nothing fires automatically. For
-/// production set this back to 24 hours (`24 * 60 * 60`).
-/// Overridable at runtime with `OATHLIGHT_UNINSTALL_SECS` (seconds) — **debug
-/// builds only**, see `delay_secs` below.
-const DEFAULT_DELAY_SECS: u64 = 10; // ← production: 24 * 60 * 60
+/// **At its real production value: 24 hours** (plan item 4.6 — "uninstall
+/// hardening at the real timer value"). It spent Phase 4 at a deliberate 10
+/// seconds, and was briefly returned there on 2026-07-31 to exercise the
+/// uninstall/upgrade gate end to end on a real release install — the
+/// debug-only override below cannot reach an NSIS-installed build. That test
+/// passed; the testing value is gone again.
+///
+/// Local testing still works: debug builds honor `OATHLIGHT_UNINSTALL_SECS`
+/// (see `delay_secs` below). Release builds ignore it entirely, so a shipped
+/// app cannot have its friction dialled to zero from a shell.
+const DEFAULT_DELAY_SECS: u64 = 24 * 60 * 60;
 
 /// Debug builds: honor `OATHLIGHT_UNINSTALL_SECS` so the cool-off can be dialed
 /// down for manual testing. Release builds ignore the env var entirely and
@@ -52,6 +54,94 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
+// ============================================================================
+// Confirmation phrase (plan item 4.6) — type-this-paragraph friction
+// ============================================================================
+//
+// The 24-hour wait defends against the impulsive moment. This defends against
+// the *end* of it: the moment the timer finally elapses, "Remove Oath Light"
+// is a single button, and a person who has been waiting a day for exactly that
+// button will click it without a thought. Cold Turkey's answer — make them
+// type something out first — costs about forty seconds and reliably pulls
+// someone back into deliberate thought. That is the entire mechanism.
+//
+// Deliberate design choices:
+//   - The phrase is RANDOM per request, so it can't be muscle-memoried, and
+//     it is generated once at request time and persisted with the request, so
+//     it survives restarts and is stable for the whole wait.
+//   - The words are ordinary and unambiguous (no homoglyphs, no punctuation to
+//     guess at) — this is friction, not a CAPTCHA. Comparison is
+//     whitespace-normalized and case-insensitive so a trailing space or a
+//     capitalized first word doesn't turn friction into a puzzle.
+//   - It is NOT a security control. Anyone can read the phrase off the screen
+//     and type it. That's fine: the point is the forty seconds of typing, not
+//     secrecy.
+
+/// Word pool for the confirmation phrase. Deliberately plain, unambiguous,
+/// hard-to-typo English — the friction should come from the typing, not from
+/// deciphering the words.
+const PHRASE_WORDS: &[&str] = &[
+    "anchor", "harbor", "lantern", "meadow", "compass", "granite", "river",
+    "timber", "orchard", "beacon", "cinder", "willow", "marble", "canyon",
+    "thistle", "amber", "cobalt", "juniper", "quarry", "saffron", "velvet",
+    "walnut", "zephyr", "bramble", "cedar", "flint", "harvest", "ivory",
+];
+
+/// How many words a confirmation phrase contains. Twelve is long enough that
+/// typing it is a genuine pause and short enough that it never feels punitive.
+const PHRASE_WORD_COUNT: usize = 12;
+
+/// Generate a fresh random confirmation phrase.
+///
+/// Randomness source: the system clock plus the address of a stack local,
+/// mixed through a small xorshift. This is emphatically NOT cryptographic —
+/// and doesn't need to be, since the phrase is displayed to the very person
+/// who has to type it. What it does need is to differ between requests so the
+/// phrase can't be memorized, and this does that.
+pub(crate) fn generate_phrase() -> String {
+    let seed_local = 0u8;
+    let mut state = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64
+        ^ (&seed_local as *const u8 as u64);
+    if state == 0 {
+        state = 0x9E37_79B9_7F4A_7C15;
+    }
+    let mut next = move || {
+        // xorshift64*
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        state.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    };
+    let mut words = Vec::with_capacity(PHRASE_WORD_COUNT);
+    for _ in 0..PHRASE_WORD_COUNT {
+        let idx = (next() % PHRASE_WORDS.len() as u64) as usize;
+        words.push(PHRASE_WORDS[idx]);
+    }
+    words.join(" ")
+}
+
+/// Normalize a phrase for comparison: lowercase, trimmed, and with every run
+/// of whitespace collapsed to a single space. So "Anchor  harbor " matches
+/// "anchor harbor" — a stray space is not a reason to make someone start over.
+fn normalize_phrase(s: &str) -> String {
+    s.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Does `typed` match `expected`, after normalization? An empty `expected`
+/// means no phrase was recorded for this request (a request filed by an older
+/// build, before 4.6) — in that case there is nothing to check and the wait
+/// alone stands, rather than locking the user out of a request they can no
+/// longer satisfy.
+pub(crate) fn phrase_matches(expected: &str, typed: &str) -> bool {
+    if expected.trim().is_empty() {
+        return true;
+    }
+    normalize_phrase(expected) == normalize_phrase(typed)
+}
+
 /// On-disk shape — a tiny JSON file in the app data dir. `pub(crate)` (and its
 /// field) so `friction.rs` can read/write the same shape directly — see
 /// `write_marker` below for why this file still exists at all now that
@@ -78,6 +168,10 @@ pub struct UninstallState {
     pub remaining_secs: u64,
     /// True once the cool-off has fully elapsed for a pending request.
     pub ready: bool,
+    /// The phrase the user must type out to actually complete removal (4.6).
+    /// Empty when there's no pending request, or when the request predates
+    /// this feature — see `phrase_matches` for how an empty one is treated.
+    pub confirm_phrase: String,
 }
 
 /// Write `<app_data_dir>/uninstall.json` in the exact `Persisted` shape.
@@ -445,4 +539,73 @@ pub fn spawn_self_delete(app_data_dir: &std::path::Path) -> LaunchResult {
     // is left to the user's package manager / drag-to-trash.
     let _ = std::fs::remove_dir_all(app_data_dir);
     LaunchResult::Launched(app_data_dir.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The whole point of the phrase (4.6) is that it can't be muscle-memoried
+    /// across requests. Two generations colliding would be a real failure, not
+    /// a flake — with 28 words in 12 slots the odds are about 28^-12.
+    #[test]
+    fn generated_phrases_differ_between_requests() {
+        let a = generate_phrase();
+        let b = generate_phrase();
+        assert_ne!(a, b, "two generated phrases must not be identical");
+        assert_eq!(a.split_whitespace().count(), PHRASE_WORD_COUNT);
+        assert_eq!(b.split_whitespace().count(), PHRASE_WORD_COUNT);
+    }
+
+    /// Every word comes from the curated pool — no stray characters a user
+    /// would have to puzzle over while typing.
+    #[test]
+    fn generated_phrase_uses_only_pool_words() {
+        let phrase = generate_phrase();
+        for word in phrase.split_whitespace() {
+            assert!(PHRASE_WORDS.contains(&word), "unexpected word in phrase: {word}");
+        }
+    }
+
+    /// Friction, not a CAPTCHA: casing and stray whitespace must not fail a
+    /// user who typed the right words.
+    #[test]
+    fn phrase_match_is_forgiving_about_case_and_whitespace() {
+        let expected = "anchor harbor lantern";
+        assert!(phrase_matches(expected, "anchor harbor lantern"));
+        assert!(phrase_matches(expected, "  Anchor   HARBOR  lantern  "));
+        assert!(phrase_matches(expected, "Anchor\nharbor\tlantern"));
+    }
+
+    /// ...but it is still a real check: wrong, reordered, or partial input
+    /// must not pass.
+    #[test]
+    fn phrase_match_rejects_wrong_input() {
+        let expected = "anchor harbor lantern";
+        assert!(!phrase_matches(expected, "anchor harbor"));
+        assert!(!phrase_matches(expected, "harbor anchor lantern"));
+        assert!(!phrase_matches(expected, "anchor harbor lanternx"));
+        assert!(!phrase_matches(expected, ""));
+    }
+
+    /// A request filed before 4.6 shipped has no stored phrase. It must not
+    /// become permanently un-completable — the 24h wait alone stands for it.
+    #[test]
+    fn empty_expected_phrase_accepts_anything() {
+        assert!(phrase_matches("", ""));
+        assert!(phrase_matches("   ", "whatever"));
+    }
+
+    /// The timer is at its real production value (4.6). Guarded by a test so a
+    /// stray debugging edit back to seconds can't ship silently.
+    ///
+    /// This has now caught exactly the thing it was written for: the constant
+    /// was deliberately dropped to 10s on 2026-07-31 to test the uninstall gate
+    /// on a real install, and flipping this assertion was the step that made
+    /// that temporary state impossible to forget. Keep it asserting the
+    /// production value.
+    #[test]
+    fn default_delay_is_twenty_four_hours() {
+        assert_eq!(DEFAULT_DELAY_SECS, 24 * 60 * 60);
+    }
 }

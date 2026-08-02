@@ -10,15 +10,12 @@
 //!
 //! Setting/changing the password is instant (a strengthening or neutral
 //! change — same asymmetry as every other friction rule in this codebase).
-//! REMOVING it is the one weakening this module has any part in gating:
-//! `request_password_removal` in lib.rs routes it through
-//! `friction::FrictionStore` under the `"password.remove"` action id, the
-//! same delay mechanism as turning off the uninstall guard or the AI
-//! monitor. That is also the documented recovery path for a forgotten
-//! password — see the loud comment on `request_password_removal` in lib.rs:
-//! a lockout is recovered by *waiting out the delay*, not by some backdoor,
-//! and the pending removal sits in Settings -> Pending changes the entire
-//! time so a stronger-willed future self can still cancel it.
+//! REMOVING it is the one weakening this module has any part in gating, and it
+//! has two routes with two different prices — see [`PASSWORD_REMOVE`] and
+//! [`PASSWORD_REMOVE_FORGOTTEN`]. Either way a lockout is recovered by *waiting
+//! out the delay*, not by some backdoor, and the pending removal sits in
+//! Settings -> Pending changes the entire time so a stronger-willed future self
+//! can still cancel it.
 //!
 //! Sessions are short-lived (5 minutes) and held only in memory — a token is
 //! never persisted to disk and never logged, and neither is the password
@@ -32,6 +29,27 @@
 //! can already edit their own app-data files can already delete the file to
 //! clear the password outright; refusing to boot back up from a corrupt one
 //! would just brick every other weakening forever for no real security gain.
+
+/// Friction action id for removing the password **with the current password
+/// proved** (`request_password_removal`). Ordinary weakening cool-off.
+pub const PASSWORD_REMOVE: &str = "password.remove";
+
+/// Friction action id for the "I forgot it" route
+/// (`request_password_removal_forgotten`), which asks for nothing at all.
+///
+/// It is a **separate id purely so it can cost more time** — every other
+/// weakening in the app is gated by either the password or by already having
+/// proved something, and this is the single path that is reachable by anyone
+/// who can click a button on an unlocked machine. At the shared id it inherited
+/// the ordinary 24h cool-off, which meant a moment of someone else's access (or
+/// your own, at 2am, having decided not to remember) started the same clock as a
+/// deliberate, authenticated removal. `friction::delay_for` now charges this one
+/// the longest wait the app has.
+///
+/// The two ids are otherwise interchangeable: the applier in lib.rs treats
+/// either as "remove the password file", and `set_master_password` cancels both,
+/// so re-setting a password still withdraws a pending removal of either kind.
+pub const PASSWORD_REMOVE_FORGOTTEN: &str = "password.remove.forgotten";
 
 use argon2::password_hash::rand_core::{OsRng, RngCore};
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};

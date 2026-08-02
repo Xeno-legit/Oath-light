@@ -9,7 +9,7 @@
 //
 // Two modes mirror the two entries in manifest.json's "background" block:
 //   'firefox' — evaluate bg/blocklists.js, bg/matching.js, bg/graylist.js,
-//               bg/native-bridge.js, bg/reminders.js, then background.js, each
+//               bg/native-bridge.js, bg/vulnerable-window.js, then background.js, each
 //               as a separate script sharing ONE global scope (exactly what
 //               Firefox's `background.scripts` array does — sequential classic
 //               scripts, no importScripts). `importScripts` is left undefined,
@@ -30,11 +30,23 @@ const EXT_ROOT = path.join(__dirname, '..');
 // Must match manifest.json's background.scripts order (Firefox), minus the
 // trailing background.js entry (added separately below).
 const BG_FILES = [
+  // Voice layer (UX Direction §2) — byte-identical copy of
+  // design-system/strings.js. Dependency-free and DOM-free (it must run in an
+  // MV3 service worker), so it loads first and anything below can call
+  // OL_STRINGS.t() for user-facing copy.
+  'strings.js',
+  // Locale tables (i18n). Each registers itself onto OL_STRINGS, so they must
+  // land after strings.js and before anything that calls t(). One entry per
+  // shipped language — a worker cannot lazily import a locale, so they are
+  // plain scripts like everything else here. test-load-order.cjs asserts this
+  // list stays equal to design-system/locales/ on disk, which is what catches
+  // "added a language, forgot the manifest".
+  'locales/ar.js',
   'bg/blocklists.js',
   'bg/matching.js',
   'bg/graylist.js',
   'bg/native-bridge.js',
-  'bg/reminders.js',
+  'bg/vulnerable-window.js',
   // Vendored @noble/ed25519 + the OTA consumer (plan 3.5). noble attaches
   // globalThis.nobleEd25519; ota.js reads it (and WHITELIST_DOMAINS from
   // matching.js) at runtime, so it loads after both.
@@ -47,8 +59,7 @@ function readExt(relPath) {
   return fs.readFileSync(path.join(EXT_ROOT, relPath), 'utf8');
 }
 
-// ── minimal chrome stub (modeled on the proven harness in
-//    "MD files/cjs files/test-adversarial-fixes.cjs") ────────────────────────
+// ── minimal chrome stub ─────────────────────────────────────────────────────
 function makeChromeStub() {
   const noop = () => {};
   const listener = { addListener: noop, removeListener: noop, hasListener: () => false };

@@ -1,32 +1,34 @@
-/* theme-sync.js — keeps an extension page's theme/palette in lockstep with the
- * desktop app's selection. The desktop pushes the chosen display into
+/* theme-sync.js — keeps an extension page's light/dark side in lockstep with
+ * the desktop app's selection. The desktop pushes the chosen display into
  * chrome.storage.local (key `display`, mirrored to individual keys) via native
- * messaging; this reads it and applies the matching data-theme / data-style.
+ * messaging; this reads it and sets `data-theme`.
  *
- * The palette CSS (aurora/lagoon/dawn/midnight/forest/ember × light/dark) already
- * lives in each page's stylesheet, so this only flips the two attributes.
  * Shared by popup, blocklists and user_blocklist. (blocked.js has its own copy
  * because it also drives the animated background.)
+ *
+ * There is no palette axis any more. `data-style` used to carry one of seven
+ * palette names and every stylesheet keyed its colours off it; Noir has been
+ * the only built-in theme since 2026-07-19, the six others were deleted from
+ * the stylesheets, and what remained here was validation logic for values
+ * nothing wrote against selectors nothing had. The `style` key is not even
+ * read from storage now — leaving it read-but-unused is how it would creep
+ * back.
  */
 (function () {
   const THEMES = ['light', 'dark'];
-  const STYLES = ['aurora', 'lagoon', 'dawn', 'midnight', 'forest', 'ember', 'noir'];
-  const DEFAULTS = { theme: 'dark', style: 'aurora' };
-
-  const pick = (v, allowed, fb) => (allowed.includes(v) ? v : fb);
+  const DEFAULT_THEME = 'dark';
 
   function apply(d) {
     d = d || {};
-    const el = document.documentElement;
-    el.setAttribute('data-theme', pick(d.theme, THEMES, DEFAULTS.theme));
-    el.setAttribute('data-style', pick(d.style, STYLES, DEFAULTS.style));
+    const theme = THEMES.includes(d.theme) ? d.theme : DEFAULT_THEME;
+    document.documentElement.setAttribute('data-theme', theme);
   }
 
   function read(cb) {
     if (typeof chrome === 'undefined' || !chrome.storage) { cb({}); return; }
-    chrome.storage.local.get(['display', 'theme', 'style'], (r) => {
+    chrome.storage.local.get(['display', 'theme'], (r) => {
       const d = r && r.display && typeof r.display === 'object' ? r.display : (r || {});
-      cb({ theme: d.theme, style: d.style });
+      cb({ theme: d.theme });
     });
   }
 
@@ -35,7 +37,7 @@
   if (typeof chrome !== 'undefined' && chrome.storage) {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local') return;
-      if (['display', 'theme', 'style'].some((k) => k in changes)) read(apply);
+      if (['display', 'theme'].some((k) => k in changes)) read(apply);
     });
   }
 })();

@@ -1,0 +1,340 @@
+{
+  "_meta": {
+    "platform": "fanbox",
+    "field": "hasAdultContent",
+    "url": "https://api.fanbox.cc/creator.listRecommended?limit=4",
+    "itemsPath": "body.creators",
+    "captured": "2026-08-01",
+    "flaggedAreDerived": false,
+    "why": "Both clean and flagged items are live captures. If fanbox renames `hasAdultContent`, the flagged item stops being stripped and this test fails."
+  },
+  "payload": {
+    "body": {
+      "creators": [
+        {
+          "user": {
+            "userId": "2546651",
+            "name": "はしゃ",
+            "iconUrl": "https://pixiv.pximg.net/c/160x160_90_a2_…"
+          },
+          "creatorId": "hasya",
+          "description": "こんにちは！はしゃです。\r\n主にイラストや漫画を描いて日々暮らしてるイラストレー…",
+          "hasAdultContent": false,
+          "coverImageUrl": "https://pixiv.pximg.net/c/1620x580_90_a2…",
+          "profileLinks": [
+            "https://hasya.booth.pm/",
+            "https://www.pixiv.net/member.php?id=2546651",
+            "https://twitter.com/hasya31",
+            "http://hasya.nomaki.jp"
+          ],
+          "profileItems": [
+            {
+              "id": "f2BNRJ0IQrnoEhaKKRSRTuXP",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "M46lYwf7Z14HBhDAY3KRO8kA",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "eo7HtuOWuwk8wKbMXDfXVDiF",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "MpkAD3eQvjiHdCM6N8OZiHXO",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "YfLR2bTMNQy8MdfyevXpaU64",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            }
+          ],
+          "isFollowed": false,
+          "isSupported": false,
+          "isStopped": false,
+          "isAcceptingRequest": false,
+          "hasBoothShop": true,
+          "hasPublishedPost": true,
+          "category": "illustrations"
+        },
+        {
+          "user": {
+            "userId": "591801",
+            "name": "左近堂絵里",
+            "iconUrl": "https://pixiv.pximg.net/c/160x160_90_a2_…"
+          },
+          "creatorId": "sakondo",
+          "description": "漫画家をしております。\r\n◆「桃組＋戦記」連載中（KADOKAWA/Newtyp…",
+          "hasAdultContent": false,
+          "coverImageUrl": "https://pixiv.pximg.net/c/1620x580_90_a2…",
+          "profileLinks": [
+            "https://comic.webnewtype.com/contents/momogumi/",
+            "https://twitter.com/sakondo"
+          ],
+          "profileItems": [
+            {
+              "id": "RnMU38PGwb81dRFDnRaXz09O",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "k08kXlMOpgpxS4vOM4u2wXq6",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "2CYUsmRkdL63BPbC05AWsPHy",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "GGZTfIDoh0RtKb0LWijcX8zm",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "9yj3th8S3M4NrrQ1exNbhnat",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            }
+          ],
+          "isFollowed": false,
+          "isSupported": false,
+          "isStopped": false,
+          "isAcceptingRequest": false,
+          "hasBoothShop": true,
+          "hasPublishedPost": true,
+          "category": null
+        },
+        {
+          "user": {
+            "userId": "1039353",
+            "name": "Mika Pikazo",
+            "iconUrl": "https://pixiv.pximg.net/c/160x160_90_a2_…"
+          },
+          "creatorId": "mikapikazo",
+          "description": "初めまして、Mika Pikazoといいます。\r\nこの度pixivFANBOXを…",
+          "hasAdultContent": false,
+          "coverImageUrl": "https://pixiv.pximg.net/c/1620x580_90_a2…",
+          "profileLinks": [
+            "https://www.pixiv.net/users/1039353",
+            "https://twitter.com/MikaPikaZo"
+          ],
+          "profileItems": [
+            {
+              "id": "OqnXujWRRDQz1jEReqYqLjTN",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "EpPz92xExL8w6hUHYEYxP8GL",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "PxwzUpUbSO1D9mAPfdbngZK1",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "FaP5RktdJJpcCFE1K2KgWrzt",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            }
+          ],
+          "isFollowed": false,
+          "isSupported": false,
+          "isStopped": false,
+          "isAcceptingRequest": false,
+          "hasBoothShop": false,
+          "hasPublishedPost": true,
+          "category": null
+        },
+        {
+          "user": {
+            "userId": "705370",
+            "name": "しらたま",
+            "iconUrl": "https://pixiv.pximg.net/c/160x160_90_a2_…"
+          },
+          "creatorId": "shiratamaco",
+          "description": "🔽しらたま公式サイト\r\n（プロフィール・お仕事経歴・ご依頼はこちら！）\r\nht…",
+          "hasAdultContent": false,
+          "coverImageUrl": "https://pixiv.pximg.net/c/1620x580_90_a2…",
+          "profileLinks": [
+            "https://www.youtube.com/@shiratamacaron/featured",
+            "http://shiratamaco.com/",
+            "https://twitter.com/shiratamacaron",
+            "https://www.instagram.com/shiratamacaron/"
+          ],
+          "profileItems": [
+            {
+              "id": "haJltpowk8LeYkdreugztZle",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "rkZ2k5fHF8TtndXxoJ9I8PYX",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "8RKbMBbuF49k304rBTXAe1ug",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "5s1WHRSp5iHkxjyEeBj7drH0",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "oDScJQFnGOh9xCQ0yhRYVa6i",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "PX5yP2q9jMyTRn2Y4AvbQcIq",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            }
+          ],
+          "isFollowed": false,
+          "isSupported": false,
+          "isStopped": false,
+          "isAcceptingRequest": false,
+          "hasBoothShop": true,
+          "hasPublishedPost": true,
+          "category": "illustrations"
+        },
+        {
+          "user": {
+            "userId": "3439325",
+            "name": "かにビーム",
+            "iconUrl": "https://pixiv.pximg.net/c/160x160_90_a2_…"
+          },
+          "creatorId": "kanibiimu",
+          "description": "投稿したイラストのいやらし差分、没ラフ、作業中のデータなどなど、雑多なものを投稿予定です。\r\n無理のない範囲で頑張りたいと思いますのでよろしくお願いします！",
+          "hasAdultContent": true,
+          "coverImageUrl": "https://pixiv.pximg.net/c/1620x580_90_a2…",
+          "profileLinks": [
+            "https://www.youtube.com/@kanibiimu",
+            "https://www.pixiv.net/member.php?id=3439325",
+            "https://twitter.com/kani_biimu"
+          ],
+          "profileItems": [
+            {
+              "id": "tkOlVpvACDlIlhRkXDN0dVIH",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "iseoYgtXTd0fVAg1H1B5asUQ",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "vxm9nCsLVBUqcAPK30fN6iyc",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "818q5ui2thiPzvQZHMCMLB6L",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            }
+          ],
+          "isFollowed": false,
+          "isSupported": false,
+          "isStopped": false,
+          "isAcceptingRequest": false,
+          "hasBoothShop": true,
+          "hasPublishedPost": true,
+          "category": "illustrations"
+        },
+        {
+          "user": {
+            "userId": "32244225",
+            "name": "いのり。",
+            "iconUrl": "https://pixiv.pximg.net/c/160x160_90_a2_…"
+          },
+          "creatorId": "inori-0",
+          "description": "いのり。と申します。\r\nPixivの片隅に生息するしがない物書きです。\r\n\r\n「…",
+          "hasAdultContent": true,
+          "coverImageUrl": "https://pixiv.pximg.net/c/1620x580_90_a2…",
+          "profileLinks": [
+            "http://mypage.syosetu.com/483316/",
+            "https://www.pixiv.net/member.php?id=32244225",
+            "https://twitter.com/Inori_ILTV"
+          ],
+          "profileItems": [
+            {
+              "id": "gE0U8gVHsYbW1cH8aqOl7fYg",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "Ul0NmyoB0gARxJtJPoUfd2tc",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "WX5NwrF66qMBYhcXG9vm07ix",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            },
+            {
+              "id": "iJKqaFA7FdnGRMXO1054uv4l",
+              "type": "image",
+              "imageUrl": "https://pixiv.pximg.net/fanbox/public/im…",
+              "thumbnailUrl": "https://pixiv.pximg.net/c/400x400_90_a2_…"
+            }
+          ],
+          "isFollowed": false,
+          "isSupported": false,
+          "isStopped": false,
+          "isAcceptingRequest": false,
+          "hasBoothShop": false,
+          "hasPublishedPost": true,
+          "category": null
+        }
+      ],
+      "nextUrl": null
+    }
+  },
+  "expect": {
+    "kept": 4,
+    "removed": 2
+  }
+}

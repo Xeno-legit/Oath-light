@@ -263,6 +263,58 @@ mod imp {
         std::env::temp_dir().join("oathlight.watchdog.shutdown")
     }
 
+    /// Path of the sentinel that authorizes a stand-down for an *update*
+    /// (`update.rs`). Deliberately a second file rather than a second meaning
+    /// for the shutdown sentinel: the two carry different payloads, expire on
+    /// different rules, and are cleared by different code paths, and folding
+    /// them together would make every reader guess which kind it was looking
+    /// at. Content is the full UTF-8 path to `update.json`, mirroring the
+    /// shutdown sentinel's protocol exactly so the guardian — which may have
+    /// been spawned before the app knew any paths — can locate and verify the
+    /// window itself. MUST match the guardian crate.
+    fn update_sentinel() -> PathBuf {
+        std::env::temp_dir().join("oathlight.watchdog.update")
+    }
+
+    /// Open an update stand-down: point the sentinel at `update_json` so both
+    /// processes stop resurrecting each other and both binaries unlock. The
+    /// window in that file is what actually authorizes it — this file only says
+    /// where to look, so a hand-created empty sentinel authorizes nothing.
+    pub fn request_update_standdown(update_json: &Path) {
+        let p = update_sentinel();
+        let content = update_json.to_string_lossy().into_owned();
+        if let Err(e) = std::fs::write(&p, content.as_bytes()) {
+            log::warn!("watchdog: could not write update sentinel {p:?}: {e}");
+        } else {
+            log::info!("watchdog: update stand-down authorized via {p:?}");
+        }
+    }
+
+    /// Drop the update sentinel. Called when an update is cancelled, and
+    /// unconditionally from `init_main` — see the call site for why a fresh
+    /// main starting is proof the window is over.
+    pub fn clear_update_standdown() {
+        let _ = std::fs::remove_file(update_sentinel());
+    }
+
+    /// Whether an update stand-down is currently authorized.
+    ///
+    /// Unlike the shutdown sentinel, this behaves identically in debug and
+    /// release: the file is never trusted on its own in either build, because
+    /// the thing that bounds this — the one-minute window in `update.json`,
+    /// re-validated on every read by `update::window_active_at` — is the whole
+    /// safety argument. A stale sentinel left behind by an interrupted update
+    /// therefore stops authorizing anything the moment its window expires, with
+    /// no cleanup required from anyone.
+    fn update_standdown_active() -> bool {
+        match std::fs::read_to_string(update_sentinel()) {
+            Ok(content) if !content.trim().is_empty() => {
+                crate::update::window_active_at(Path::new(content.trim()))
+            }
+            _ => false,
+        }
+    }
+
     /// Authorize a legitimate shutdown: drop the sentinel so both sides stop
     /// resurrecting and let the processes exit. (Hook for the uninstall-friction
     /// flow, and the manual kill switch during testing.)
@@ -450,10 +502,128 @@ mod imp {
         c
     }
 
-    /// Register Oath Light to start at user login. Idempotent — `/f` overwrites,
-    /// so this also self-heals the entry (e.g. if the exe moved) on every launch.
-    /// The launch carries `--autostart` so it comes up minimized in the
-    /// background. Tamper-resistance, like the watchdog: enforced, not a toggle.
+    /// Scheduled-task name for the second, independent autostart registration
+    /// (plan item 4.6). Named plainly on purpose — this is tamper *resistance*,
+    /// not concealment, and a user auditing their own machine should be able to
+    /// see exactly what Oath Light installed.
+    const LOGON_TASK_NAME: &str = "OathLight Autostart";
+
+    /// PowerShell single-quote escaping (double an embedded `'`) — mirrors the
+    /// guardian crate's `ps_quote`.
+    fn ps_quote(s: &str) -> String {
+        format!("'{}'", s.replace('\'', "''"))
+    }
+
+    /// Run a PowerShell one-liner, windowless, and report whether it succeeded.
+    ///
+    /// Used for the logon task because `schtasks.exe` cannot register one from
+    /// an unelevated process — see `register_logon_task`.
+    fn run_powershell(script: &str) -> bool {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                script,
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    /// Second autostart registration, as a per-user logon Scheduled Task
+    /// (plan item 4.6's "double-registration").
+    ///
+    /// Why two: the HKCU Run value is a single registry string that any user —
+    /// or any "startup manager" utility, or Task Manager's own Startup tab —
+    /// can delete in about four seconds, with no elevation and no friction.
+    /// After that, the app simply never comes back on the next boot and the
+    /// watchdog it would have started never runs. A logon task is a second,
+    /// independent path with a completely different UI to find and remove, so
+    /// deleting one leaves the other standing and the next launch re-asserts
+    /// the missing one (both registrations are idempotent and run on every
+    /// startup, so this self-heals).
+    ///
+    /// Honest scope note, so nobody reads more into this than it does: this
+    /// registers a normal ONLOGON task at the default run level, which needs
+    /// no admin rights. It does NOT survive Windows **Safe Mode** — Safe Mode
+    /// starts neither Run-key entries nor ordinary scheduled tasks, and
+    /// covering it would need a service registered under the `SafeBoot` keys,
+    /// which requires elevation. That gap is documented in SECURITY.md rather
+    /// than papered over here.
+    /// Registered through the Task Scheduler COM API (via PowerShell's
+    /// `Register-ScheduledTask`), **not** `schtasks.exe`.
+    ///
+    /// This is the fix for a bug that silently disabled half of 4.6's
+    /// double-registration for the entire life of the feature.
+    /// `schtasks.exe /create` refuses to create ANY task from an unelevated
+    /// process — it fails with `ERROR: Access is denied.` regardless of the
+    /// flags, including with an explicit `/ru <current user> /it`. The app runs
+    /// unelevated in normal operation, so this function's old implementation
+    /// could only ever take its failure branch: the log line said "logon task
+    /// registration failed (Run key still active)" on every single launch, and
+    /// the second registration this feature exists to provide never existed on
+    /// any user's machine. Verified empirically, not inferred: on a stock
+    /// Windows 11 install, `schtasks /create /sc onlogon` is denied unelevated
+    /// while `Register-ScheduledTask` with the same trigger succeeds.
+    ///
+    /// The COM API has no such restriction for a task scoped to the *current*
+    /// user, which is exactly the task we want. `-Force` overwrites, so this
+    /// stays idempotent and self-healing across an app move or upgrade, just as
+    /// the old `/f` intended.
+    ///
+    /// The battery settings are deliberate: Task Scheduler's defaults refuse to
+    /// start a task on battery power and stop one when a laptop unplugs, which
+    /// on exactly the machines that matter most would have made this autostart
+    /// path quietly conditional on the charger being in.
+    fn register_logon_task(exe: &std::path::Path) {
+        let script = format!(
+            "$a = New-ScheduledTaskAction -Execute {exe} -Argument {arg}; \
+             $t = New-ScheduledTaskTrigger -AtLogOn -User \"$env:USERDOMAIN\\$env:USERNAME\"; \
+             $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries \
+                  -DontStopIfGoingOnBatteries -StartWhenAvailable \
+                  -ExecutionTimeLimit ([TimeSpan]::Zero); \
+             Register-ScheduledTask -TaskName {task} -Action $a -Trigger $t \
+                  -Settings $s -Force | Out-Null",
+            exe = ps_quote(&exe.display().to_string()),
+            arg = ps_quote(AUTOSTART_ARG),
+            task = ps_quote(LOGON_TASK_NAME),
+        );
+        if run_powershell(&script) {
+            log::info!("autostart logon task registered: {LOGON_TASK_NAME}");
+        } else {
+            // Not fatal: the Run key is still registered, and a machine with
+            // the Task Scheduler service disabled is a legitimate (if odd)
+            // configuration. One path is the baseline, two is the goal.
+            log::warn!("autostart logon task registration failed (Run key still active)");
+        }
+    }
+
+    /// Remove the logon Scheduled Task. Silent about failure — being absent is
+    /// the desired end state, and "it wasn't there" is not an error.
+    ///
+    /// Uses the COM API for the same reason `register_logon_task` does: a task
+    /// registered by an unelevated process is removable by one, but
+    /// `schtasks.exe /delete` inherits the same access denial as `/create`.
+    fn unregister_logon_task() {
+        let script = format!(
+            "Unregister-ScheduledTask -TaskName {task} -Confirm:$false \
+             -ErrorAction SilentlyContinue",
+            task = ps_quote(LOGON_TASK_NAME),
+        );
+        let _ = run_powershell(&script);
+    }
+
+    /// Register Oath Light to start at user login, through BOTH the HKCU Run
+    /// key and a logon Scheduled Task (4.6). Idempotent — `/f` overwrites in
+    /// both cases, so this also self-heals either entry (a moved exe, or one
+    /// of the two deleted by hand) on every launch. The launch carries
+    /// `--autostart` so it comes up minimized in the background.
+    /// Tamper-resistance, like the watchdog: enforced, not a toggle.
     pub fn register_autostart() {
         let exe = match std::env::current_exe() {
             Ok(p) => p,
@@ -473,12 +643,17 @@ mod imp {
         } else {
             log::warn!("autostart registration failed");
         }
+        register_logon_task(&exe);
     }
 
-    /// Remove the login autostart entry (called from the uninstall flow).
+    /// Remove BOTH login autostart registrations (called from the uninstall
+    /// flow). Removal has to clear both, or an uninstalled app would come back
+    /// at the next logon through whichever one was missed — which would read
+    /// as malware, not tamper-resistance.
     pub fn unregister_autostart() {
         let _ = reg().args(["delete", RUN_KEY, "/v", RUN_VALUE, "/f"]).status();
-        log::info!("autostart entry removed");
+        unregister_logon_task();
+        log::info!("autostart entries removed (Run key + logon task)");
     }
 
     /// True if this process was started by the login autostart entry, so the
@@ -504,6 +679,15 @@ mod imp {
             if shutdown_requested() {
                 log::info!("watchdog: shutdown requested — main standing down");
                 break;
+            }
+            // An update window stands the guard down too, but temporarily: keep
+            // polling rather than breaking, so if the window expires with this
+            // process somehow still alive (the user cancelled, or the installer
+            // was never run) guarding simply resumes on the next tick instead of
+            // being off for the rest of the session.
+            if update_standdown_active() {
+                std::thread::sleep(POLL);
+                continue;
             }
 
             if !role_alive(GUARDIAN_MUTEX) && last_spawn.elapsed() >= SPAWN_COOLDOWN {
@@ -603,6 +787,14 @@ mod imp {
 
         clear_stale_sentinel();
 
+        // An update stand-down is over the moment a main instance is up and
+        // holding the mutex — either the installer finished and launched the
+        // new build, or the recovery task brought the old one back. Clearing it
+        // HERE rather than in `setup()` is load-bearing: `guard_loop` starts on
+        // the next line and would otherwise spend the rest of the window
+        // declining to guard, and `setup()` runs too late to prevent that.
+        clear_update_standdown();
+
         std::thread::spawn(guard_loop);
     }
 
@@ -661,8 +853,9 @@ mod imp {
 
 #[cfg(windows)]
 pub use imp::{
-    enabled, init_main, launched_at_login, register_autostart, request_shutdown,
-    set_uninstall_json_path, start_show_listener, unregister_autostart,
+    clear_update_standdown, enabled, init_main, launched_at_login, register_autostart,
+    request_shutdown, request_update_standdown, set_uninstall_json_path, start_show_listener,
+    unregister_autostart,
 };
 
 // ---- Non-Windows: graceful no-ops (the app is Windows-first; see master plan).
@@ -675,6 +868,10 @@ pub fn enabled() -> bool {
 pub fn init_main() {}
 #[cfg(not(windows))]
 pub fn request_shutdown() {}
+#[cfg(not(windows))]
+pub fn request_update_standdown(_update_json: &std::path::Path) {}
+#[cfg(not(windows))]
+pub fn clear_update_standdown() {}
 #[cfg(not(windows))]
 pub fn set_uninstall_json_path(_path: std::path::PathBuf) {}
 #[cfg(not(windows))]

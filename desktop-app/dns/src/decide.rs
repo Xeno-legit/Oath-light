@@ -8,7 +8,8 @@
 //!   4. Hostname keyword layer — Block.
 //!   5. Custom user domains (loaded from `custom_domains.json`, refreshed on
 //!      a slow timer) — Block.
-//!   otherwise Allow.
+//!
+//! Otherwise Allow.
 //!
 //! This is a coarse whole-domain backstop for surfaces the extension can't
 //! reach (Tor, portable browsers, Electron apps) — see the plan's Part B

@@ -1,10 +1,11 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-style="aurora">
+<html lang="en" data-theme="dark">
 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Oath Light</title>
+  <link rel="stylesheet" href="popup_assets/tokens.css">
   <link rel="stylesheet" href="popup_assets/popup.css">
   <style>
     /* Extension popup: render the panel directly (no faux browser chrome). */
@@ -20,11 +21,10 @@
 
 <body>
   <div class="popup" id="popup">
-    <div class="bg">
-      <div class="bg-orb o1"></div>
-      <div class="bg-orb o2"></div>
-      <div class="bg-orb o3"></div>
-      <div class="bg-veil"></div>
+    <!-- Static ground. The popup takes grain only — the patterned looks are
+         sized for a full window and read as noise at 380px wide. -->
+    <div class="bg" aria-hidden="true">
+      <i class="bg-grain"></i>
     </div>
 
     <div class="popup-inner">
@@ -40,9 +40,12 @@
       <!-- protection status (always on — not a toggle) -->
       <div class="protect" role="status">
         <span class="protect-knob" aria-hidden="true"></span>
+        <!-- Voice-bound copy (UX Direction §2): voice-sync.js repaints every
+             `data-ol-str` node on load and whenever the voice/Serious Mode
+             flips. Inline text is the no-JS fallback. -->
         <span class="protect-label">
-          <b>Protection On</b>
-          <span>Actively filtering this browser</span>
+          <b data-ol-str="popup.protection_on">Protection On</b>
+          <span data-ol-str="popup.protection_sub">Actively filtering this browser</span>
         </span>
         <span class="protect-spacer" aria-hidden="true"></span>
       </div>
@@ -52,12 +55,12 @@
         <div class="stat">
           <div class="stat-ico"><svg class="ico" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z" /><path d="M9 12l2 2 4-4" /></svg></div>
           <div class="stat-num" id="statBlocked">0</div>
-          <div class="stat-lbl">Sites Blocked</div>
+          <div class="stat-lbl" data-ol-str="popup.stat_blocked_label">Sites Blocked</div>
         </div>
         <div class="stat">
           <div class="stat-ico"><svg class="ico" viewBox="0 0 24 24"><path d="M12 3c1 3-1.5 4.5-1.5 7a1.5 1.5 0 003 0c0-.8-.3-1.4-.3-1.4 2 1.4 3.3 3.6 3.3 6.1a6.5 6.5 0 11-13 0C3.5 11 7 9 7.5 5.5 9.5 7 10 4.5 12 3z" /></svg></div>
           <div class="stat-num" id="statStreak">0</div>
-          <div class="stat-lbl">Day Streak</div>
+          <div class="stat-lbl" data-ol-str="popup.stat_streak_label">Day Streak</div>
         </div>
       </div>
 
@@ -72,9 +75,10 @@
 
       <!-- block input -->
       <div class="block-row">
-        <input class="input" id="blockInput" placeholder="Enter URL to block" autocomplete="off" spellcheck="false">
+        <input class="input" id="blockInput" placeholder="Enter URL to block" autocomplete="off" spellcheck="false"
+               data-ol-str="popup.block_input_placeholder" data-ol-str-attr="placeholder">
         <button class="btn btn-primary" id="blockBtn">
-          <svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg> Block
+          <svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg> <span data-ol-str="popup.block_button">Block</span>
         </button>
       </div>
       <div id="blockMsg"></div>
@@ -82,7 +86,7 @@
       <!-- My Blocklist — opens the full manager page -->
       <button class="blocklist-btn" id="openManagerRow">
         <svg class="ico bl-ico" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12" /><circle cx="4" cy="6" r="1.2" fill="currentColor" stroke="none" /><circle cx="4" cy="12" r="1.2" fill="currentColor" stroke="none" /><circle cx="4" cy="18" r="1.2" fill="currentColor" stroke="none" /></svg>
-        My Blocklist
+        <span data-ol-str="popup.open_manager">My Blocklist</span>
         <svg class="ico bl-chev" viewBox="0 0 24 24" style="margin-left:auto"><path d="M9 6l6 6-6 6" /></svg>
       </button>
 
@@ -95,6 +99,9 @@
   </div>
 
   <script src="theme-sync.js"></script>
+  <script src="strings.js"></script>
+  <script src="locales/ar.js"></script>
+  <script src="voice-sync.js"></script>
   <script src="popup.js"></script>
 </body>
 

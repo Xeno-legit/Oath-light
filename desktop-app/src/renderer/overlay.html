@@ -17,6 +17,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Oath Light</title>
+<link rel="stylesheet" href="tokens.css">
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -104,6 +105,18 @@
   }
   .sos-btn:hover { border-color: #a5a6c9; color: #fff; }
 
+  /* False-positive report (plan 2.4) — quieter than every other control on
+     this screen on purpose. */
+  .fp-btn {
+    appearance: none; border: none; cursor: pointer;
+    display: block; margin: 14px auto 0; padding: 6px 10px;
+    background: transparent; color: #6f7093;
+    font-size: 11.5px; font-weight: 600; text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .fp-btn:hover { color: #a5a6c9; }
+  .fp-btn:disabled { cursor: default; text-decoration: none; color: #56576f; }
+
   .ground-count {
     font-size: 56px; font-weight: 800; line-height: 1; color: #fff; margin-bottom: 4px;
   }
@@ -131,6 +144,11 @@
       <button class="dismiss-btn" id="dismissBtn" disabled>I'm okay — dismiss (30s)</button>
       <div class="dismiss-note" id="dismissNote">You've made it through hard moments before. This one's no different.</div>
       <button class="sos-btn" id="sosBtn">I need help right now</button>
+      <!-- False-positive feedback (plan 2.4). Deliberately understated and
+           placed last: on the occasions the model IS right, this must not read
+           as an escape hatch. Not dwell-gated — being wrongly interrupted and
+           then made to wait to say so would be the worst of both. -->
+      <button class="fp-btn" id="fpBtn">This was wrong — nothing was on screen</button>
       <div class="err" id="err" style="display:none"></div>
     </div>
   </div>
@@ -165,6 +183,35 @@
     }
     render();
   }, 1000);
+
+  // ── False-positive report (plan 2.4) ──────────────────────────────────────
+  // Records the report against the scores the BACKEND stashed when it
+  // escalated — this page sends nothing about what was on screen, and could
+  // not do so honestly if it wanted to. The backend returns the newly-tuned
+  // dwell, which shortens this overlay's own remaining countdown: the effect
+  // is immediate and visible, rather than a promise about future overlays.
+  var fpBtn = document.getElementById('fpBtn');
+  fpBtn.addEventListener('click', function () {
+    var T = window.__TAURI__;
+    if (!T || !T.core) return;
+    fpBtn.disabled = true;
+    T.core.invoke('report_false_positive').then(function (newDwell) {
+      fpBtn.textContent = 'Logged. Thank you — you can review this in Settings.';
+      var d = Number(newDwell);
+      if (isFinite(d) && d > 0 && d < DWELL_SECS) {
+        // Re-derive what's left of the pause against the shortened dwell.
+        var elapsed = DWELL_SECS - remaining;
+        DWELL_SECS = d;
+        remaining = Math.max(0, d - elapsed);
+        if (remaining === 0) clearInterval(timer);
+        render();
+      }
+    }).catch(function (e) {
+      fpBtn.disabled = false;
+      err.style.display = 'block';
+      err.textContent = String((e && e.message) || e || 'Could not record that.');
+    });
+  });
 
   // Box-breathing phase label, synced to the CSS ring's 16s cycle
   // (4s in / 4s hold / 4s out / 4s hold).

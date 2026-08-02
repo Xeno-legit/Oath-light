@@ -88,8 +88,8 @@ pub fn parse_query(buf: &[u8]) -> Result<ParsedQuery, ParseError> {
             pos += 1;
             break; // root: terminates the name (possibly with zero labels).
         }
-        if len & 0xC0 != 0 {
-            // Top two bits set -> a compression pointer, invalid here.
+        if len & 0xC0 == 0xC0 {
+            // Both top two bits set -> a compression pointer, invalid here.
             return Err(ParseError::CompressionPointer);
         }
         if len > MAX_LABEL_LEN {

@@ -41,11 +41,22 @@ fn default_false() -> bool {
 /// a quick, honest-effort wall-clock estimate without pulling in the whole
 /// lockdown module.
 ///
-/// TODO(4.4 v2): schedule-from-vulnerable-hours is OUT of v1 scope. The
-/// reminder schedule already carries vulnerable-hours windows in
-/// `ext_blocking` (pushed by `pages-blocking.jsx`'s `vulnerable` field) — a
-/// later version would let one of those windows escalate into an automatic
-/// lockdown instead of just a reminder popup. Not wired here.
+/// Schedule-from-vulnerable-hours (4.4 v2, now wired): the reminder schedule
+/// already carries vulnerable-hours windows in `ext_blocking` (pushed by
+/// `pages-blocking.jsx`'s `vulnerable` field) — when `escalate_vulnerable_hours`
+/// is on, the extension reports the active window over native messaging (the
+/// `"vulnerable_window_active"` arm in `lib.rs` — the desktop has no timezone
+/// database, so the extension owns the local-time window math) and the desktop
+/// starts a Lockdown for the remainder of that window instead of just firing
+/// a reminder popup.
+/// Turning this ON is a strengthening (instant, same as any other lockdown
+/// start). Turning it OFF is the weakening half of the asymmetry: it goes
+/// through the ordinary friction delay under the `"lockdown.escalation_disable"`
+/// action id (see `set_lockdown_escalation` in lib.rs), exactly like
+/// `dns.disable`/`lockdown.cancel` — so a weak moment can't just flip this off
+/// to dodge the next window. It never touches an ALREADY-active lockdown
+/// (started or not by this schedule) — that still only ever ends via
+/// `lockdown.cancel` or natural expiry, same as always.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LockdownV1 {
     /// Unix seconds a currently-active lockdown is expected to end at —
@@ -56,6 +67,11 @@ pub struct LockdownV1 {
     /// `lockdown.rs`.
     #[serde(default)]
     pub frozen: bool,
+    /// Opt-in (default OFF): let the configured vulnerable-hours window
+    /// escalate to a (non-frozen) Lockdown automatically instead of only
+    /// showing reminder pop-ups. See the struct doc above for the asymmetry.
+    #[serde(default = "default_false")]
+    pub escalate_vulnerable_hours: bool,
 }
 
 // ============================================================================
@@ -65,11 +81,13 @@ pub struct LockdownV1 {
 /// Which discrete events the trusted contact is notified about. Solo-first:
 /// this whole struct only exists at all when `SettingsV1.trusted_contact` is
 /// `Some` — a solo user with no contact configured never sees or triggers any
-/// of this. `ext_removed` / `block_burst` are deliberately NOT here yet —
-/// TODO(5.2 v2): wire those once the extension-missing debounce and the
-/// vulnerable-hours block-burst detector both have a settled shape; v1 only
-/// covers the three friction-adjacent events that already have a single,
-/// unambiguous request site.
+/// of this. `ext_removed` (5.2 v2, now wired): fires once a browser has sat in
+/// `extension_missing` for longer than `EXT_MISSING_NOTIFY_AFTER_MS` while
+/// the uninstall guard is on — the existing `extension_missing` edge tracker
+/// in `start_monitor` (lib.rs) is the debounce source. `block_burst` (also now
+/// wired): fires once `BLOCK_BURST_THRESHOLD` blocks land within
+/// `BLOCK_BURST_WINDOW_MS` — see the `stats_sync`/`stats_update` handler in
+/// `handle_extension_message`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotifyEventsV1 {
     #[serde(default = "default_true")]
@@ -78,11 +96,28 @@ pub struct NotifyEventsV1 {
     pub lockdown_cancelled: bool,
     #[serde(default = "default_true")]
     pub password_removal_requested: bool,
+    #[serde(default = "default_true")]
+    pub ext_removed: bool,
+    #[serde(default = "default_true")]
+    pub block_burst: bool,
+    /// Serious Mode disable requested (UX Direction §1). Same shape as every
+    /// other event here: the contact learns only that the request happened,
+    /// and it fires at REQUEST time — before the waiting period starts, so a
+    /// weak-moment request can't be quietly filed and forgotten.
+    #[serde(default = "default_true")]
+    pub serious_disable_requested: bool,
 }
 
 impl Default for NotifyEventsV1 {
     fn default() -> Self {
-        Self { uninstall_requested: true, lockdown_cancelled: true, password_removal_requested: true }
+        Self {
+            uninstall_requested: true,
+            lockdown_cancelled: true,
+            password_removal_requested: true,
+            ext_removed: true,
+            block_burst: true,
+            serious_disable_requested: true,
+        }
     }
 }
 
@@ -104,6 +139,56 @@ pub struct TrustedContactV1 {
     pub last_heartbeat: u64,
 }
 
+// ============================================================================
+// AI mentor (optional, opt-in) — see mentor.rs
+// ============================================================================
+
+/// Config for the optional AI mentor. Every default here is the "off,
+/// nothing configured" state, and that is the whole point: this is the only
+/// feature in the app that sends anything the user types off the device, so
+/// it must be inert until they explicitly turn it on.
+///
+/// Note this is NOT a protection, and so it is deliberately **outside** the
+/// friction rule: turning it off is instant. The asymmetry exists to stop
+/// someone weakening their own filter in a bad moment — applying it to a
+/// chat feature would mean a 24-hour wait to stop sending your words to a
+/// third party, which is the rule pointed exactly backwards.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MentorV1 {
+    /// Off until explicitly enabled. Nothing is sent anywhere while false.
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    /// Which provider the key belongs to — a `mentor::PROVIDERS` id such as
+    /// `"anthropic"`, `"openai"`, `"openrouter"` or `"custom"`. Empty means the
+    /// default (Anthropic), which is what every profile written before the
+    /// mentor became multi-provider will deserialize to.
+    ///
+    /// This exists because the mentor was hardwired to one vendor: the settings
+    /// field was literally named for Anthropic and the request builder could
+    /// only speak that wire format. "Bring your own key" is a much weaker
+    /// promise if it means "bring your own key, from this one company".
+    #[serde(default)]
+    pub provider: String,
+    /// Endpoint override. Required for `provider = "custom"` (a local Ollama /
+    /// LM Studio / vLLM server, or any OpenAI-compatible gateway); ignored for
+    /// the built-in providers, which carry their own base URL.
+    #[serde(default)]
+    pub base_url: String,
+    /// The user's own API key, plaintext, same as the SMTP app-password in
+    /// `notify.rs`. Plaintext because the alternative on a machine where the
+    /// app must read it unattended is obfuscation dressed up as encryption —
+    /// the UI states this outright rather than implying a vault that does not
+    /// exist. Never sent to the renderer: `mentor_config` reports only whether
+    /// a key is present.
+    #[serde(default)]
+    pub api_key: String,
+    /// Empty = the selected provider's own default model. Overridable so
+    /// someone on a tighter budget can point it at a cheaper model without a
+    /// rebuild.
+    #[serde(default)]
+    pub model: String,
+}
+
 /// Persisted shape, written to `<app_data_dir>/settings.json`. Every field
 /// has a `#[serde(default = ...)]` so an old file on disk — from before a
 /// field existed — still deserializes cleanly and simply gains the field's
@@ -116,6 +201,11 @@ pub struct SettingsV1 {
     /// The "uninstall guard" / reinstall-enforcement switch. Mirrors
     /// `AppState.guard_enabled`; this is the persisted copy that survives a
     /// restart, `AppState`'s is the live one the monitor thread reads.
+    ///
+    /// **Not user-controllable.** Kept as a field because the monitor, the
+    /// uninstall flow and the extension protocol all read it, but `load`
+    /// forces it true and the command that used to clear it now refuses —
+    /// see `force_mandatory`.
     #[serde(default = "default_true")]
     pub guard_enabled: bool,
     /// Whether the AI screen monitor should auto-start with the app.
@@ -130,13 +220,36 @@ pub struct SettingsV1 {
     /// leaving it unenforced. Also wired up by plan item 1.3.
     #[serde(default = "default_false")]
     pub block_unknown_browsers: bool,
-    /// System-level DNS filtering (plan item 1.1). Opt-in for v1 — default
-    /// **false**: it takes over every adapter's DNS + needs admin, so it is
-    /// never turned on without an explicit user action. Enabling is a
-    /// strengthening (instant); disabling is a friction-gated weakening
-    /// (`dns.disable`), same asymmetry as every other protection here.
-    #[serde(default = "default_false")]
+    /// System-level DNS filtering (plan item 1.1). **On, and not
+    /// user-controllable** — it is the only layer that reaches past the
+    /// browser, and a blocker that ships its whole-machine coverage switched
+    /// off ships mostly-off.
+    ///
+    /// This was opt-in through v1 on the reasoning that taking over adapter
+    /// DNS needs admin and shouldn't happen unasked. That traded a protection
+    /// for a permission prompt: the takeover half is the only part that needs
+    /// elevation, it fails cleanly and reversibly when refused, and the
+    /// resolver keeps running either way. So the intent is always on; whether
+    /// the machine currently *lets* it take over is a status the UI reports
+    /// (`DnsStatus::taken_over`), not a setting.
+    #[serde(default = "default_true")]
     pub dns_filter_enabled: bool,
+    /// Refuse to let a browser that **cannot be force-installed** run without the
+    /// extension: it is killed on sight, and the way back is a supervised restore
+    /// window requested from the app (see `browser_lock`). Today that is Edge
+    /// alone, because Microsoft won't force-install from the Chrome Web Store on
+    /// a consumer PC — leaving it as the one browser where staying protected is
+    /// entirely voluntary.
+    ///
+    /// **On, and not user-controllable.** It shipped opt-in and default-false
+    /// because it kills a process the user may be mid-sentence in. That was the
+    /// wrong call: a browser running without the extension is half this app's
+    /// coverage gone, and "would you like your blocker to keep working?" is not
+    /// a question worth asking someone at 2am. The recovery path (a 20s restore
+    /// window, asked for as many times as it takes) is what makes the lock
+    /// survivable — not an off switch.
+    #[serde(default = "default_true")]
+    pub lock_unverified_browsers: bool,
     /// Lockdown Mode (4.4) display-only view — see `LockdownV1`'s doc
     /// comment. The clock-tamper-immune source of truth lives in
     /// `lockdown::LockdownStore` (`lockdown.json`), not here.
@@ -146,6 +259,30 @@ pub struct SettingsV1 {
     /// 2) — `None` by default and never nagged; see `TrustedContactV1`.
     #[serde(default)]
     pub trusted_contact: Option<TrustedContactV1>,
+    /// Serious Mode (UX Direction §1) — the single toggle that flips the whole
+    /// app to its strictest configuration and its hard voice, with **no
+    /// per-feature exceptions** (that's the point: an all-or-nothing switch
+    /// can't be negotiated with piecemeal at 2am).
+    ///
+    /// Backend-owned rather than a renderer preference for exactly one reason:
+    /// turning it OFF is a weakening, and weakenings live in Rust behind
+    /// `friction.rs` (action id `"serious.disable"`, double the ordinary
+    /// cool-off — see `friction::delay_for`). ON is instant. The renderer
+    /// only ever *mirrors* this value; it can never set it false directly.
+    #[serde(default = "default_false")]
+    pub serious_mode: bool,
+    /// Grayscale the whole display during the configured vulnerable-hours
+    /// window (plan item 5.6). Opt-in, default off.
+    ///
+    /// Unlike every protection flag above, this one is instant in BOTH
+    /// directions — it is an environment nudge, not a protection, and locking
+    /// someone out of their own display colour for 24 hours would be applying
+    /// the friction rule where it does no good. See grayscale.rs.
+    #[serde(default = "default_false")]
+    pub grayscale_vulnerable_hours: bool,
+    /// Optional AI mentor (mentor.rs) — off, and with no key, by default.
+    #[serde(default)]
+    pub mentor: MentorV1,
 }
 
 impl Default for SettingsV1 {
@@ -156,9 +293,13 @@ impl Default for SettingsV1 {
             monitor_enabled: false,
             blocked_processes: Vec::new(),
             block_unknown_browsers: false,
-            dns_filter_enabled: false,
+            dns_filter_enabled: true,
+            lock_unverified_browsers: true,
             lockdown: LockdownV1::default(),
             trusted_contact: None,
+            serious_mode: false,
+            grayscale_vulnerable_hours: false,
+            mentor: MentorV1::default(),
         }
     }
 }
@@ -170,15 +311,34 @@ pub struct SettingsState {
     inner: Mutex<SettingsV1>,
 }
 
+/// Re-assert every protection that is no longer the user's to switch off.
+///
+/// Three fields used to be toggles and are now floors: the uninstall guard, the
+/// browser lock and the system DNS filter. Making the *commands* refuse to clear
+/// them is not enough on its own — `settings.json` is a plain file in the user's
+/// own profile, and a build that only defended the UI path would be defeated by
+/// Notepad. Every load re-applies the floor, so an old file written when these
+/// were opt-in (or an edited one) comes up protected rather than carrying its
+/// old answer forward.
+///
+/// Deliberately silent: this is not a migration the user needs told about, and
+/// "your setting was overridden" is an invitation to go looking for where.
+fn force_mandatory(s: &mut SettingsV1) {
+    s.guard_enabled = true;
+    s.lock_unverified_browsers = true;
+    s.dns_filter_enabled = true;
+}
+
 impl SettingsState {
     /// Load `<app_data_dir>/settings.json` (defaults on absence or a parse
     /// failure — never blocks startup on a corrupt file).
     pub fn load(app_data_dir: &std::path::Path) -> Self {
         let path = app_data_dir.join("settings.json");
-        let inner = std::fs::read_to_string(&path)
+        let mut inner = std::fs::read_to_string(&path)
             .ok()
             .and_then(|s| serde_json::from_str::<SettingsV1>(&s).ok())
             .unwrap_or_default();
+        force_mandatory(&mut inner);
         Self {
             path,
             inner: Mutex::new(inner),
@@ -200,9 +360,18 @@ impl SettingsState {
 
     /// Mutate the settings and persist the result. `f` runs under the lock,
     /// so keep it cheap — no I/O, no blocking, inside the closure.
+    ///
+    /// The mandatory floor is re-applied after `f`, so no caller anywhere can
+    /// clear a protection that is no longer optional — including a future one
+    /// written by someone who never read `force_mandatory`. Teardown paths that
+    /// genuinely must stop the DNS resolver (uninstall, the update window) act
+    /// on `DnsFilterState` directly and do not go through here, which is the
+    /// distinction that makes this safe: this flag is the *intent*, not the
+    /// running state.
     pub fn update(&self, f: impl FnOnce(&mut SettingsV1)) {
         let mut s = self.inner.lock().unwrap();
         f(&mut s);
+        force_mandatory(&mut s);
         self.save(&s);
     }
 }

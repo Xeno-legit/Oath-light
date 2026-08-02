@@ -51,10 +51,27 @@ fn main() {
     /// cool-off is unmet for a legitimately-completed uninstall and keep
     /// resurrecting the app, fighting the self-delete worker forever. Keeping
     /// this value less-than-or-equal to the app's guarantees a real, completed
-    /// uninstall is always honored. Kept equal, at the intentional 10-second
-    /// testing value the product owner chose in `uninstall.rs` — for production
-    /// set BOTH back to `24 * 60 * 60`.
-    const COOLOFF_DELAY_SECS: u64 = 10; // ← keep in sync w/ uninstall.rs
+    /// uninstall is always honored.
+    ///
+    /// Now at the production value, matching `uninstall.rs` (which finished its
+    /// own move off the 10-second testing value). Equal is the right setting,
+    /// not merely a safe one: while this side was laxer, a hand-crafted
+    /// sentinel plus a backdated `uninstall.json` could satisfy the guardian
+    /// but not the app, and the two would sit there spawning and exiting a
+    /// guardian at each other. Not a bypass — the app never stops resurrecting
+    /// — but a pointless fight, and one that only existed because the constants
+    /// disagreed. That is also why this constant must move in the *same commit*
+    /// as the app's, in both directions: the 2026-07-31 gate test dropped both
+    /// to 10s together and raised both back together.
+    const COOLOFF_DELAY_SECS: u64 = 24 * 60 * 60; // ← keep in sync w/ uninstall.rs
+
+    /// Longest update window this side will honor. MUST be greater than or
+    /// equal to `update::WINDOW_SECS` in the app — the opposite direction to
+    /// `COOLOFF_DELAY_SECS` above, and for the mirror-image reason: this value
+    /// is a CAP on a window the app issues, so a guardian holding a smaller cap
+    /// would reject a legitimately-issued window and keep resurrecting the app
+    /// straight through the update it was told to allow. Kept equal.
+    const UPDATE_WINDOW_SECS: u64 = 60; // ← keep in sync w/ update.rs
 
     const POLL: Duration = Duration::from_millis(1000);
     const SPAWN_COOLDOWN: Duration = Duration::from_secs(3);
@@ -146,17 +163,21 @@ fn main() {
         (main_exe, uninstall_json)
     }
 
-    /// Hand-parsed reader for `uninstall.json`'s `requested_at` field. This
+    /// Hand-parsed reader for a top-level `"<key>": <unsigned int>` field. This
     /// crate carries no JSON dependency by design (see Cargo.toml — pure std +
-    /// a handful of kernel32 calls, kept tiny on purpose), and the on-disk
-    /// shape (`{"requested_at": <unix-secs|null>}`, from `serde_json` in
-    /// uninstall.rs) is trivial and stable enough that a small scanner beats
-    /// pulling in serde just for this one read. MUST track the `Persisted`
-    /// struct in uninstall.rs.
-    fn read_requested_at(path: &Path) -> Option<u64> {
+    /// a handful of kernel32 calls, kept tiny on purpose), and the two files it
+    /// reads (`uninstall.json`'s `requested_at`, `update.json`'s `opened_at` /
+    /// `expires_at`, both written by `serde_json` on the app side) are trivial
+    /// and stable enough that a small scanner beats pulling in serde for three
+    /// numbers. MUST track the `Persisted` struct in uninstall.rs and the
+    /// `UpdateWindow` struct in update.rs.
+    ///
+    /// `null` and a missing key both read as `None` — callers treat that as
+    /// "unauthorized", which is the safe direction for every use here.
+    fn read_u64_field(path: &Path, key: &str) -> Option<u64> {
         let s = std::fs::read_to_string(path).ok()?;
-        let idx = s.find("requested_at")?;
-        let after = &s[idx + "requested_at".len()..];
+        let idx = s.find(key)?;
+        let after = &s[idx + key.len()..];
         let colon = after.find(':')?;
         let rest = after[colon + 1..].trim_start();
         let end = rest
@@ -170,18 +191,21 @@ fn main() {
         }
     }
 
+    fn now_unix() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    }
+
     /// True if the uninstall cool-off has actually elapsed, per the
     /// `uninstall.json` path the spawner gave us. A missing arg, or an
     /// unreadable/unparsable/still-pending file, all read as "not elapsed" —
     /// default-deny. See `shutdown_requested` for why that's the safe default.
     fn cooloff_elapsed(uninstall_json: Option<&Path>) -> bool {
         let Some(path) = uninstall_json else { return false };
-        let Some(requested_at) = read_requested_at(path) else { return false };
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        now.saturating_sub(requested_at) >= COOLOFF_DELAY_SECS
+        let Some(requested_at) = read_u64_field(path, "requested_at") else { return false };
+        now_unix().saturating_sub(requested_at) >= COOLOFF_DELAY_SECS
     }
 
     // ---- Shutdown sentinel (kill switch) ------------------------------------
@@ -251,6 +275,55 @@ fn main() {
             Some(p) => cooloff_elapsed(Some(p)),
             None => cooloff_elapsed(sentinel_verify_path().as_deref()),
         }
+    }
+
+    // ---- Update stand-down (see update.rs) ----------------------------------
+    //
+    // The second, temporary reason to stop resurrecting: an update is being
+    // installed, and neither binary can be replaced while it is running. Same
+    // sentinel protocol as above — a file in %TEMP% whose content is the full
+    // path to the JSON that actually carries the authorization — but a
+    // different file, a different payload, and no debug/release split. This one
+    // is never trusted on its own in either build, because what bounds it is
+    // the one-minute window inside `update.json`, and that is cheap enough
+    // to re-verify on every poll.
+    //
+    // MUST match `watchdog.rs`'s `update_sentinel` / `update_standdown_active`.
+    const UPDATE_SENTINEL_NAME: &str = "oathlight.watchdog.update";
+
+    /// The `update.json` path to verify: the sentinel's own content, falling
+    /// back to a sibling of the `uninstall.json` we were spawned with. Either
+    /// route works for either kind of guardian, which is the point — the first
+    /// guardian of a session never receives `--uninstall-json`, and one
+    /// respawned later may see a sentinel it did not watch being written.
+    fn update_json_path(uninstall_json: Option<&Path>) -> Option<PathBuf> {
+        let from_sentinel = std::fs::read_to_string(std::env::temp_dir().join(UPDATE_SENTINEL_NAME))
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        from_sentinel.or_else(|| {
+            uninstall_json.and_then(|p| p.parent().map(|d| d.join("update.json")))
+        })
+    }
+
+    /// Whether an update window is open right now.
+    ///
+    /// Mirrors `update::window_active_at` exactly, including the duration cap —
+    /// which is re-applied HERE rather than trusted from the file, so a
+    /// hand-edited `expires_at` cannot buy a longer stand-down than the app
+    /// would ever have issued. See update.rs's module doc for the full posture.
+    fn update_standdown_active(uninstall_json: Option<&Path>) -> bool {
+        if !std::env::temp_dir().join(UPDATE_SENTINEL_NAME).exists() {
+            return false;
+        }
+        let Some(path) = update_json_path(uninstall_json) else { return false };
+        let Some(opened_at) = read_u64_field(&path, "opened_at") else { return false };
+        let Some(expires_at) = read_u64_field(&path, "expires_at") else { return false };
+        let now = now_unix();
+        opened_at <= now
+            && now < expires_at
+            && expires_at.saturating_sub(opened_at) <= UPDATE_WINDOW_SECS
     }
 
     fn relaunch_main(main_exe: &Path) {
@@ -542,6 +615,15 @@ fn main() {
         return;
     }
 
+    // Same for an open update window. Exiting immediately matters here: the
+    // installer is waiting to overwrite this very executable, and a guardian
+    // that lingers is the lock that makes the update fail.
+    if update_standdown_active(uninstall_json.as_deref()) {
+        wlog("update window open at start - exiting so the installer can replace us");
+        restore_dns_best_effort(uninstall_json.as_deref());
+        return;
+    }
+
     // Single-instance: bow out if another guardian already holds the mutex.
     let _held = match try_hold(GUARDIAN_MUTEX) {
         // Intentionally leaked: never CloseHandle, so the mutex (our liveness
@@ -563,6 +645,20 @@ fn main() {
             // Last act before standing down: restore adapter DNS if the
             // filter was ever taken over, so a completed uninstall never
             // leaves the machine pointing at a resolver that's gone.
+            restore_dns_best_effort(uninstall_json.as_deref());
+            return;
+        }
+
+        // An update window opened while we were guarding: get out of the
+        // installer's way. Exiting rather than idling is deliberate — unlike
+        // the main app (which keeps polling so it can resume if the window
+        // lapses), this process IS one of the files being replaced, so staying
+        // alive to be helpful is the one thing that guarantees failure. The
+        // recovery task `begin_update` scheduled covers the case where the
+        // update never happens; a new guardian is spawned by whichever main
+        // comes up next.
+        if update_standdown_active(uninstall_json.as_deref()) {
+            wlog("update window opened - exiting so the installer can replace us");
             restore_dns_best_effort(uninstall_json.as_deref());
             return;
         }

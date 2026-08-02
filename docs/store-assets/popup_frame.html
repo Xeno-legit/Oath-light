@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden}
+  body{
+    display:flex;align-items:center;justify-content:center;
+    background:
+      radial-gradient(900px 600px at 15% 10%, rgba(168,120,255,.22), transparent 60%),
+      radial-gradient(800px 600px at 85% 90%, rgba(90,140,255,.18), transparent 60%),
+      #17141d;
+  }
+  .frame{
+    border-radius:18px;overflow:hidden;
+    box-shadow:0 30px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.08);
+  }
+  iframe{display:block;width:380px;height:590px;border:0;background:#17141d}
+</style>
+</head>
+<body>
+  <div class="frame"><iframe src="/extension/popup.html" scrolling="no"></iframe></div>
+</body>
+</html>

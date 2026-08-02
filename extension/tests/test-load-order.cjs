@@ -82,12 +82,48 @@ function run() {
   }
 
   // Every bg/ file on disk is actually declared (no orphan module silently
-  // never loaded in the browser).
+  // never loaded in the browser). BG_FILES also carries non-bg/ entries — the
+  // shared design-system copies loaded into the worker, e.g. strings.js — so
+  // filter to the bg/ ones before comparing against the directory listing.
   const onDisk = fs.readdirSync(path.join(EXT_ROOT, 'bg')).filter((f) => f.endsWith('.js')).sort();
   runner.equal(
     JSON.stringify(onDisk),
-    JSON.stringify([...BG_FILES].map((f) => f.replace('bg/', '')).sort()),
+    JSON.stringify(BG_FILES.filter((f) => f.startsWith('bg/')).map((f) => f.replace('bg/', '')).sort()),
     'every bg/*.js on disk is declared in the load order'
+  );
+
+  // Every locale on disk is actually declared. A language added to
+  // design-system/locales/ and copied into the extension but never listed in
+  // the manifest loads nowhere: `t()` silently falls back to English forever,
+  // with nothing to indicate the file was ignored. Same orphan check as the
+  // bg/ one above, for the same reason.
+  const localeDir = path.join(EXT_ROOT, 'locales');
+  const localesOnDisk = fs.existsSync(localeDir)
+    ? fs.readdirSync(localeDir).filter((f) => f.endsWith('.js')).sort()
+    : [];
+  runner.equal(
+    JSON.stringify(localesOnDisk),
+    JSON.stringify(BG_FILES.filter((f) => f.startsWith('locales/')).map((f) => f.replace('locales/', '')).sort()),
+    'every locales/*.js on disk is declared in the load order'
+  );
+
+  // …and each one is byte-identical to its design-system source, same
+  // invariant as strings.js below.
+  for (const f of localesOnDisk) {
+    runner.equal(
+      readExt(`locales/${f}`),
+      fs.readFileSync(path.join(EXT_ROOT, '..', 'design-system', 'locales', f), 'utf8'),
+      `extension/locales/${f} is byte-identical to design-system/locales/${f}`
+    );
+  }
+
+  // The worker's strings copy must be the design-system source verbatim — the
+  // same invariant scripts/ci/check-design-system-sync.mjs enforces repo-wide,
+  // asserted here too so the extension suite alone catches a hand-edited copy.
+  runner.equal(
+    readExt('strings.js'),
+    fs.readFileSync(path.join(EXT_ROOT, '..', 'design-system', 'strings.js'), 'utf8'),
+    'extension/strings.js is byte-identical to design-system/strings.js'
   );
 
   return runner.summary();

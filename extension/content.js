@@ -213,10 +213,33 @@
     window.addEventListener('message', (e) => {
       if (e.source !== window) return;
       const d = e.data;
-      if (!d || d.__oathLight !== 'graylist-filter' || typeof d.count !== 'number') return;
-      try {
-        chrome.runtime.sendMessage({ action: 'graylistFiltered', count: d.count, site: d.site });
-      } catch (_) {}
+      if (!d || !d.__oathLight) return;
+
+      if (d.__oathLight === 'graylist-filter' && typeof d.count === 'number') {
+        try {
+          chrome.runtime.sendMessage({ action: 'graylistFiltered', count: d.count, site: d.site });
+        } catch (_) {}
+        return;
+      }
+
+      // Channel-page hard block (Twitch/Kick). The MAIN-world interceptor found
+      // the site's OWN adult label on the channel THIS page is, in JSON it
+      // already parses — a case item-stripping can't handle, because the flagged
+      // object isn't in an array (see graylist-inject.js → checkPageBlock).
+      // Same destination as checkPageLabel's DOM-driven block; different, and
+      // more durable, evidence.
+      if (d.__oathLight === 'graylist-page-block' && !pageLabelBlocked) {
+        pageLabelBlocked = true;
+        try { document.documentElement.style.display = 'none'; } catch (_) {}
+        try {
+          chrome.runtime.sendMessage({
+            action: 'notifyBlock',
+            url: window.location.href,
+            reason: 'graylist_page_label',
+            match: d.match || (d.site + ' adult-labelled channel')
+          });
+        } catch (_) {}
+      }
     });
   }
 
@@ -391,6 +414,33 @@
         }
         _ppPatreonMemo = { url: href, val: val };
         return val;
+      }
+    },
+    // Twitch — page-level block for ONE surface: the category Twitch itself
+    // created to quarantine swimwear/suggestive streaming.
+    //
+    // Everything else on Twitch is handled by the per-item stripper reading
+    // `contentClassificationLabels` (graylist-inject.js → S.twitch). This surface
+    // is the hole in that approach: the streams inside it overwhelmingly do NOT
+    // carry a SexualThemes label — the whole point of the category is that the
+    // content is understood from the category, not the label — so item-stripping
+    // walks straight past them. Same shape as itch.io's /games/nsfw and
+    // ScribbleHub's adult genre browse: when the entire grid is the adult
+    // surface, block the surface.
+    //
+    // Deliberately just this one. ASMR and IRL carry real suggestive tails too,
+    // but they're overwhelmingly ordinary content — blocking them would be the
+    // Restricted-Mode mistake of trading a large amount of legitimate use for a
+    // small amount of filtering.
+    //
+    // Both URL forms are covered: the modern /directory/category/<slug> and the
+    // legacy /directory/game/<url-encoded name>.
+    'twitch.tv': {
+      pagePath: /^\/directory\/(?:category|game)\//i,
+      pageLabel: () => {
+        let p = window.location.pathname || '';
+        try { p = decodeURIComponent(p); } catch (_) {}
+        return /\/directory\/(?:category|game)\/pools[,\s-]*hot[\s-]*tubs?[,\s-]*(?:and[\s-]*)?beaches/i.test(p);
       }
     },
     // Steam — page-level block only (no JSON feed; mostly age-gated SSR pages).
@@ -726,109 +776,6 @@
     else document.addEventListener('DOMContentLoaded', start);
   }
 
-  // FOCUS-SCHEDULE REMINDER POP-UPS
-  // The background worker fires these during the user's "vulnerable hours". We
-  // render a small, self-contained card inside a shadow root (so page CSS can't
-  // touch it) anchored bottom-right of the TOP frame only.
-  const PP_REMINDER_HOST_ID = 'oath-light-reminder';
-
-  function setupReminderListener() {
-    if (window.top !== window) return; // top frame only — avoid one card per iframe
-    if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.onMessage) return;
-    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-      if (msg && msg.action === 'showReminder') {
-        try { showReminderOverlay(msg); } catch (_) {}
-        if (sendResponse) sendResponse({ ok: true });
-      }
-      return false;
-    });
-  }
-
-  function showReminderOverlay(msg) {
-    const render = (dark) => renderReminderCard(msg, dark);
-    try {
-      chrome.storage.local.get(['display', 'theme'], (r) => {
-        const d = (r && r.display && typeof r.display === 'object') ? r.display : (r || {});
-        render((d.theme || 'dark') !== 'light');
-      });
-    } catch (_) {
-      render(true);
-    }
-  }
-
-  function renderReminderCard({ title, body, kind }, dark) {
-    if (!document.body && !document.documentElement) return;
-    // Replace any existing card so reminders never stack.
-    const prev = document.getElementById(PP_REMINDER_HOST_ID);
-    if (prev) prev.remove();
-
-    const host = document.createElement('div');
-    host.id = PP_REMINDER_HOST_ID;
-    host.style.cssText = 'all: initial; position: fixed; z-index: 2147483647; right: 20px; bottom: 20px;';
-    const root = host.attachShadow({ mode: 'open' });
-
-    const bg = dark ? 'rgba(17,24,39,0.92)' : 'rgba(255,255,255,0.94)';
-    const fg = dark ? '#f3f4f6' : '#111827';
-    const sub = dark ? '#9ca3af' : '#4b5563';
-    const border = dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
-    const accent = kind === 'checkin' ? '#34d399' : '#818cf8';
-
-    root.innerHTML = `
-      <style>
-        :host { all: initial; }
-        .card {
-          position: relative;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-          width: 320px; max-width: calc(100vw - 40px);
-          background: ${bg}; color: ${fg};
-          border: 1px solid ${border}; border-radius: 16px;
-          box-shadow: 0 18px 50px rgba(0,0,0,0.35);
-          backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-          overflow: hidden; transform: translateY(16px); opacity: 0;
-          transition: transform .42s cubic-bezier(.16,1,.3,1), opacity .42s ease;
-        }
-        .card.in { transform: translateY(0); opacity: 1; }
-        .accent { height: 4px; background: linear-gradient(90deg, ${accent}, transparent); }
-        .body { padding: 16px 18px; display: flex; gap: 12px; }
-        .dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; background: ${accent}; box-shadow: 0 0 0 4px ${accent}22; }
-        .txt { flex: 1; min-width: 0; }
-        .brand { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: ${accent}; font-weight: 700; }
-        .title { font-size: 15px; font-weight: 700; margin: 3px 0 4px; }
-        .msg { font-size: 13.5px; line-height: 1.5; color: ${sub}; }
-        .close { position: absolute; top: 10px; right: 10px; width: 24px; height: 24px; border: 0; background: transparent; color: ${sub}; font-size: 18px; line-height: 1; cursor: pointer; border-radius: 8px; }
-        .close:hover { background: ${border}; color: ${fg}; }
-      </style>
-      <div class="card">
-        <div class="accent"></div>
-        <button class="close" aria-label="Dismiss">&times;</button>
-        <div class="body">
-          <div class="dot"></div>
-          <div class="txt">
-            <div class="brand">Oath Light</div>
-            <div class="title"></div>
-            <div class="msg"></div>
-          </div>
-        </div>
-      </div>`;
-    // Inject text via textContent — never interpolate the message into HTML.
-    root.querySelector('.title').textContent = title || 'Oath Light';
-    root.querySelector('.msg').textContent = body || '';
-
-    (document.body || document.documentElement).appendChild(host);
-    const card = root.querySelector('.card');
-    requestAnimationFrame(() => card.classList.add('in'));
-
-    let removed = false;
-    const dismiss = () => {
-      if (removed) return;
-      removed = true;
-      card.classList.remove('in');
-      setTimeout(() => host.remove(), 450);
-    };
-    root.querySelector('.close').addEventListener('click', dismiss);
-    setTimeout(dismiss, 12000);
-  }
-
   // PRIVACY-FRONTEND / SEARXNG FINGERPRINT BLOCK (report Round 4 §11.1, §11.3)
   // Reddit / YouTube / X / Imgur / Quora / TikTok all have open-source "frontends"
   // (redlib, libreddit, invidious, piped, nitter, rimgo, quetre, proxitok…) that
@@ -945,7 +892,6 @@
     setupDomLabelFiltering();
     setupDiscordFiltering();
     setupFrontendSoftwareBlock();
-    setupReminderListener();
 
     // FIRST: check for Newgrounds bypass page before doing anything else
     blockNewgroundsBypassPage();

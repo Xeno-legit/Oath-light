@@ -1,155 +1,101 @@
 # Contributing to Oath Light
 
-First off, thank you for considering contributing to Oath Light! It's people like you that make Oath Light such a great tool for personal growth.
+Thank you for contributing to Oath Light. Oath Light is an open-source, privacy-first content protection system built to empower individuals. We welcome contributions from software developers, security researchers, graphic designers, and technical writers.
 
-## Code of Conduct
+---
 
-This project and everyone participating in it is governed by our commitment to creating a welcoming and inclusive environment. By participating, you are expected to uphold this standard. (GPL V3 license)
+## Core Principles for Contributions
 
-## How Can I Contribute?
+Every contribution accepted into the Oath Light codebase must strictly comply with three unalterable design principles:
 
-Email me at: **abdelhamidalielsebaie@gmail.com**
+* **100% Free and Open-Source**: All features, improvements, and fixes must remain freely available under the GNU General Public License v3.0 (GPLv3). Contributions introducing paywalls, feature gating, user tiers, or monetization mechanics will be rejected immediately.
+* **Zero Telemetry and Local Processing**: All code must execute locally on host machine hardware. Contributions that introduce remote analytics, tracking scripts, server-side image processing, user reporting APIs, or telemetry will not be merged.
+* **Uncompromising Code Quality**: Contributions must adhere to strict standards of memory safety, performance optimization, and comprehensive automated test coverage.
 
-### Reporting Bugs
+---
 
-Before creating bug reports, please check the existing issues as you might find out that you don't need to create one. When you are creating a bug report, please include as many details as possible:
+## Downloads and Release Releases
 
-* **Use a clear and descriptive title**
-* **Describe the exact steps to reproduce the problem**
-* **Provide specific examples to demonstrate the steps**
-* **Describe the behavior you observed after following the steps**
-* **Explain which behavior you expected to see instead and why**
-* **Include screenshots if possible**
-* **Include browser version and operating system**
-* **Include console error messages**
+Users and contributors seeking to test published versions can obtain official compiled releases directly:
 
-### Suggesting Enhancements
+* **Official Setup Downloads**: [Oath Light GitHub Releases](https://github.com/Xeno-legit/Oath-light/releases)
+* **Release Artifact**: `OathLight_Setup.exe` (Windows 64-bit installer)
 
-Enhancement suggestions are tracked as GitHub issues. When creating an enhancement suggestion, please include:
+---
 
-* **Use a clear and descriptive title**
-* **Provide a step-by-step description of the suggested enhancement**
-* **Provide specific examples to demonstrate the steps**
-* **Describe the current behavior and explain which behavior you expected to see instead**
-* **Explain why this enhancement would be useful**
+## Subsystem Architecture Mapping
 
-### Pull Requests
+The table below outlines the codebase layout to help contributors navigate the project structure quickly.
 
-* Fill in the required template
-* Do not include issue numbers in the PR title
-* Follow the JavaScript style guide
-* Include thoughtfully-worded, well-structured tests
-* Document new code
-* End all files with a newline
+| Repository Subdirectory | Subsystem Role | Core Technologies | Responsibility and Key Files |
+| :--- | :--- | :--- | :--- |
+| `core` | Shared Core Library | Rust (`oathlight-core`) | Houses blocklist tables, 41-language keyword parser, and SHA-256 event log. |
+| `dns` | Local DNS Proxy | Rust (`oathlight-dns`) | Implements UDP forwarding proxy on `127.0.0.1:53` and health probe logic. |
+| `desktop-app/src-tauri` | Desktop App Backend | Tauri v2, Rust | Manages IPC commands, ONNX machine learning models, Argon2id, and sidecars. |
+| `desktop-app/src` | User Interface | React, Vite, CSS | Modern reactive UI frontend rendered within Tauri desktop webview. |
+| `desktop-app/guardian` | Watchdog Process | Pure Rust (`oathlightguard`) | Dependency-free windowless executable holding `OathLight.Watchdog.Guardian.v1`. |
+| `extension` | Browser Extension | Manifest V3 / WebExtension | Houses network interceptors (`graylist-sites.js`, `graylist-inject.js`), DOM scrubbers. |
 
-#### HTML/CSS Style
+---
 
-* Use semantic HTML5 elements
-* Use BEM naming convention for CSS classes
-* Keep CSS organized and commented
-* Use CSS variables for colors and spacing
+## Contribution Workflow Stages
 
-#### Commit Messages
+Contributors should follow the four-stage workflow detailed in the table below:
 
-* Use the present tense ("Add feature" not "Added feature")
-* Use the imperative mood ("Move cursor to..." not "Moves cursor to...")
-* Limit the first line to 72 characters or less
-* Reference issues and pull requests liberally after the first line
+| Workflow Stage | Action Required | Details and Guidelines |
+| :--- | :--- | :--- |
+| **1. Issue & Proposal** | Open GitHub Issue | Discuss proposed changes, feature additions, or bug fixes with maintainers before coding. |
+| **2. Local Development** | Create Feature Branch | Branch off `main` using standard naming conventions (e.g., `feat/dns-optimization`). |
+| **3. Automated Verification** | Run Test Suites | Pass all Rust workspace tests, Clippy lint checks, and JavaScript extension suites locally. |
+| **4. Code Review & Merge** | Submit Pull Request | Provide a clear technical summary in your PR description. Maintainers will review promptly. |
 
-### Testing
+---
 
-* Write tests for new features
-* Ensure all tests pass before submitting PR
-* Test in multiple browsers if possible
-* Check console for errors
-* Test with different blocklist sizes
+## Development Environment Setup
 
-### Documentation
+### Tools and Prerequisites
+* [Rust Compiler](https://www.rust-lang.org/) (version 1.77.2 or later)
+* [Node.js](https://nodejs.org/) (LTS version) and `npm`
+* Microsoft Visual Studio C++ Build Tools (Windows development workload)
 
-* Update README.md if needed
-* Add/update JSDoc comments
-* Update CHANGELOG.md
-* Create/update guides in Guides/ folder
+### Step-by-Step Setup
 
-## Project Structure
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/Xeno-legit/Oath-light.git
+   cd Oath-light/"Oath Light Blocker"
+   ```
 
-```
-oath-light/
-├── extension/                 # Browser extension
-│   ├── manifest.json          # Extension configuration
-│   ├── background.js          # Service worker
-│   ├── content.js             # Content script
-│   ├── popup.html/js          # Extension popup
-│   ├── blocked.html/js        # Blocked page
-│   ├── blocklists.html/js     # Blocklist manager
-│   ├── blocklists/            # Blocklist data
-│   └── icons/                 # Extension icons
-├── desktop-app/               # Desktop application
-├── Guides/                    # Documentation
-└── test-blocklists.html       # Test suite
-```
+2. Install desktop application dependencies:
+   ```bash
+   cd desktop-app
+   npm install
+   ```
 
-## Adding New Features
+---
 
-### Checklist
+## Testing and Verification Reference
 
-- [ ] Feature is well-defined and scoped
-- [ ] Code follows project style guide
-- [ ] Tests are added/updated
-- [ ] Documentation is added/updated
-- [ ] CHANGELOG.md is updated
-- [ ] No console errors
-- [ ] Works in Chrome and Firefox
-- [ ] Performance impact is minimal
+All contributions must pass local validation before submission. The table below lists all verification commands used across the project.
 
-### Example: Adding a New Blocklist Category
+| Verification Suite | Target Subsystem | Execution Command | Acceptance Standard |
+| :--- | :--- | :--- | :--- |
+| **Rust Unit Tests** | All Rust Crates | `cargo test --workspace` | 100% test pass rate across all 160+ unit tests. |
+| **Clippy Static Linting** | All Rust Crates | `cargo clippy --workspace --all-targets -- -D warnings` | Zero compiler or linting warnings. |
+| **Extension Network Interceptors** | Browser Extension | `node extension/tests/test-graylist-inject.cjs` | Validates API payload interceptor parsing against captures. |
+| **Extension Platform Rules** | Browser Extension | `node extension/tests/test-graylist-platforms.cjs` | Validates rule matching across 44 supported platforms. |
+| **Extension Content Script** | Browser Extension | `node extension/tests/test-content-script.cjs` | Validates DOM element scrubbing logic. |
 
-1. Update data structure in `blocklists/`
-2. Update loading logic in `background.js`
-3. Update UI in `blocklists.html/js`
-4. Add tests in `test-blocklists.html`
-5. Update documentation
-6. Test thoroughly
+---
 
-## Improving Blocklists
+## Code Style and Pull Request Guidelines
 
-### Adding Domains
+1. **Commit Message Format**: Write direct, descriptive commit titles (e.g., `feat(dns): optimize lookup trie performance`).
+2. **Memory Safety**: Avoid `unsafe` Rust blocks unless strictly required for Win32 OS interop, and document all safety invariants clearly.
+3. **Documentation**: Update inline doc comments and relevant Markdown files when adding or modifying public functions.
 
-1. Research the domain thoroughly
-2. Verify it's actually NSFW
-3. Add to `blocklists/domains.json`
-4. Keep list alphabetically sorted
-5. Test that it blocks correctly
+---
 
-### Adding Keywords
+## Licensing Terms
 
-1. Consider false positive rate
-2. Test with real-world examples
-3. Add to `blocklists/keywords.json`
-4. Keep list alphabetically sorted
-5. Test that it blocks correctly
-
-## Performance Considerations
-
-* Minimize DOM operations
-* Use debouncing for search
-* Avoid blocking the main thread
-* Profile performance changes
-
-## Security Considerations
-
-* Never store passwords in plain text
-* Validate all user input
-* Sanitize HTML output
-* Use Content Security Policy
-* Follow principle of least privilege
-
-## Questions?
-
-Feel free to open an issue with your question or reach out to the maintainers.
-
-## Recognition
-
-Contributors will be recognized Here.
-
-Thank you for contributing to Oath Light! ❤️
+By submitting contributions to Oath Light, you agree that your code will be licensed under the GNU General Public License v3.0 (GPLv3).

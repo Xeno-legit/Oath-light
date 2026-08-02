@@ -1,4 +1,17 @@
-/* pages-blocking.jsx */
+/* pages-blocking.jsx — Blocking Settings.
+ *
+ * Layout rule for this page (and the reason it was rebuilt): every row is
+ * `<Setting>` — icon, one-line title, at most one short line of description,
+ * control at the end. Anything longer than that one line goes in an InfoDot,
+ * not on the page. The old version put its full rationale inline under every
+ * switch, which buried the switches themselves in prose.
+ *
+ * Section order is deliberate — how hard it blocks, what enforces that, what
+ * watches the screen, when it applies, what you see when it fires, and finally
+ * the one drastic lever. Reading top to bottom answers "how strict am I?"
+ * before it answers "what happens at 11pm?".
+ */
+
 // Open the redirect URL for the "Test" button. Normalizes a scheme-less entry
 // to https (same rule the extension uses), then opens it in the default browser
 // via the native command, falling back to window.open outside Tauri.
@@ -9,6 +22,56 @@ function openRedirect(raw) {
   if (window.PPNative && window.PPNative.available) window.PPNative.openExternal(u);
   else window.open(u, '_blank', 'noopener');
 }
+
+// Shared by every section that calls a friction-gated backend command: resolve
+// the master-password token (4.2), or `null` when no password is configured.
+// Rejects with Error('cancelled') if the user dismissed the prompt.
+function acquireAuth() {
+  return window.PPAuth ? window.PPAuth.acquire() : Promise.resolve(null);
+}
+
+// A pending-weakening note, in the one shape every section here needs: what is
+// turning off, when, and the one-click way to call it back. Previously each
+// section hand-wrote this line and they had all drifted apart.
+function PendingNote({ pending, whatKey, onKeep }) {
+  if (!pending) return null;
+  return (
+    <div className="pending-note">
+      {tRich('blocking.pending_note', { what: PP.t(whatKey), time: fmtDur(pending.remaining_secs) })}
+      {onKeep &&
+        <React.Fragment>{' '}
+          <a href="#" onClick={(e) => { e.preventDefault(); onKeep(); }}>{PP.t('blocking.pending_keep')}</a>
+        </React.Fragment>}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- strictness */
+
+function StrictnessCard({ s, PP }) {
+  const current = (s.blocking && s.blocking.strictness) || 'strict';
+  const presets = PP.PRESETS || [];
+  return (
+    <SectionCard
+      title={PP.t('blocking.strictness_title')}
+      sub={PP.t('blocking.strictness_sub')}
+      info={PP.t('blocking.strictness_info')}>
+      <Choices>
+        {presets.map((p) => (
+          <Choice
+            key={p.id}
+            name={PP.t(p.nameKey)}
+            desc={PP.t(p.descKey)}
+            info={PP.t(p.infoKey)}
+            selected={current === p.id}
+            onSelect={() => PP.applyPreset(p.id)} />
+        ))}
+      </Choices>
+    </SectionCard>
+  );
+}
+
+/* --------------------------------------------------------------- protections */
 
 // Process-level app blocking + evasion-browser detection (plan item 1.3).
 // House rule: name-based process blocking is friction, not a sandbox — a
@@ -45,10 +108,13 @@ function AppBlockingSection() {
     if (!available) return;
     let unProc = null, unEvasion = null, cancelled = false;
     const push = (text) => setRecent((r) => [{ id: Date.now() + Math.random(), ts: Date.now(), text }, ...r].slice(0, 6));
-    window.PPNative.onProcessEnforcement((p) => push(`${p.name} — blocked list — killed`))
+    window.PPNative.onProcessEnforcement((p) => push(PP.t('blocking.event_process_closed', { name: p.name })))
       .then((fn) => { if (cancelled) fn(); else unProc = fn; });
+    // UX Direction §3: report WHAT happened, not which category of evasion it
+    // was — the reason codes are still logged in full to the protection
+    // history and the app log, they just aren't a taxonomy on screen.
     window.PPNative.onEvasionDetected((p) => push(
-      `${p.name} — ${p.reason === 'tor_browser' ? 'Tor Browser' : p.reason === 'portable_browser' ? 'portable copy' : 'evasion browser'} — ${p.killed ? 'blocked' : 'detected (not blocked)'}`
+      PP.t(p.killed ? 'blocking.event_evasion_closed' : 'blocking.event_evasion_noted', { name: p.name })
     )).then((fn) => { if (cancelled) fn(); else unEvasion = fn; });
     return () => { cancelled = true; if (unProc) unProc(); if (unEvasion) unEvasion(); };
   }, [available]);
@@ -64,13 +130,6 @@ function AppBlockingSection() {
       .finally(() => setBusy(false));
   }
 
-  // PPAuth (master password, 4.2) may not exist in this build yet — the
-  // defensive call means this works with or without it, and a cancelled
-  // prompt (rejected with message 'cancelled') aborts silently.
-  function acquireAuth() {
-    return window.PPAuth ? window.PPAuth.acquire() : Promise.resolve(null);
-  }
-
   function removeProc(name) {
     setErr('');
     acquireAuth()
@@ -78,10 +137,6 @@ function AppBlockingSection() {
       .then(() => refresh())
       .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
       .finally(() => setBusy(false));
-  }
-
-  function keepBlockingProc(p) {
-    window.PPNative.cancelWeakening(p.action_id).then(refresh);
   }
 
   function toggleEvasionKill(enabled) {
@@ -107,101 +162,116 @@ function AppBlockingSection() {
 
   return (
     <React.Fragment>
-      <div className="setting" style={{ alignItems: 'flex-start' }}>
-        <div className="ico"><IconGrid size={20} /></div>
-        <div className="txt" style={{ flex: 1 }}>
-          <b>App blocking</b>
-          <span>Block distracting or explicit desktop apps by process name. This is friction, not a sandbox — a renamed .exe slips straight past it, on purpose accepted as a known limit rather than something faked as airtight.</span>
+      <Setting
+        icon={IconGrid}
+        title={PP.t('blocking.apps_title')}
+        desc={blockedList.length
+          ? PP.t('blocking.apps_desc_count', { count: blockedList.length })
+          : PP.t('blocking.apps_desc_empty')}
+        info={PP.t('blocking.apps_info')}>
+        <span className="chip">{blockedList.length}</span>
+      </Setting>
 
-          <div className="row" style={{ gap: 10, marginTop: 10 }}>
-            <input
-              className="input"
-              placeholder="e.g. discord.exe"
-              value={newProc}
-              onChange={(e) => setNewProc(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && addProc()}
-              style={{ flex: 1 }} />
-            <button className="btn btn-primary btn-sm" disabled={busy || !available} onClick={addProc}>
-              <IconPlus size={15} /> Add
-            </button>
-          </div>
-
-          {blockedList.length > 0 &&
-            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {blockedList.map((name) => (
-                <div key={name} className="row" style={{ justifyContent: 'space-between', padding: '8px 10px', background: 'color-mix(in oklab, var(--muted) 7%, transparent)', borderRadius: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>{name}</span>
-                  <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => removeProc(name)}>
-                    <IconTrash size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          }
-
-          {pendingRemovals.length > 0 &&
-            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {pendingRemovals.map((p) => {
-                const name = p.action_id.slice('process_block.remove:'.length);
-                return (
-                  <div key={p.action_id} className="row" style={{ justifyContent: 'space-between', padding: '8px 10px', background: 'color-mix(in oklab, #d9a441 12%, transparent)', borderRadius: 8 }}>
-                    <span style={{ fontSize: 13 }}><b>{name}</b> — unblocks in {fmtDur(p.remaining_secs)}</span>
-                    <button className="btn btn-ghost btn-sm" onClick={() => keepBlockingProc(p)}>Keep blocking</button>
-                  </div>
-                );
-              })}
-            </div>
-          }
-
-          {err && <div style={{ fontSize: 12, color: '#d9534f', marginTop: 8 }}>{err}</div>}
-          {!available && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>App blocking controls are available in the desktop app.</div>}
+      <div className="sub-block">
+        <div className="row" style={{ gap: 10 }}>
+          <input
+            className="input"
+            placeholder={PP.t('blocking.apps_placeholder')}
+            value={newProc}
+            onChange={(e) => setNewProc(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addProc()}
+            style={{ flex: 1 }} />
+          <button className="btn btn-primary btn-sm" disabled={busy || !available} onClick={addProc}>
+            <IconPlus size={15} /> {PP.t('app.action_add')}
+          </button>
         </div>
+
+        {blockedList.length > 0 &&
+          <div className="tag-list">
+            {blockedList.map((name) => (
+              <span key={name} className="tag">
+                {name}
+                <button className="tag-x" disabled={busy} aria-label={PP.t('blocking.apps_stop_blocking_aria', { name })}
+                        onClick={() => removeProc(name)}><IconX size={13} /></button>
+              </span>
+            ))}
+          </div>}
+
+        {pendingRemovals.map((p) => {
+          const name = p.action_id.slice('process_block.remove:'.length);
+          return (
+            <div key={p.action_id} className="pending-note">
+              {tRich('blocking.apps_pending', { name, time: fmtDur(p.remaining_secs) })}{' '}
+              <a href="#" onClick={(e) => { e.preventDefault(); window.PPNative.cancelWeakening(p.action_id).then(refresh); }}>
+                {PP.t('blocking.apps_keep_blocking')}
+              </a>
+            </div>
+          );
+        })}
+
+        {err && <div className="err-note">{err}</div>}
+        {!available && <div className="muted-note">{PP.t('app.needs_desktop')}</div>}
       </div>
 
-      <div className="setting">
-        <div className="ico"><IconShieldOff size={20} /></div>
-        <div className="txt">
-          <b>Block unknown &amp; evasion browsers</b>
-          <span>Kill Tor Browser, LibreWolf and other extension-proof browsers — and portable copies of known ones — on sight instead of just logging them. Off by default: detections are always logged as warnings either way, this only decides whether they're also force-closed.</span>
-        </div>
+      {/* UX Direction §3 — "status yes, map no": this deliberately does not
+          name the specific browsers it defends against, which would be a list
+          of things to go try. */}
+      <Setting
+        icon={IconShieldOff}
+        title={PP.t('blocking.evasion_title')}
+        desc={PP.t(killUnknown ? 'blocking.evasion_desc_on' : 'blocking.evasion_desc_off')}
+        info={PP.t('blocking.evasion_info')}>
         <Switch on={killUnknown} onClick={() => toggleEvasionKill(!killUnknown)} disabled={busy || !available} />
-      </div>
-      {evasionPending &&
-        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '-6px 0 10px 54px' }}>
-          Turning off in {fmtDur(evasionPending.remaining_secs)} — cancel from Settings → Pending changes
-        </div>
-      }
+      </Setting>
+      <PendingNote pending={evasionPending} whatKey="blocking.evasion_pending_what"
+                   onKeep={() => window.PPNative.cancelWeakening('evasion_kill.disable').then(refresh)} />
+
+      {/* No switch, by design — see SafeSearch above for the same treatment.
+          A browser running without the extension is not a weaker Oath Light,
+          it is none of it, and the off position of that switch was the answer
+          to "how do I browse unfiltered" printed on the settings page.
+
+          Same "status yes, map no" rule as before: this says a browser that
+          won't run the extension won't run, without naming which browser or
+          why it's the one that has to be made to behave this way. */}
+      <Setting
+        icon={IconLock}
+        title={PP.t('blocking.browser_lock_title')}
+        desc={PP.t('blocking.browser_lock_desc_on')}
+        info={PP.t('blocking.browser_lock_info')}>
+        <span className="chip chip-ok">{PP.t('blocking.always_on')}</span>
+      </Setting>
 
       {recent.length > 0 &&
-        <div style={{ marginTop: 14 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', marginBottom: 6 }}>Recent detections (this session)</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {recent.map((r) => (
-              <div key={r.id} style={{ fontSize: 12, color: 'var(--muted)' }}>
-                {new Date(r.ts).toLocaleTimeString()} — {r.text}
-              </div>
-            ))}
-          </div>
-        </div>
-      }
+        <div className="sub-block">
+          <div className="sub-label">{PP.t('blocking.apps_session_label')}</div>
+          {recent.map((r) => (
+            <div key={r.id} className="muted-note" style={{ marginTop: 2 }}>
+              {new Date(r.ts).toLocaleTimeString()} — {r.text}
+            </div>
+          ))}
+        </div>}
     </React.Fragment>
   );
 }
 
 // System-level DNS filter (plan items 1.1 + 1.2). A coarse whole-domain
-// backstop for surfaces the browser extension can't reach — Tor, portable
-// browsers, Electron apps — enforced by a local DNS resolver the desktop app
-// points every network adapter at. The real gate lives in Rust
-// (`set_dns_filter_enabled`); this is a view onto `get_dns_status` plus the
-// instant-enable / friction-gated-disable requests.
+// backstop for surfaces the browser extension can't reach, enforced by a local
+// DNS resolver the desktop app points every network adapter at.
+//
+// **No switch.** It shipped opt-in, which meant the one layer that covers
+// everything outside the browser was off unless somebody went and found it —
+// and once anything knocked it over it stayed off. Now it is always on and
+// always trying: Rust re-attempts on a backoff (`dns_filter::tick_retry`) and
+// re-attempts the adapter takeover on its own too. What is left here is a
+// status line and, when the machine is withholding the one thing the filter
+// can't get for itself, the button that asks for it.
 function DnsFilterSection() {
   const available = !!(window.PPNative && window.PPNative.available);
-  const [status, setStatus] = React.useState(null); // { running, taken_over, last_error, upstreams }
+  // { running, taken_over, last_error, upstreams, upstream_warning, exposure_warning }
+  const [status, setStatus] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState('');
-
-  const pending = (window.usePendingWeakenings || (() => []))();
-  const disablePending = pending.find((p) => p.action_id === 'dns.disable');
 
   const refresh = React.useCallback(() => {
     if (!available) return;
@@ -209,380 +279,635 @@ function DnsFilterSection() {
   }, [available]);
 
   React.useEffect(() => { refresh(); }, [refresh]);
-  // Re-poll while active (health/takeover state can flip on its own — e.g. the
-  // failsafe restoring real DNS if the resolver dies) and whenever a pending
-  // weakening resolves.
+  // Re-poll continuously: every state on this row can now change with nobody
+  // touching anything — the failsafe stands the filter down, the retry loop
+  // brings it back, an elevated pass lands the takeover.
   React.useEffect(() => {
     if (!available) return;
     const id = setInterval(refresh, 3000);
     return () => clearInterval(id);
   }, [available, refresh]);
-  React.useEffect(() => { refresh(); }, [pending.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const on = !!(status && status.running);
+  const takenOver = !!(status && status.taken_over);
 
-  function acquireAuth() {
-    return window.PPAuth ? window.PPAuth.acquire() : Promise.resolve(null);
-  }
-
-  function toggle() {
+  // Ask now rather than waiting out the backoff. Not a toggle — there is no
+  // off — just "try again, I've changed something".
+  function retryNow() {
     setErr('');
-    if (!on) {
-      // Turning it on is a strengthening — instant, no auth. A bind conflict
-      // or missing-admin failure rejects; surface it verbatim.
-      setBusy(true);
-      window.PPNative.setDnsFilter(true, null)
-        .then(() => refresh())
-        .catch((e) => setErr(e && e.message ? e.message : String(e)))
-        .finally(() => setBusy(false));
-      return;
-    }
-    // Turning it off is a weakening — password gate (4.2) then friction delay.
-    acquireAuth()
-      .then((token) => { setBusy(true); return window.PPNative.setDnsFilter(false, token); })
+    setBusy(true);
+    window.PPNative.setDnsFilter(true, null)
       .then(() => refresh())
-      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
+      .catch((e) => setErr(e && e.message ? e.message : String(e)))
       .finally(() => setBusy(false));
   }
 
-  function keepOn() {
-    window.PPNative.cancelWeakening('dns.disable').then(refresh);
+  // One UAC prompt writes the adapter DNS this can't write for itself; the
+  // elevated pass performs the takeover directly, so the row goes green without
+  // a restart. Same command the extension rows use.
+  function grantAdmin() {
+    setErr('');
+    setBusy(true);
+    window.PPNative.requestElevatedSetup()
+      .catch((e) => setErr(e && e.message ? e.message : String(e)))
+      .finally(() => setBusy(false));
   }
 
-  // Status line: off / active / active-but-not-taken-over / error.
-  let statusText, statusColor;
-  if (!status) { statusText = 'Loading…'; statusColor = 'var(--muted)'; }
-  else if (status.last_error && !on) { statusText = status.last_error; statusColor = '#d9534f'; }
-  else if (on && status.taken_over) {
-    statusText = 'Active — filtering at the network level' + (status.upstreams && status.upstreams.length ? ' · upstream ' + status.upstreams.join(', ') : '');
-    statusColor = 'var(--accent-2)';
-  }
-  else if (on && !status.taken_over) { statusText = status.last_error || 'Resolver running, but no network adapter could be redirected — needs administrator rights.'; statusColor = '#d9a441'; }
-  else { statusText = 'Off — only the browser extension is filtering.'; statusColor = 'var(--muted)'; }
+  // Status line: active / active-but-sidelined / active-but-not-taken-over /
+  // down-and-retrying. The 'reduced' tone is deliberately NOT 'warn': nothing is
+  // broken and there is nothing to do about it, so it must not pull in the
+  // admin action below.
+  let statusText, statusTone;
+  if (!status) { statusText = PP.t('app.loading'); statusTone = 'muted'; }
+  else if (on && takenOver && status.exposure_warning) { statusText = PP.t('blocking.dns_status_reduced'); statusTone = 'reduced'; }
+  else if (on && takenOver) { statusText = PP.t('blocking.dns_status_active'); statusTone = 'ok'; }
+  else if (on) { statusText = PP.t('blocking.dns_status_no_adapter'); statusTone = 'warn'; }
+  else { statusText = PP.t('blocking.dns_status_retrying'); statusTone = 'warn'; }
+
+  // Why it is down / not covering, in Rust's own words (a port-53 conflict, a
+  // refused adapter write, the failsafe having just stood it down). Kept out of
+  // the status line so the row stays one line, and kept on screen because
+  // "retrying" without a reason is the kind of vagueness this app doesn't do.
+  const reason = status && status.last_error && statusTone === 'warn' ? status.last_error : '';
+
+  // The admin prompt is the fix for exactly one state — running but never
+  // allowed to redirect an adapter. When the resolver itself is down, elevation
+  // changes nothing, so that state gets a plain retry instead.
+  const action = statusTone !== 'warn' ? null
+    : on ? { label: PP.t('blocking.dns_grant_admin'), run: grantAdmin }
+         : { label: PP.t('blocking.dns_retry'), run: retryNow };
 
   return (
     <React.Fragment>
-      <div className="setting" style={{ alignItems: 'flex-start' }}>
-        <div className="ico"><IconShield size={20} /></div>
-        <div className="txt" style={{ flex: 1 }}>
-          <b>System DNS filter</b>
-          <span>
-            Blocks explicit domains at the network level — for apps the browser extension can't reach, like Tor,
-            portable browsers and Electron apps. Requires administrator rights to take over your DNS, and disables
-            browser DNS-over-HTTPS by policy while active (otherwise a browser could resolve around it). Opt-in.
-          </span>
-          <div style={{ fontSize: 12.5, color: statusColor, marginTop: 8 }}>{statusText}</div>
-          {err && <div style={{ fontSize: 12, color: '#d9534f', marginTop: 6 }}>{err}</div>}
-          {!available && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>Available in the desktop app.</div>}
-        </div>
-        <Switch on={on} onClick={toggle} disabled={busy || !available} />
-      </div>
-      {disablePending &&
-        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '-6px 0 10px 54px' }}>
-          Turning off in {fmtDur(disablePending.remaining_secs)} — it stays fully active until then · cancel from Settings → Pending changes,{' '}
-          <a href="#" onClick={(e) => { e.preventDefault(); keepOn(); }} style={{ color: 'var(--accent-2)' }}>keep it on</a>
-        </div>
-      }
+      <Setting
+        icon={IconGlobe}
+        title={PP.t('blocking.dns_title')}
+        desc={statusText}
+        info={PP.t('blocking.dns_info')}>
+        {action
+          ? <button className="btn btn-sm" onClick={action.run} disabled={busy || !available}>{action.label}</button>
+          : <span className="chip chip-ok">{PP.t('blocking.always_on')}</span>}
+      </Setting>
+      {reason && <div className="warn-note">{reason}</div>}
+      {/* Separate from the status line on purpose: the filter IS working, the
+          network isn't. Merging the two would make a bad Wi-Fi day look like a
+          broken protection. */}
+      {on && status && status.upstream_warning &&
+        <div className="warn-note">{status.upstream_warning}</div>}
+      {/* Third distinct case: the filter is working AND the network is fine, but
+          the resolver is no longer in the DNS path, so it is covering less than
+          the headline claims. Rust owns the wording (dns_filter.rs's
+          `exposure_message`) because it knows which connection it found. */}
+      {on && status && status.exposure_warning &&
+        <div className="warn-note">{status.exposure_warning}</div>}
+      {err && <div className="err-note">{err}</div>}
     </React.Fragment>
   );
 }
 
-function SettingRow({ icon: I, title, desc, on, onToggle, accent }) {
+// Everything in this card is a floor, not a preference.
+//
+// It used to be three switches and one chip, and the switches were the problem:
+// each one taught the reader that the protection beside it was negotiable, and
+// between them they described — accurately, in plain English, on one screen —
+// how to end up with an unprotected computer. SafeSearch was already the
+// exception ("There is deliberately no switch for this one"), and it was the
+// only row that had the tone right.
+//
+// So the rest joined it. Nothing here has an off position now: the uninstall
+// guard, SafeSearch, YouTube Restricted Mode, the browser lock and the system
+// DNS filter are all "Always on", and the backend refuses a disable rather than
+// gating one (lib.rs's `NOT_OPTIONAL`, `settings::force_mandatory`). The
+// asymmetric friction system still exists and still matters — it governs the
+// things that *are* choices, further down this page and elsewhere.
+function ProtectionsCard({ PP }) {
   return (
-    <div className="setting">
-      <div className="ico" style={accent ? { background: 'color-mix(in oklab, var(--accent-2) 14%, transparent)', color: 'var(--accent-2)' } : undefined}><I size={20} /></div>
-      <div className="txt"><b>{title}</b><span>{desc}</span></div>
-      <Switch on={on} onClick={onToggle} />
-    </div>);
+    <SectionCard
+      title={PP.t('blocking.protection_title')}
+      sub={PP.t('blocking.protection_sub')}
+      info={PP.t('blocking.protection_info')}>
 
+      <Setting
+        icon={IconShield}
+        title={PP.t('blocking.guard_title')}
+        desc={PP.t('blocking.guard_desc_on')}
+        info={PP.t('blocking.guard_info')}>
+        <span className="chip chip-ok">{PP.t('blocking.always_on')}</span>
+      </Setting>
+
+      <Setting
+        icon={IconSearch}
+        title={PP.t('blocking.safesearch_title')}
+        desc={PP.t('blocking.safesearch_desc')}
+        info={PP.t('blocking.safesearch_info')}>
+        <span className="chip chip-ok">{PP.t('blocking.always_on')}</span>
+      </Setting>
+
+      <Setting
+        icon={IconShield}
+        title={PP.t('blocking.youtube_title')}
+        desc={PP.t('blocking.youtube_desc_on')}
+        info={PP.t('blocking.youtube_info')}>
+        <span className="chip chip-ok">{PP.t('blocking.always_on')}</span>
+      </Setting>
+
+      <div className="sub-label">{PP.t('blocking.sub_apps')}</div>
+      <AppBlockingSection />
+
+      <div className="sub-label">{PP.t('blocking.sub_network')}</div>
+      <DnsFilterSection />
+    </SectionCard>
+  );
 }
 
-function BlockingPage({ s, PP }) {
-  const b = s.blocking;
-  const set = (patch) => PP.set({ blocking: patch });
-  // Friction (4.1): if the uninstall guard has a pending "turn off" request,
-  // it's still fully ON (the backend never flips it early) — this is purely
-  // an honest heads-up, not a countdown that gates anything here. `fmtDur` is
-  // a plain top-level `function` declared in pages-settings.jsx; even though
-  // that file loads AFTER this one (see index.html's script order), globals
-  // resolve at *render* time, not at script-parse time, and by the time this
-  // component actually renders every script has already run — so this is
-  // safe. See pages-settings.jsx for the definition.
-  const guardPending = (window.usePendingWeakenings || (() => []))().find((p) => p.action_id === 'guard.disable');
-  const toggle = (k) => set({ [k]: !b[k] });
-  // Turning the uninstall guard OFF is a weakening, gated behind the master
-  // password (4.2) when one is set — turning it back ON is a strengthening
-  // and stays instant/ungated (`toggle` above), same asymmetry as every
-  // other friction rule in this codebase. Only the off-and-currently-on
-  // click goes through `PPAuth.acquire()`.
-  //
-  // This calls `PPNative.setGuard` directly with the acquired token, rather
-  // than just flipping the local store and letting app.jsx's reconciliation
-  // effect push it — that effect deliberately passes no token (it's a
-  // reconciler, not a user action; see its comment in app.jsx), so it alone
-  // could never get past the backend's gate. The local store only flips
-  // after the direct, gated call actually succeeds; a cancelled prompt or a
-  // real error leaves the switch exactly where it was. (The reconciliation
-  // effect still fires afterward when the store changes — redundant but
-  // harmless: the friction request already exists, so its own ungated call
-  // just gets rejected by the backend gate and is swallowed there.)
-  const toggleGuard = () => {
-    if (!b.uninstallGuard) { toggle('uninstallGuard'); return; }
-    (window.PPAuth ? PPAuth.acquire() : Promise.resolve(null))
-      .then((auth) => (window.PPNative && PPNative.available
-        ? PPNative.setGuard(false, auth)
-        : Promise.resolve({ applied: true })))
-      .then(() => toggle('uninstallGuard'))
+/* ------------------------------------------------------------- screen monitor */
+
+// The on-device AI screen monitor. It used to be a top-level page of its own,
+// which framed a protection as a dashboard; it belongs with the other
+// protections. Enabling it is gated behind an explicit warning because — unlike
+// everything else on this page — it looks at the screen itself, and nobody
+// should turn that on without having been told so in plain words.
+//
+// Nothing about the model or the pipeline changed in the move: this is still a
+// view onto the backend's `nsfw-scan` / `nsfw-overlay` events plus the same
+// friction-gated stop request.
+function MonitorSection() {
+  const available = !!(window.PPNative && window.PPNative.available);
+  const [running, setRunning] = React.useState(false);
+  const [last, setLast] = React.useState(null);
+  const [err, setErr] = React.useState('');
+  const [confirming, setConfirming] = React.useState(false);
+  const [showDetail, setShowDetail] = React.useState(false);
+
+  const stopPending = (window.usePendingWeakenings || (() => []))()
+    .find((p) => p.action_id === 'monitor.disable') || null;
+
+  React.useEffect(() => {
+    if (!available) return;
+    let unlisten = null, cancelled = false;
+    PPNative.nsfwMonitorRunning().then((r) => { if (!cancelled) setRunning(r); });
+    PPNative.onNsfwScan((scan) => setLast(scan))
+      .then((fn) => { if (cancelled) fn(); else unlisten = fn; });
+    return () => { cancelled = true; if (unlisten) unlisten(); };
+  }, [available]);
+
+  // Re-sync the real running state whenever the pending stop appears or
+  // disappears — the backend's applier thread does the actual stop once the
+  // delay elapses (and a cancel from Settings withdraws it); either way this
+  // notices and keeps the status honest.
+  React.useEffect(() => {
+    if (!available) return;
+    PPNative.nsfwMonitorRunning().then(setRunning);
+  }, [!!stopPending, available]);
+
+  const start = () => {
+    setErr('');
+    setConfirming(false);
+    PPNative.startNsfwMonitor().then(() => setRunning(true))
+      .catch((e) => setErr(String(e && e.message || e)));
+  };
+
+  // Stopping is a friction-gated weakening (4.1): the backend resolves
+  // { applied, pending } instead of just stopping. `applied` true means there
+  // was nothing to weaken (it was already stopped). When `applied` is false the
+  // monitor is still running and the pending request shows up within one poll.
+  const stop = () => {
+    acquireAuth()
+      .then((auth) => PPNative.stopNsfwMonitor(auth))
+      .then((outcome) => { if (outcome && outcome.applied) setRunning(false); })
       .catch((e) => {
-        if (!e || e.message !== 'cancelled') console.warn('[OathLight] toggleGuard failed:', e);
+        if (e && e.message === 'cancelled') return;
+        setErr(String(e && e.message || e));
       });
   };
-  // Block-screen mode toggles are mutually exclusive — enabling one disables
-  // the others; toggling the active one off leaves them all disabled.
-  const modeKeys = ['redirectLinkOn', 'redirectOffline', 'bgSongEnabled'];
-  const setMode = (k) => {
-    if (b[k]) { set({ [k]: false }); return; }
-    const patch = { [k]: true };
-    modeKeys.forEach((m) => { if (m !== k) patch[m] = false; });
-    set(patch);
-  };
+
+  return (
+    <SectionCard
+      title={PP.t('blocking.monitor_title')}
+      sub={PP.t('blocking.monitor_sub')}
+      info={PP.t('blocking.monitor_info')}>
+
+      <Setting
+        icon={IconSearch}
+        title={PP.t('blocking.monitor_row_title')}
+        desc={PP.t(running ? 'blocking.monitor_running' : 'app.state_off')}
+        tone={running ? 'ok' : undefined}
+        info={PP.t('blocking.monitor_row_info')}>
+        {running
+          ? <button className="btn btn-ghost btn-sm" onClick={stop} disabled={!!stopPending}>{PP.t('blocking.monitor_turn_off')}</button>
+          : <button className="btn btn-primary btn-sm" disabled={!available} onClick={() => setConfirming(true)}>{PP.t('blocking.monitor_turn_on')}</button>}
+      </Setting>
+
+      {/* The warning. Deliberately a blocking step rather than fine print: this
+          is the one protection that reads the screen, so consent to that is
+          collected explicitly, once, before it ever starts. */}
+      {confirming &&
+        <div className="warn-panel">
+          <div className="warn-panel-title"><IconShield size={17} /> {PP.t('blocking.monitor_consent_title')}</div>
+          <ul className="warn-panel-list">
+            <li>{PP.t('blocking.monitor_consent_1')}</li>
+            <li>{PP.t('blocking.monitor_consent_2')}</li>
+            <li>{PP.t('blocking.monitor_consent_3')}</li>
+            <li>{PP.t('blocking.monitor_consent_4')}</li>
+          </ul>
+          <div className="row" style={{ gap: 10, marginTop: 14 }}>
+            <button className="btn btn-primary btn-sm" onClick={start}>{PP.t('blocking.monitor_consent_cta')}</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setConfirming(false)}>{PP.t('app.action_cancel')}</button>
+          </div>
+        </div>}
+
+      <PendingNote pending={stopPending} whatKey="blocking.monitor_pending_what" />
+      {err && <div className="err-note">{err}</div>}
+      {!available && <div className="muted-note">{PP.t('app.needs_desktop')}</div>}
+
+      {/* The live readout is diagnostics, not a setting — collapsed by default
+          so it stops competing with the controls above it. */}
+      {running &&
+        <React.Fragment>
+          <button className="disclose" aria-expanded={showDetail} onClick={() => setShowDetail((v) => !v)}>
+            <IconChevron size={15} className={showDetail ? 'disclose-open' : ''} />
+            {PP.t(showDetail ? 'blocking.monitor_hide_readout' : 'blocking.monitor_show_readout')}
+          </button>
+          {showDetail &&
+            <div className="sub-block">
+              {last
+                ? <div className="row" style={{ gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                    {last.thumb &&
+                      <img src={last.thumb} alt={PP.t('blocking.monitor_capture_alt')}
+                           style={{ width: 200, borderRadius: 10, display: 'block' }} />}
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 15 }}>{last.top_label}</div>
+                      <div className="muted-note">
+                        {PP.t('blocking.monitor_reading', {
+                          score: (last.top_score * 100).toFixed(1),
+                          time: new Date(last.ts).toLocaleTimeString(),
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                : <div className="muted-note">{PP.t('blocking.monitor_waiting')}</div>}
+            </div>}
+        </React.Fragment>}
+    </SectionCard>
+  );
+}
+
+/* ------------------------------------------------------------------ schedule */
+
+function ScheduleCard({ s, PP }) {
+  const b = s.blocking;
+  const available = !!(window.PPNative && window.PPNative.available);
+  const set = (patch) => PP.set({ blocking: patch });
   const setVuln = (patch) => set({ vulnerable: { ...b.vulnerable, ...patch } });
   const toggleAlert = (id) => set({ alerts: b.alerts.map((x) => x.id === id ? { ...x, on: !x.on } : x) });
+  const [grayErr, setGrayErr] = React.useState('');
 
+  // The friction asymmetry deliberately does NOT apply to grayscale — see
+  // settings.rs's `grayscale_vulnerable_hours`. Turning it off unblocks
+  // nothing, and holding someone's display hostage for 24 hours over a
+  // wellbeing nudge would be applying a good rule in the wrong place.
+  const toggleGray = () => {
+    const next = !b.grayscaleVulnerable;
+    setGrayErr('');
+    set({ grayscaleVulnerable: next });
+    if (available) {
+      window.PPNative.setGrayscaleVulnerableHours(next).catch((e) => {
+        setGrayErr(e && e.message ? e.message : String(e));
+        set({ grayscaleVulnerable: !next });
+      });
+    }
+  };
+
+  return (
+    <SectionCard
+      title={PP.t('blocking.schedule_title')}
+      sub={PP.t('blocking.schedule_sub')}
+      info={PP.t('blocking.schedule_info')}>
+
+      <Setting
+        icon={IconClock}
+        title={PP.t('blocking.vulnerable_title')}
+        desc={b.vulnerable.on ? `${b.vulnerable.start} → ${b.vulnerable.end}` : PP.t('app.state_off')}
+        info={PP.t('blocking.vulnerable_info')}>
+        <Switch on={b.vulnerable.on} onClick={() => setVuln({ on: !b.vulnerable.on })} />
+      </Setting>
+
+      {b.vulnerable.on &&
+        <div className="sub-block">
+          <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+            <label className="time-field">
+              <span>{PP.t('blocking.time_from')}</span>
+              <input type="time" className="time-input" value={b.vulnerable.start}
+                     onChange={(e) => setVuln({ start: e.target.value })} />
+            </label>
+            <span style={{ color: 'var(--muted)', fontSize: 13, fontWeight: 600 }}>→</span>
+            <label className="time-field">
+              <span>{PP.t('blocking.time_to')}</span>
+              <input type="time" className="time-input" value={b.vulnerable.end}
+                     onChange={(e) => setVuln({ end: e.target.value })} />
+            </label>
+          </div>
+        </div>}
+
+      <Setting
+        icon={IconMoon}
+        title={PP.t('blocking.grayscale_title')}
+        desc={PP.t(b.grayscaleVulnerable ? 'blocking.grayscale_desc_on' : 'app.state_off')}
+        info={PP.t('blocking.grayscale_info')}>
+        <Switch on={!!b.grayscaleVulnerable} onClick={toggleGray} disabled={!available} />
+      </Setting>
+      {grayErr && <div className="err-note">{grayErr}</div>}
+
+      <div className="sub-label">{PP.t('blocking.nudges_label')}</div>
+      {b.alerts.map((a) =>
+        <Setting key={a.id} icon={IconBell}
+                 title={a.labelKey ? PP.t(a.labelKey) : a.label}
+                 desc={a.descKey ? PP.t(a.descKey) : a.desc}>
+          <Switch on={a.on} onClick={() => toggleAlert(a.id)} />
+        </Setting>
+      )}
+    </SectionCard>
+  );
+}
+
+/* -------------------------------------------------------------- block screen */
+
+function BlockScreenCard({ s, PP }) {
+  const b = s.blocking;
+  const alts = b.alternatives || [];
+  const set = (patch) => PP.set({ blocking: patch });
+  const [draft, setDraft] = React.useState('');
+  const [draftUrl, setDraftUrl] = React.useState('');
+
+  const addAlt = () => {
+    const text = draft.trim();
+    if (!text) return;
+    // Arrays are replaced wholesale by PP.set, so build the new one here.
+    set({ alternatives: alts.concat([{ id: String(Date.now()), text, url: draftUrl.trim() }]) });
+    setDraft(''); setDraftUrl('');
+  };
+  const removeAlt = (id) => set({ alternatives: alts.filter((a) => a.id !== id) });
+
+  return (
+    <SectionCard
+      title={PP.t('blocking.blockscreen_title')}
+      sub={PP.t('blocking.blockscreen_sub')}
+      info={PP.t('blocking.blockscreen_info')}>
+
+      <Setting
+        icon={IconCompass}
+        title={PP.t('blocking.redirect_title')}
+        desc={b.redirectLinkOn
+          ? (b.redirectUrl || PP.t('blocking.redirect_desc_unset'))
+          : PP.t('blocking.redirect_desc_off')}
+        info={PP.t('blocking.redirect_info')}>
+        <Switch on={b.redirectLinkOn} onClick={() => set({ redirectLinkOn: !b.redirectLinkOn })} />
+      </Setting>
+
+      {b.redirectLinkOn &&
+        <div className="sub-block">
+          <div className="row" style={{ gap: 10 }}>
+            <input
+              type="url"
+              className="input"
+              placeholder={PP.t('blocking.redirect_placeholder')}
+              value={b.redirectUrl}
+              onChange={(e) => set({ redirectUrl: e.target.value })}
+              style={{ flex: 1 }} />
+            <button type="button" className="btn btn-ghost btn-sm" disabled={!b.redirectUrl}
+                    onClick={() => openRedirect(b.redirectUrl)}>{PP.t('app.action_test')}</button>
+          </div>
+        </div>}
+
+      <div className="sub-label">{PP.t('blocking.alternatives_label')}</div>
+      {alts.map((a) => (
+        <Setting key={a.id} icon={IconSpark} title={a.text} desc={a.url || undefined}>
+          <button className="btn btn-ghost btn-sm" onClick={() => removeAlt(a.id)}>{PP.t('app.action_remove')}</button>
+        </Setting>
+      ))}
+
+      {alts.length < 6 &&
+        <div className="sub-block">
+          <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <input className="input" placeholder={PP.t('blocking.alternatives_placeholder')} value={draft}
+                   onChange={(e) => setDraft(e.target.value)}
+                   onKeyDown={(e) => e.key === 'Enter' && addAlt()}
+                   style={{ flex: '1 1 220px' }} />
+            <input className="input" placeholder={PP.t('blocking.alternatives_link_placeholder')} value={draftUrl}
+                   onChange={(e) => setDraftUrl(e.target.value)} style={{ flex: '1 1 160px' }} />
+            <button className="btn btn-ghost btn-sm" onClick={addAlt} disabled={!draft.trim()}>{PP.t('app.action_add')}</button>
+          </div>
+        </div>}
+    </SectionCard>
+  );
+}
+
+/* ---------------------------------------------------------------- lockdown */
+
+// Cold Turkey-style allowlist-only browsing, on demand — while active, only the
+// mainstream allowlist is reachable; everything else blocks, full stop.
+//
+// Asymmetry (see src-tauri/lockdown.rs's module doc): starting/extending is
+// always a STRENGTHENING — instant, unconditional, monotonic. Ending one early
+// is the WEAKENING — a normal lockdown goes through the same friction delay as
+// every other weakening; a FROZEN lockdown refuses outright, on purpose,
+// because that was the whole point of choosing frozen.
+const LOCKDOWN_DURATIONS = [
+  { value: 1800, labelKey: 'lockdown.duration_30m' },
+  { value: 3600, labelKey: 'lockdown.duration_1h' },
+  { value: 2 * 3600, labelKey: 'lockdown.duration_2h' },
+  { value: 4 * 3600, labelKey: 'lockdown.duration_4h' },
+  { value: 8 * 3600, labelKey: 'lockdown.duration_8h' },
+  { value: 24 * 3600, labelKey: 'lockdown.duration_24h' },
+];
+
+function LockdownCard() {
+  const available = !!(window.PPNative && window.PPNative.available);
+  const [view, setView] = React.useState(null); // { active, frozen, remaining_secs, active_until }
+  const [escalate, setEscalate] = React.useState(null); // null = loading
+  const [durationSecs, setDurationSecs] = React.useState(3600);
+  const [frozenChoice, setFrozenChoice] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [escBusy, setEscBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const [, tick] = React.useReducer((x) => x + 1, 0);
+  // The backend's credited-time engine is the source of truth; this just
+  // derives a smooth 1s countdown between re-syncs instead of hammering it.
+  const ref = React.useRef({ at: 0, remaining: 0 });
+
+  const pending = (window.usePendingWeakenings || (() => []))();
+  const cancelPending = pending.find((p) => p.action_id === 'lockdown.cancel');
+  const escalationPending = pending.find((p) => p.action_id === 'lockdown.escalation_disable');
+
+  const applyView = (v) => {
+    setView(v);
+    ref.current = { at: Date.now(), remaining: v ? v.remaining_secs : 0 };
+  };
+
+  const refresh = React.useCallback(() => {
+    if (!available) return;
+    window.PPNative.getLockdownState().then((v) => { if (v) applyView(v); });
+    // No dedicated "get lockdown escalation" command — SettingsV1.lockdown is
+    // part of the same full-settings snapshot getAppSettings() already returns.
+    window.PPNative.getAppSettings().then((s) => { if (s) setEscalate(!!(s.lockdown && s.lockdown.escalate_vulnerable_hours)); });
+  }, [available]);
+
+  React.useEffect(() => { refresh(); }, [refresh]);
+  // Re-poll while mounted — a lockdown can end on its own (natural expiry, no
+  // click involved), and a cancel/escalation-disable can resolve from Settings.
+  React.useEffect(() => {
+    if (!available) return;
+    const id = setInterval(refresh, 5000);
+    return () => clearInterval(id);
+  }, [available, refresh]);
+  React.useEffect(() => { refresh(); }, [pending.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  React.useEffect(() => {
+    if (!view || !view.active) return;
+    const id = setInterval(() => {
+      const left = ref.current.remaining - (Date.now() - ref.current.at) / 1000;
+      if (left <= 0) refresh(); else tick();
+    }, 1000);
+    return () => clearInterval(id);
+  }, [view, refresh]);
+
+  const liveRemaining = view && view.active
+    ? Math.max(0, Math.round(ref.current.remaining - (Date.now() - ref.current.at) / 1000))
+    : 0;
+
+  const start = () => {
+    setErr('');
+    const chosen = LOCKDOWN_DURATIONS.find((o) => o.value === durationSecs);
+    const durationLabel = chosen ? PP.t(chosen.labelKey) : fmtDur(durationSecs);
+    const warn = frozenChoice ? PP.t('lockdown.confirm_start_frozen_note') : '';
+    if (!confirm(PP.t('lockdown.confirm_start', { duration: durationLabel }) + warn)) return;
+    setBusy(true);
+    window.PPNative.startLockdown(durationSecs, frozenChoice)
+      .then((v) => applyView(v))
+      .catch((e) => setErr(e && e.message ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+
+  const cancel = () => {
+    if (!confirm(PP.t('lockdown.confirm_cancel'))) return;
+    setErr('');
+    acquireAuth()
+      .then((token) => { setBusy(true); return window.PPNative.cancelLockdown(token); })
+      .then(() => refresh())
+      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
+      .finally(() => setBusy(false));
+  };
+
+  const toggleEscalation = () => {
+    setErr('');
+    if (!escalate) {
+      // Turning it on is a strengthening — instant, no auth.
+      setEscBusy(true);
+      window.PPNative.setLockdownEscalation(true, null)
+        .then(() => setEscalate(true))
+        .catch((e) => setErr(e && e.message ? e.message : String(e)))
+        .finally(() => setEscBusy(false));
+      return;
+    }
+    acquireAuth()
+      .then((token) => { setEscBusy(true); return window.PPNative.setLockdownEscalation(false, token); })
+      .then((outcome) => { if (outcome && outcome.applied) setEscalate(false); refresh(); })
+      .catch((e) => { if (e !== 'cancelled' && !(e && e.message === 'cancelled')) setErr(e && e.message ? e.message : String(e)); })
+      .finally(() => setEscBusy(false));
+  };
+
+  return (
+    <SectionCard
+      title={PP.t('lockdown.section_title')}
+      sub={PP.t('lockdown.section_sub')}
+      info={PP.t('lockdown.section_info')}>
+
+      {!available && <div className="muted-note">{PP.t('app.needs_desktop')}</div>}
+      {available && !view && <div className="muted-note">{PP.t('app.loading')}</div>}
+
+      {/* inactive → start */}
+      {available && view && !view.active &&
+        <div className="sub-block">
+          <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <label className="field" style={{ flex: '0 0 180px' }}>
+              <span>{PP.t('lockdown.duration_label')}</span>
+              <select className="input" value={durationSecs} onChange={(e) => setDurationSecs(Number(e.target.value))}>
+                {LOCKDOWN_DURATIONS.map((o) => <option key={o.value} value={o.value}>{PP.t(o.labelKey)}</option>)}
+              </select>
+            </label>
+            <button className="btn btn-danger btn-sm" style={{ alignSelf: 'flex-end' }} disabled={busy} onClick={start}>
+              {PP.t(busy ? 'lockdown.starting' : 'lockdown.start_button')}
+            </button>
+          </div>
+          <label className="check-row">
+            <input type="checkbox" checked={frozenChoice} onChange={(e) => setFrozenChoice(e.target.checked)} />
+            <span className={frozenChoice ? 'frozen-armed' : undefined}>
+              {tRich('lockdown.frozen_choice')}
+              <InfoDot label={PP.t('lockdown.frozen_choice_info_label')}>
+                {PP.t('lockdown.frozen_choice_info')}
+              </InfoDot>
+            </span>
+          </label>
+          {err && <div className="err-note">{err}</div>}
+        </div>}
+
+      {/* active */}
+      {available && view && view.active &&
+        <div className="sub-block" style={{ marginTop: 4 }}>
+          <div className="ut-count">{fmtDur(liveRemaining)}</div>
+          <div className="ut-sub">
+            {PP.t(view.frozen ? 'lockdown.remaining_note_frozen' : 'lockdown.remaining_note')}
+          </div>
+          {err && <div className="err-note">{err}</div>}
+          {!view.frozen &&
+            <button className="btn btn-ghost btn-sm" disabled={busy || !!cancelPending} onClick={cancel} style={{ marginTop: 14 }}>
+              {PP.t('lockdown.end_early_short')}
+            </button>}
+          {view.frozen &&
+            <div className="muted-note" style={{ marginTop: 12 }}>
+              {PP.t('lockdown.frozen_note')}
+            </div>}
+          {cancelPending &&
+            <div className="pending-note">
+              {tRich('lockdown.cancel_pending', { time: fmtDur(cancelPending.remaining_secs) })}{' '}
+              <a href="#" onClick={(e) => { e.preventDefault(); window.PPNative.cancelWeakening('lockdown.cancel').then(refresh); }}>
+                {PP.t('lockdown.keep_locked')}
+              </a>
+            </div>}
+        </div>}
+
+      <Setting
+        icon={IconLock}
+        title={PP.t('lockdown.escalation_title')}
+        desc={PP.t(escalate ? 'app.state_on' : 'app.state_off')}
+        info={PP.t('lockdown.escalation_info')}>
+        <Switch on={!!escalate} onClick={toggleEscalation} disabled={escBusy || escalate === null || !available} />
+      </Setting>
+      <PendingNote pending={escalationPending} whatKey="lockdown.escalation_pending_what"
+                   onKeep={() => window.PPNative.cancelWeakening('lockdown.escalation_disable').then(refresh)} />
+    </SectionCard>
+  );
+}
+
+/* -------------------------------------------------------------------- page */
+
+function BlockingPage({ s, PP }) {
   return (
     <div className="page">
       <div className="page-head fade-up">
-        <div className="eyebrow">Blocking Settings</div>
-        <h1 className="page-title">How firmly to <em style={{ fontFamily: "Manrope" }}>hold the line</em></h1>
-        <p className="page-sub">Have custom Blocking settings, Like redirects, videos and more.</p>
+        <div className="eyebrow">{PP.t('blocking.eyebrow')}</div>
+        <h1 className="page-title">{tRich('blocking.title')}</h1>
+        <p className="page-sub">{PP.t('blocking.sub')}</p>
       </div>
 
-      {/* redirect & blocking screen */}
-      <div className="card fade-up">
-        <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Blocking screen redirect</div>
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 18, maxWidth: '60ch', lineHeight: 1.5 }}>
-          When a blocked site is visited, redirect to a motivational video or page instead of the default blocking screen.
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* redirect URL */}
-          <div className="redirect-box">
-            <div className="redirect-row">
-              <div className="ico"><IconCompass size={20} /></div>
-              <div className="txt">
-                <b>Redirect link</b>
-                <span>Where the user is sent — e.g. a motivational YouTube video</span>
-              </div>
-              <Switch on={b.redirectLinkOn} onClick={() => setMode('redirectLinkOn')} />
-            </div>
-            {b.redirectLinkOn &&
-            <div className="redirect-expand" style={{ display: 'flex', gap: 10 }}>
-              <input
-                type="url"
-                className="redirect-input"
-                placeholder="https://youtube.com/watch?v=…"
-                value={b.redirectUrl}
-                onChange={(e) => set({ redirectUrl: e.target.value })}
-                style={{ flex: 1 }} />
-              {b.redirectUrl &&
-              <button type="button" className="redirect-test" onClick={() => openRedirect(b.redirectUrl)}>
-                  Test ↗
-                </button>
-              }
-            </div>
-            }
-          </div>
-
-          {/* offline download */}
-          <div className="redirect-box">
-            <div className="redirect-row">
-              <div className="ico"><IconArrowUp size={20} style={{ transform: 'rotate(180deg)' }} /></div>
-              <div className="txt">
-                <b>Download for offline use</b>
-                <span>Video plays locally — works without internet access</span>
-              </div>
-              <Switch on={b.redirectOffline} onClick={() => setMode('redirectOffline')} />
-            </div>
-            {b.redirectOffline &&
-            <div className="redirect-expand">
-                <input
-                type="text"
-                className="redirect-input"
-                placeholder="/Users/you/Videos/motivation.mp4"
-                value={b.redirectOfflinePath}
-                onChange={(e) => set({ redirectOfflinePath: e.target.value })} />
-              </div>
-            }
-          </div>
-
-          {/* background song */}
-          <div className="redirect-box">
-            <div className="redirect-row">
-              <div className="ico"><IconSpark size={20} /></div>
-              <div className="txt">
-                <b>Background audio on block screen</b>
-                <span>Plays a calming track when the block screen appears</span>
-              </div>
-              <Switch on={b.bgSongEnabled} onClick={() => setMode('bgSongEnabled')} />
-            </div>
-            {b.bgSongEnabled &&
-            <div className="redirect-expand">
-                <input
-                type="text"
-                className="redirect-input"
-                placeholder="/Users/you/Music/calm.mp3  or  https://…"
-                value={b.bgSongPath}
-                onChange={(e) => set({ bgSongPath: e.target.value })} />
-              </div>
-            }
-          </div>
-        </div>
-      </div>
-
-      {/* schedule & reminders */}
-      <div className="card fade-up" style={{ marginTop: 18 }}>
-        <div style={{ fontWeight: 800, fontSize: 16 }}>Focus schedule &amp; reminders</div>
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, marginBottom: 18, maxWidth: '60ch', lineHeight: 1.5 }}>
-          Set your vulnerable hours and choose what kind of support shows up during them.
-        </div>
-
-        {/* vulnerable hours */}
-        <div className="redirect-box">
-          <div className="redirect-row">
-            <div className="ico"><IconClock size={20} /></div>
-            <div className="txt">
-              <b>Vulnerable hours</b>
-              <span>Pop ups & reminders run during this window</span>
-            </div>
-            <Switch on={b.vulnerable.on} onClick={() => setVuln({ on: !b.vulnerable.on })} />
-          </div>
-          {b.vulnerable.on &&
-          <div className="redirect-expand" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <label className="time-field">
-                <span>From</span>
-                <input type="time" className="time-input" value={b.vulnerable.start}
-              onChange={(e) => setVuln({ start: e.target.value })} />
-              </label>
-              <span style={{ color: 'var(--muted)', fontSize: 13, fontWeight: 600 }}>→</span>
-              <label className="time-field">
-                <span>To</span>
-                <input type="time" className="time-input" value={b.vulnerable.end}
-              onChange={(e) => setVuln({ end: e.target.value })} />
-              </label>
-            </div>
-          }
-        </div>
-
-        {/* pop-up / reminder types */}
-        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', margin: '22px 0 4px' }}>
-          Pop-ups &amp; reminders
-        </div>
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>
-          Choose which nudges you want to receive during your vulnerable hours.
-        </div>
-        {b.alerts.map((a) =>
-        <SettingRow key={a.id} icon={IconBell} title={a.label} desc={a.desc}
-        on={a.on} onToggle={() => toggleAlert(a.id)} />
-        )}
-      </div>
-
-      {/* tamper protection & enforcement */}
-      <div className="card fade-up" style={{ marginTop: 18 }}>
-        <div style={{ fontWeight: 800, fontSize: 16 }}>Tamper protection &amp; enforcement</div>
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, marginBottom: 18, maxWidth: '60ch', lineHeight: 1.5 }}>
-          What actually stops you from working around Oath Light — and what's still on the way.
-        </div>
-
-        {/* real, backend-enforced */}
-        <div className="setting">
-          <div className="ico"><IconShield size={20} /></div>
-          <div className="txt">
-            <b>Uninstall guard</b>
-            <span>Force-installs the extension on Chromium browsers and re-applies the policy if it's removed (user-level lock now; machine-wide hardening later)</span>
-          </div>
-          <Switch on={b.uninstallGuard} onClick={toggleGuard} />
-        </div>
-        {guardPending &&
-          <div style={{ fontSize: 12, color: 'var(--muted)', margin: '-6px 0 10px 54px' }}>
-            Turning off in {fmtDur(guardPending.remaining_secs)} — cancel from Settings → Pending changes
-          </div>
-        }
-
-        {/* SafeSearch is enforced unconditionally by the extension — there's
-            genuinely no switch for this, so we don't pretend there is one. */}
-        <div className="setting">
-          <div className="ico"><IconSearch size={20} /></div>
-          <div className="txt">
-            <b>SafeSearch enforcement</b>
-            <span>Forced on every connected browser, permanently — it can't be turned off, on purpose</span>
-          </div>
-          <span className="chip" style={{ color: 'var(--accent-2)' }}>Always on</span>
-        </div>
-
-        {/* YouTube Restricted Mode — opt-in strictness, default OFF. The browser
-            extension enforces it with a YouTube-Restrict: Strict header rule
-            (the same mechanism school networks use), pushed down on the same
-            channel as the redirect settings. */}
-        <div className="setting">
-          <div className="ico"><IconShield size={20} /></div>
-          <div className="txt">
-            <b>YouTube Restricted Mode (strict)</b>
-            <span>Opt-in: the browser extension applies YouTube's strict Restricted Mode via a header rule, so YouTube filters mature videos & comments server-side</span>
-          </div>
-          <Switch on={!!b.youtubeRestrict} onClick={() => toggle('youtubeRestrict')} />
-        </div>
-
-        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', margin: '22px 0 4px' }}>
-          App &amp; process blocking
-        </div>
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>
-          Enforced by the desktop app in the background — no browser needed.
-        </div>
-
-        <AppBlockingSection />
-
-        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', margin: '22px 0 4px' }}>
-          Network-level DNS
-        </div>
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>
-          A coarse backstop for apps that never touch the browser extension. Requires administrator rights.
-        </div>
-
-        <DnsFilterSection />
-
-        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-2)', margin: '22px 0 4px' }}>
-          Coming soon
-        </div>
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>
-          Not built yet — shown honestly here instead of as a switch that would quietly do nothing.
-        </div>
-
-        <div className="setting">
-          <div className="ico"><IconMoon size={20} /></div>
-          <div className="txt">
-            <b>Incognito blocking</b>
-            <span>Stop private/incognito windows from being used to slip past filters</span>
-          </div>
-          <div className="row" style={{ gap: 10 }}>
-            <span className="chip">Coming in Phase 4</span>
-            <Switch on={false} disabled />
-          </div>
-        </div>
-
-        <div className="setting">
-          <div className="ico"><IconLock size={20} /></div>
-          <div className="txt">
-            <b>Settings lock</b>
-            <span>Password-protect Oath Light's settings so they can't be changed without you</span>
-          </div>
-          <div className="row" style={{ gap: 10 }}>
-            <span className="chip">Coming in Alpha</span>
-            <Switch on={false} disabled />
-          </div>
-        </div>
-      </div>
-
-    </div>);
-
+      <StrictnessCard s={s} PP={PP} />
+      <ProtectionsCard PP={PP} />
+      <MonitorSection />
+      <ScheduleCard s={s} PP={PP} />
+      <BlockScreenCard s={s} PP={PP} />
+      <LockdownCard />
+    </div>
+  );
 }
+
 window.BlockingPage = BlockingPage;

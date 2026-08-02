@@ -1,18 +1,22 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-style="aurora">
+<html lang="en" data-theme="dark">
 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Blocklist — Oath Light</title>
+  <link rel="stylesheet" href="blocklist_assets/tokens.css">
   <link rel="stylesheet" href="blocklist_assets/desktop.css">
   <link rel="stylesheet" href="blocklist_assets/page.css">
 </head>
 
 <body>
+  <!-- Static ground; layers paint --ground-* tokens set by the active look.
+       The two blurred accent orbs that used to be here are gone with the
+       rest of the atmosphere. -->
   <div class="bg-layer" aria-hidden="true">
-    <div class="orb a"></div>
-    <div class="orb b"></div>
+    <i class="bg-pattern"></i>
+    <i class="bg-grain"></i>
   </div>
 
   <!-- head -->
@@ -145,6 +149,9 @@
   </footer>
 
   <script src="theme-sync.js"></script>
+  <script src="strings.js"></script>
+  <script src="locales/ar.js"></script>
+  <script src="voice-sync.js"></script>
   <script src="graylist-sites.js"></script>
   <script src="user_blocklist.js"></script>
 </body>

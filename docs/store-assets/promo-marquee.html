@@ -1,0 +1,42 @@
+<meta charset="utf-8">
+<style>
+@font-face{font-family:'Manrope';font-style:normal;font-weight:200 800;src:url('m.woff2') format('woff2');}
+html,body{margin:0;padding:0;background:#0a0a0a;}
+.tile{
+  width:1400px;height:560px;box-sizing:border-box;background:#0a0a0a;
+  font-family:'Manrope',system-ui,-apple-system,'Segoe UI',sans-serif;color:#f2f2f2;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:0 120px;
+}
+.row{display:flex;align-items:center;gap:22px;}
+.mark{width:84px;height:84px;border-radius:21px;display:block;}
+.name{font-size:46px;font-weight:800;letter-spacing:-.022em;line-height:1;}
+h1{margin:42px 0 0;font-size:64px;font-weight:800;line-height:1.1;letter-spacing:-.03em;}
+h1 span{color:#b8b8b8;}
+.rule{width:84px;height:1px;background:rgba(255,255,255,.16);margin:34px 0 0;}
+p{margin:30px 0 0;font-size:21px;line-height:1.5;color:#b8b8b8;letter-spacing:-.005em;max-width:800px;}
+.feats{margin-top:38px;display:flex;gap:44px;align-items:center;}
+.feat{font-size:15px;font-weight:700;letter-spacing:.02em;color:#f2f2f2;}
+.feat i{display:block;font-style:normal;font-weight:500;font-size:13.5px;color:#7a7a7a;
+  margin-top:5px;letter-spacing:0;}
+.sep{width:1px;height:34px;background:rgba(255,255,255,.12);}
+.eyebrow{margin-top:38px;font-size:13px;font-weight:700;letter-spacing:.16em;
+  text-transform:uppercase;color:#7a7a7a;}
+</style>
+<div class="tile">
+  <div class="row">
+    <img class="mark" src="logo.png">
+    <div class="name">Oath Light</div>
+  </div>
+  <h1>A clean path, <span>on your terms.</span></h1>
+  <div class="rule"></div>
+  <p>Blocks explicit content across the browser, system DNS, and the screen itself — then makes that protection hold when you'd rather it didn't.</p>
+  <div class="feats">
+    <div class="feat">Three layers<i>Browser · DNS · on-screen</i></div>
+    <div class="sep"></div>
+    <div class="feat">Hard to undo<i>Cooldowns &amp; tamper resistance</i></div>
+    <div class="sep"></div>
+    <div class="feat">Fully on-device<i>Nothing sold or reported</i></div>
+  </div>
+  <div class="eyebrow">Free &amp; open source · No accounts · No telemetry</div>
+</div>

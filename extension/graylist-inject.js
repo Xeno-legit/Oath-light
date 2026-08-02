@@ -26,7 +26,7 @@
 // WAR script (not inline) is used deliberately — it bypasses strict page CSP that
 // would block an inline <script> (reddit/x both ship such CSP).
 //
-// See BLOCKING_STRATEGY.md §2 + §3 for the full rationale and the per-site triage.
+// See docs/ARCHITECTURE.md §2.3 for the full rationale and the per-site triage.
 // ════════════════════════════════════════════════════════════════════════════
 
 (function () {
@@ -183,7 +183,53 @@
         }
       }
       return false;
-    }
+    },
+    // Twitch: `contentClassificationLabels` on the stream object — Twitch's own
+    // mandatory moderation labels, verified live on gql.twitch.tv (each entry is
+    // { id, localizedName }). Live-captured fixture: tests/fixtures/graylist-twitch.json.
+    //
+    // We match ONLY the sexual label. The other ids are real and all appeared in a
+    // single 30-stream directory pull — MatureGame ("Mature-rated game" — Rust,
+    // Rainbow Six), DebatedSocialIssuesAndPolitics, ProfanityVulgarity — plus
+    // ViolentGraphic, DrugsIntoxication and Gambling. Matching those would strip a
+    // large share of ordinary gaming Twitch for zero NSFW gain. Same precision rule
+    // as S.gamebanana: sexual codes only, never gore/politics/profanity.
+    //
+    // `broadcastSettings.isMature` is deliberately NOT used either — it's the legacy
+    // blanket "mature audiences" checkbox, orthogonal to sexual content (every stream
+    // in the capture had isMature:false while carrying real labels).
+    //
+    // Prefix-matched rather than an exact 'SexualThemes' compare so a future
+    // SexualContent/SexualThemesX rename still lands; anchored so it can't catch an
+    // unrelated id that merely contains the word.
+    twitch:   o => Array.isArray(o.contentClassificationLabels) &&
+                   o.contentClassificationLabels.some(l => {
+                     const id = typeof l === 'string' ? l : (l && (l.id || l.name));
+                     return typeof id === 'string' && /^sexual/i.test(id);
+                   }),
+    // Kick: `is_mature` on livestream objects. Verified live on all three surfaces
+    // the web app uses — web.kick.com/api/v1/livestreams/featured (browse),
+    // kick.com/api/v2/channels/<slug>, and /api/search — with both true and false
+    // values present. Fixture: tests/fixtures/graylist-kick.json.
+    //
+    // Unlike Twitch, Kick publishes NO per-category breakdown; this one boolean is
+    // the entire ground truth, so it necessarily also removes gambling and
+    // mature-game streams (the mature entries in the live capture were Slots &
+    // Casino). That collateral is inherent to the only signal Kick exposes, and is
+    // the accepted trade on a platform whose moderation is deliberately looser.
+    //
+    // VERIFIED COVERAGE (live, 2026-08-01): live streams (featured/browse/search),
+    // the per-channel object, the global clips feed and CATEGORY objects all carry
+    // is_mature. Because the rule matches by host, any endpoint returning objects
+    // with the flag is scrubbed without being enumerated here.
+    //
+    // KNOWN GAP: per-channel VODs (/api/v2/channels/<slug>/videos) and per-channel
+    // clips carry NO is_mature — Kick simply doesn't flag them, so there is nothing
+    // to read and they pass through. Partly mitigated by the channel-page block:
+    // both are reached from a channel page, which blocks outright when the channel
+    // itself is mature. Twitch has no equivalent gap — its labels are present on
+    // the Stream, Video AND Clip types (verified live).
+    kick:     o => o.is_mature === true
   };
 
   // ── Per-host rules ────────────────────────────────────────────────────────
@@ -317,6 +363,25 @@
       test: (h) => h === 'fanbox.cc' || h.endsWith('.fanbox.cc'),
       signals: [S.fanbox] },
 
+    // Twitch — every feed the web app renders (directory, category, search,
+    // sidebar, channel page) comes from ONE endpoint: POST gql.twitch.tv/gql.
+    // Matching the host covers all of them. Stream cards live at
+    // data.streams.edges[] / data.game.streams.edges[], with the label on
+    // edge.node, so the depth-first array drop removes the whole edge.
+    // (Only chat is WebSocket, and we don't filter chat — nothing here needs it.)
+    { id: 'twitch',
+      test: (h) => h === 'gql.twitch.tv' || h === 'twitch.tv' || h.endsWith('.twitch.tv'),
+      signals: [S.twitch],
+      pageOwner: true },
+
+    // Kick — kick.com/api/* plus the separate web.kick.com/api/* host the browse
+    // page uses. Feed items carry is_mature directly on the array element
+    // (data.livestreams[]), so they drop cleanly.
+    { id: 'kick',
+      test: (h) => h === 'kick.com' || h.endsWith('.kick.com'),
+      signals: [S.kick],
+      pageOwner: true },
+
     // Mastodon — any instance, matched purely by its stable REST paths.
     // (Also carries S.nsfwBool so PeerTube videos sharing /api/v1/accounts/ are caught.)
     { id: 'mastodon',
@@ -336,7 +401,8 @@
     'minds.com', 'itaku.ee',
     '/api/v1/videos', '/api/v1/video-channels', '/api/v3/post', '/api/v3/comment',
     '/api/v3/community', '/api/v3/search', 'mangadex', 'artstation.com', 'flickr',
-    'sketchfab.com', '500px.com', 'gamebanana.com', 'wattpad.com', 'fanbox.cc'
+    'sketchfab.com', '500px.com', 'gamebanana.com', 'wattpad.com', 'fanbox.cc',
+    'twitch.tv', 'kick.com'
   ];
   function quickMatch(s) {
     for (let i = 0; i < QUICK.length; i++) if (s.indexOf(QUICK[i]) !== -1) return true;
@@ -386,6 +452,111 @@
       try { if (signals[i](node)) return true; } catch (_) {}
     }
     return false;
+  }
+
+  // ── Channel-page hard block (rules with pageOwner: true) ──────────────────
+  // On a channel URL — twitch.tv/<login>, kick.com/<slug> — the flagged object is
+  // NOT an array element. It's a named child (Twitch `data.user.stream`, Kick
+  // `livestream`), so scrub()'s map-delete removes just that child and the page
+  // renders as if the channel were merely offline: no video, no explanation, no
+  // block recorded. Worse, it looks like a bug rather than a filter.
+  //
+  // So we detect that case and hard-block the whole tab instead — driven by the
+  // SAME label the stripper reads. No DOM selectors, nothing to rot on a redesign.
+  //
+  // The precision problem: these payloads also carry recommended/sidebar channels,
+  // and firing on "any flag anywhere in the response" would block a clean channel
+  // because something in a rail was labelled. Ownership solves it — every channel
+  // object names itself — so we track the nearest enclosing owner while walking and
+  // fire only when the flagged object belongs to the channel whose page this is.
+  const PAGE_RESERVED = {
+    'twitch.tv': new Set(['directory', 'videos', 'settings', 'u', 'subs', 'drops',
+      'downloads', 'jobs', 'turbo', 'prime', 'friends', 'wallet', 'inventory', 'store',
+      'popout', 'moderator', 'p', 'search', 'following', 'collections', 'team',
+      'products', 'bits', 'payments', 'login', 'signup']),
+    'kick.com': new Set(['browse', 'categories', 'category', 'following', 'search',
+      'clips', 'dashboard', 'subscriptions', 'messages', 'help', 'about', 'legal',
+      'privacy', 'terms', 'login', 'signup', 'settings', 'wallet', 'transactions'])
+  };
+
+  // The channel this page IS, or null when we're not on a single-channel URL.
+  function currentChannelSlug() {
+    const h = location.hostname.toLowerCase();
+    const key = h.indexOf('kick.com') !== -1 ? 'kick.com'
+              : h.indexOf('twitch.tv') !== -1 ? 'twitch.tv' : null;
+    if (!key) return null;
+    const m = (location.pathname || '').match(/^\/([^\/?#]+)\/?$/);
+    if (!m) return null;
+    const slug = m[1].toLowerCase();
+    return PAGE_RESERVED[key].has(slug) ? null : slug;
+  }
+
+  // Which channel does this object node describe? Returns null when it doesn't
+  // identify one (the walker then keeps the inherited owner).
+  //
+  // A Kick livestream names its SESSION in `slug` ("acea62c8-100k-start-…"), not
+  // its channel — reading identity off that would break the ownership chain, so
+  // objects carrying stream markers are identified by their `channel` instead.
+  //
+  // `displayName` is in the list because of what a live channel page actually
+  // sends. Twitch batches ~30 operations into one POST, and the one carrying the
+  // labels — `ContentClassificationContext` — returns a user of exactly
+  // { id, stream, displayName, __typename }: NO login. Other operations in the
+  // same batch do carry `login`, but not the one we need, so keying on login
+  // alone matched nothing and the block silently never fired (caught by capturing
+  // a real channel page; the fixture now pins this shape).
+  //
+  // RESIDUAL: for channels whose displayName isn't just their login recapitalised
+  // — localized CJK names, say — this comparison misses and no block fires. That
+  // fails safe, not open: scrub() has already deleted the flagged `stream` object
+  // by then, so the player has nothing to play. The user gets a dead channel
+  // instead of a block screen.
+  function ownerOf(o) {
+    if (typeof o.is_mature === 'boolean' || o.session_title !== undefined) {
+      const c = o.channel && (o.channel.slug || o.channel.username);
+      return typeof c === 'string' ? c.toLowerCase() : null;
+    }
+    const v = o.login || o.username || o.slug ||
+              (o.broadcaster && o.broadcaster.login) || o.displayName;
+    return typeof v === 'string' ? v.toLowerCase() : null;
+  }
+
+  function ownerFlagged(node, signals, slug, owner, depth) {
+    if (node == null || typeof node !== 'object' || depth > 12) return false;
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) {
+        if (ownerFlagged(node[i], signals, slug, owner, depth + 1)) return true;
+      }
+      return false;
+    }
+    const own = ownerOf(node) || owner;
+    if (own === slug && signalsDirect(node, signals)) return true;
+    for (const k in node) {
+      const v = node[k];
+      if (v && typeof v === 'object' && ownerFlagged(v, signals, slug, own, depth + 1)) return true;
+    }
+    return false;
+  }
+
+  // Fires at most once per page — the block is a tab-level redirect, and these
+  // SPAs re-query the same channel constantly while it's open.
+  let pageBlockSent = false;
+  function checkPageBlock(rule, data) {
+    if (pageBlockSent || !rule.pageOwner) return;
+    const slug = currentChannelSlug();
+    if (!slug) return;
+    let hit = false;
+    try { hit = ownerFlagged(data, rule.signals, slug, null, 0); } catch (_) {}
+    if (!hit) return;
+    pageBlockSent = true;
+    try { document.documentElement.style.display = 'none'; } catch (_) {}
+    try {
+      window.postMessage({
+        __oathLight: 'graylist-page-block',
+        site: rule.id,
+        match: rule.id + ' adult-labelled channel (' + slug + ')'
+      }, '*');
+    } catch (_) {}
   }
 
   // scrub: walk the parsed JSON DEPTH-FIRST and remove flagged items.
@@ -496,6 +667,10 @@
             const data = parseScrubbable(txt, ct);
             if (data === undefined) return resp;
 
+            // Before scrub() mutates anything — it deletes the very object the
+            // channel-page check needs to see.
+            checkPageBlock(rule, data);
+
             const ctx = { n: 0 };
             const cleaned = scrub(data, rule.signals, 0, ctx);
             if (ctx.n === 0) return resp;
@@ -557,6 +732,7 @@
               if (self.status >= 200 && self.status < 300 && typeof raw === 'string' && ctMaybeText(ct)) {
                 const data = parseScrubbable(raw, ct);
                 if (data !== undefined) {
+                  checkPageBlock(rule, data);
                   const c = { n: 0 };
                   const cleaned = scrub(data, rule.signals, 0, c);
                   if (c.n > 0) { report(rule.id, c.n); cachedText = JSON.stringify(cleaned); }
@@ -579,6 +755,7 @@
                   try {
                     const obj = rDesc.get.call(this);
                     if (obj && typeof obj === 'object') {
+                      checkPageBlock(rule, obj);
                       const c = { n: 0 };
                       const cleaned = scrub(JSON.parse(JSON.stringify(obj)), rule.signals, 0, c);
                       if (c.n > 0) report(rule.id, c.n);

@@ -1,17 +1,26 @@
 mod auth;
+mod browser_lock;
 mod browsers;
+mod cli;
 mod dns_filter;
+mod evallog;
 mod friction;
 mod lockdown;
+mod mentor;
 mod notify;
 pub mod nsfw;
 pub mod nudenet;
 mod ota;
 mod overlay;
+mod grayscale;
 mod profiles;
+mod recovery;
+mod reminder;
 pub mod screen;
 mod settings;
+mod sidecars;
 mod uninstall;
+mod update;
 mod watchdog;
 
 use oathlight_core::eventlog::{self, EventLog};
@@ -23,11 +32,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
-use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 // ============================================================================
@@ -56,6 +64,18 @@ static UNINSTALL_FIRED: AtomicBool = AtomicBool::new(false);
 /// `open-panic` event. The renderer consumes it on startup via
 /// `take_panic_pending`, so a cold-start request still lands on the flow.
 static PANIC_PENDING: AtomicBool = AtomicBool::new(false);
+
+/// Unix ms at which a grayscale vulnerable-hours window (5.6) should end, or
+/// 0 when grayscale isn't ours to turn off. Set from the extension's
+/// `vulnerable_window_active` message (which carries the remaining minutes)
+/// and cleared by `tick_grayscale` on the monitor tick.
+///
+/// Deliberately a deadline rather than a "the extension will tell us when it
+/// ends" contract: the extension only reports while the window is ACTIVE, so
+/// if it disconnects — browser closed, extension removed, machine asleep — a
+/// signal-based design would leave the user's display monochrome indefinitely.
+/// A deadline always expires.
+static GRAYSCALE_UNTIL: AtomicU64 = AtomicU64::new(0);
 
 // ============================================================================
 // Application State
@@ -148,6 +168,29 @@ pub struct BrowserStatus {
     pub enforcement: String,
     /// Every profile of this browser currently connected.
     pub profiles: Vec<ProfileStatus>,
+    /// This browser is kill-on-sight until it carries the extension
+    /// (`browser_lock`) — i.e. the setting is on and it is one of the browsers
+    /// that cannot be force-installed. Says nothing about whether it is being
+    /// killed *right now*; that is `lock_grace_secs` and `installed`.
+    #[serde(default)]
+    pub locked_out: bool,
+    /// Seconds left on an open restore window, 0 when there is none. Drives the
+    /// countdown the UI shows while the user completes the install.
+    #[serde(default)]
+    pub lock_grace_secs: u64,
+    /// The extension is downloaded and unpacked in some profile but switched
+    /// off — the user is one click from protected. Distinct from `installed`
+    /// being false for the ordinary reason (nothing there at all), and the only
+    /// state that buys more time from `browser_lock`.
+    #[serde(default)]
+    pub pending_approval: bool,
+    /// This browser is carrying a build older than the one this app ships with
+    /// (`browsers::EXPECTED_EXTENSION_VERSION`). Reported rather than hidden:
+    /// "why is it still on the old version" is a question the user was left to
+    /// answer by squinting at a version number, and the answer is usually either
+    /// "the browser hasn't restarted yet" or "the store hasn't published it".
+    #[serde(default)]
+    pub extension_outdated: bool,
 }
 
 /// A browser not in the built-in table, learned from a native-host connection.
@@ -189,6 +232,26 @@ pub struct AppState {
     /// Persisted to `lockdown_allow.json`. Additions go through a short (60s)
     /// friction delay (`lockdown.allow:` action id) — see `request_lockdown_allow`.
     lockdown_allow: Vec<String>,
+    /// Recent (timestamp_ms, delta) block-count increases, for the
+    /// block-burst trusted-contact detector (5.2) — see `BLOCK_BURST_THRESHOLD`.
+    /// Bounded to the last `BLOCK_BURST_WINDOW_MS`; old entries are trimmed on
+    /// every `stats_sync`/`stats_update`, never grows unbounded.
+    block_burst_log: VecDeque<(u64, u64)>,
+    /// Wall-clock ms of the last `block_burst` trusted-contact notification,
+    /// so a sustained burst doesn't refire the notification every sync.
+    last_block_burst_notify_ms: u64,
+    /// Mirror of `SettingsV1.lockdown.escalate_vulnerable_hours` (4.4 v2), so
+    /// `broadcast_blocking` can push it down to extensions without needing a
+    /// `SettingsState` handle of its own — kept in sync by
+    /// `set_lockdown_escalation` and the `"lockdown.escalation_disable"`
+    /// applier arm, the only two places that ever change the setting.
+    lockdown_escalate: bool,
+    /// Mirror of `SettingsV1.serious_mode` (UX Direction §1), for the same
+    /// reason as `lockdown_escalate` above: `broadcast_blocking` needs it and
+    /// has no `SettingsState` handle. Kept in sync by `set_serious_mode` and
+    /// the `"serious.disable"` applier arm — the only two places that ever
+    /// change the setting — plus the startup seed in `setup()`.
+    serious_mode: bool,
 }
 
 /// Lazily-loaded NSFW models (Phase 4 optional AI monitoring). Both are loaded
@@ -453,7 +516,7 @@ fn run_monitor(
             let infer_ms = t_inf.elapsed().as_secs_f64() * 1000.0;
             // Ensemble: drawn/hentai (SigLIP) OR photographic nudity (NudeNet).
             let blocked = classification.nsfw_score >= ENSEMBLE_SIGLIP_NSFW
-                || nudenet.as_ref().map_or(false, |r| r.explicit >= ENSEMBLE_NUDENET_EXPLICIT);
+                || nudenet.as_ref().is_some_and(|r| r.explicit >= ENSEMBLE_NUDENET_EXPLICIT);
 
             let payload = ScanEvent {
                 ts: now_unix_ms(),
@@ -490,6 +553,18 @@ fn run_monitor(
                 // only, no content"). The monitor id is the machine's display
                 // index, not anything identifying.
                 log_event(&app, "monitor_escalated", serde_json::json!({ "monitor_id": monitor_id }));
+                // 2.4: stash the ensemble's own numbers + a frame digest so a
+                // "this was wrong" press has real evidence to record. Written
+                // BEFORE `open` (which calls `mark_shown`) — `mark_shown`
+                // deliberately preserves it. Never the frame itself.
+                overlay_state.set_evidence(
+                    monitor_id,
+                    overlay::Evidence {
+                        siglip_nsfw: payload.classification.nsfw_score,
+                        nudenet_explicit: payload.nudenet.as_ref().map(|r| r.explicit).unwrap_or(0.0),
+                        screen_hash: evallog::hash_frame(dynimg.to_rgb8().as_raw()),
+                    },
+                );
                 if let Err(e) = overlay::open(&app, &overlay_state, monitor_id) {
                     log::warn!("could not open overlay for monitor {monitor_id}: {e}");
                 }
@@ -554,6 +629,14 @@ fn msg_profile_id(msg: &Value) -> Option<String> {
         .map(String::from)
 }
 
+// Block-burst trusted-contact detector (5.2): this many blocks landing within
+// `BLOCK_BURST_WINDOW_MS` of each other triggers one `block_burst` event-log
+// entry + (if configured) trusted-contact notification. Chosen as "clearly a
+// lot, in a short window" without being so low that ordinary heavy browsing
+// (a page full of ad-network subrequests) trips it constantly.
+const BLOCK_BURST_THRESHOLD: u64 = 10;
+const BLOCK_BURST_WINDOW_MS: u64 = 10 * 60 * 1000; // 10 minutes
+
 // ============================================================================
 // Message handling — messages arriving from a browser's extension
 // ============================================================================
@@ -586,6 +669,10 @@ fn handle_extension_message(
         "handshake" | "heartbeat" => { /* liveness already refreshed above */ }
 
         "stats_sync" | "stats_update" => {
+            // Block-burst trusted-contact detector (5.2): set outside the lock
+            // below if this update pushes the rolling window's total at/over
+            // `BLOCK_BURST_THRESHOLD` and the per-window cooldown has elapsed.
+            let mut burst_detected = false;
             {
                 let mut s = state.lock().unwrap();
                 // Key this source's block count by its profile id (fall back to
@@ -597,7 +684,32 @@ fn handle_extension_message(
                     .map(|c| if c.profile_id.is_empty() { format!("conn-{}", conn_id) } else { c.profile_id.clone() })
                     .unwrap_or_else(|| format!("conn-{}", conn_id));
                 if let Some(v) = msg.get("totalBlocks").and_then(|v| v.as_u64()) {
+                    // `totalBlocks` is cumulative (lifetime), so the delta since
+                    // this source's last-known value is how many NEW blocks
+                    // this update represents — a fresh source (no prior value)
+                    // contributes zero, never its whole lifetime total, so a
+                    // reconnect/resync can never look like a burst on its own.
+                    let prev = s.block_counts.get(&key).copied().unwrap_or(v);
+                    let delta = v.saturating_sub(prev);
                     s.block_counts.insert(key, v);
+                    if delta > 0 {
+                        let now_ms = now_unix_ms();
+                        s.block_burst_log.push_back((now_ms, delta));
+                        while s
+                            .block_burst_log
+                            .front()
+                            .is_some_and(|(t, _)| now_ms.saturating_sub(*t) > BLOCK_BURST_WINDOW_MS)
+                        {
+                            s.block_burst_log.pop_front();
+                        }
+                        let windowed: u64 = s.block_burst_log.iter().map(|(_, d)| d).sum();
+                        if windowed >= BLOCK_BURST_THRESHOLD
+                            && now_ms.saturating_sub(s.last_block_burst_notify_ms) >= BLOCK_BURST_WINDOW_MS
+                        {
+                            s.last_block_burst_notify_ms = now_ms;
+                            burst_detected = true;
+                        }
+                    }
                 }
                 // Aggregate = sum of every source's latest total.
                 s.stats.total_blocks = s.block_counts.values().sum();
@@ -618,6 +730,14 @@ fn handle_extension_message(
             }
             // Reflect the new global total back down to the extensions' pages.
             broadcast_app_data(state);
+            if burst_detected {
+                // Tier 1 (solo, always): a plain protective-event entry, no
+                // content — just that a burst happened. Tier 2 (optional):
+                // notify_contact is itself a no-op unless a contact is
+                // configured with this event enabled (solo-first).
+                log_event(app, "block_burst", serde_json::json!({}));
+                notify_contact(app, "block_burst");
+            }
         }
 
         "blocklist_sync" => {
@@ -653,6 +773,78 @@ fn handle_extension_message(
             // or verify here, and the blocked page runs its own self-contained
             // fallback flow whether or not this arrives.
             open_panic_flow(app);
+        }
+
+        "vulnerable_window_active" => {
+            // Lockdown schedule-from-vulnerable-hours (4.4 v2, opt-in, off by
+            // default — `SettingsV1.lockdown.escalate_vulnerable_hours`). This
+            // crate has no timezone database, so the extension (which already
+            // evaluates the vulnerable-hours window in local time for the
+            // reminder pop-ups — see `reminders.js`) is the one telling us
+            // "the window is active, here's how many minutes remain" on a
+            // short cadence; this just tops up a lockdown to match. Starting/
+            // extending a lockdown is always a strengthening (instant, no
+            // gate — see lockdown.rs), and `LockdownStore::start` is
+            // monotonic (never shortens the remaining time), so acting on a
+            // stale or duplicate message here is always safe, never a bug.
+            // Turning the ESCALATION SETTING itself off is the weakening half
+            // of the asymmetry and goes through `set_lockdown_escalation`'s
+            // friction gate instead — this arm only ever reads that setting.
+            let escalate = app
+                .try_state::<Arc<settings::SettingsState>>()
+                .map(|s| s.get().lockdown.escalate_vulnerable_hours)
+                .unwrap_or(false);
+            let mins = msg.get("remainingMin").and_then(|v| v.as_u64()).unwrap_or(0);
+            if escalate && mins > 0 {
+                if let Some(lockdown) = app.try_state::<Arc<lockdown::LockdownStore>>() {
+                    let was_active = lockdown.view().active;
+                    let view = lockdown.start(mins.saturating_mul(60), false);
+                    if let Some(settings) = app.try_state::<Arc<settings::SettingsState>>() {
+                        settings.update(|s| {
+                            s.lockdown.active_until = view.active_until;
+                            s.lockdown.frozen = view.frozen;
+                        });
+                    }
+                    let _ = broadcast_blocking(state, lockdown.inner());
+                    if !was_active {
+                        log_event(
+                            app,
+                            "lockdown_started",
+                            serde_json::json!({
+                                "duration_secs": mins * 60,
+                                "frozen": false,
+                                "reason": "vulnerable_hours_schedule",
+                            }),
+                        );
+                    }
+                }
+            }
+
+            // Grayscale vulnerable hours (5.6). Rides the SAME signal as the
+            // lockdown escalation above, for the same reason: this crate has
+            // no timezone database, so the extension owns the local-time
+            // window math and tells us "active, N minutes left". Independent
+            // of the escalation setting — a user can want a desaturated
+            // screen at 1am without wanting allowlist-only browsing.
+            //
+            // `GRAYSCALE_UNTIL` is when to hand the display back; the monitor
+            // tick does the actual restore (see `tick_grayscale`), so the
+            // filter still lifts if the extension disconnects mid-window
+            // rather than leaving someone stuck in monochrome.
+            let want_gray = app
+                .try_state::<Arc<settings::SettingsState>>()
+                .map(|s| s.get().grayscale_vulnerable_hours)
+                .unwrap_or(false);
+            if want_gray && mins > 0 {
+                let until = now_unix_ms() + mins.saturating_mul(60_000);
+                GRAYSCALE_UNTIL.store(until, Ordering::SeqCst);
+                if !grayscale::is_active() {
+                    match grayscale::set(true) {
+                        Ok(()) => log::info!("grayscale on for the vulnerable-hours window ({mins}m)"),
+                        Err(e) => log::warn!("could not enable grayscale: {e}"),
+                    }
+                }
+            }
         }
 
         _ => log::warn!("[conn {}] unknown message type: {}", conn_id, msg_type),
@@ -716,12 +908,18 @@ fn log_event(app: &AppHandle, kind: &str, data: Value) {
 /// connection drops; while connected, the desktop's explicit pushes are
 /// authoritative (a clock roll can't shorten a lockdown, only the desktop
 /// ending it can).
-fn lockdown_field(view: &lockdown::LockdownView, allow: &[String]) -> Value {
+fn lockdown_field(view: &lockdown::LockdownView, allow: &[String], escalate_vulnerable_hours: bool) -> Value {
     serde_json::json!({
         "active": view.active,
         "frozen": view.frozen,
         "ends_at_hint": view.active_until,
         "allow": allow,
+        // 4.4 v2: tells the extension whether to arm its own vulnerable-hours
+        // watcher (see reminders.js's `maybeEscalateLockdown`) — the desktop
+        // has no timezone database, so the extension is the one that decides
+        // WHEN the window is active; this flag only decides WHETHER it should
+        // bother checking at all.
+        "escalate_vulnerable_hours": escalate_vulnerable_hours,
     })
 }
 
@@ -735,12 +933,24 @@ fn lockdown_field(view: &lockdown::LockdownView, allow: &[String]) -> Value {
 /// either the base settings or the lockdown state.
 fn broadcast_blocking(state: &Arc<Mutex<AppState>>, lockdown: &lockdown::LockdownStore) -> usize {
     let view = lockdown.view();
-    let (mut settings, allow) = {
+    let (mut settings, allow, escalate, serious) = {
         let s = state.lock().unwrap();
-        (s.ext_blocking.clone().unwrap_or_else(|| serde_json::json!({})), s.lockdown_allow.clone())
+        (
+            s.ext_blocking.clone().unwrap_or_else(|| serde_json::json!({})),
+            s.lockdown_allow.clone(),
+            s.lockdown_escalate,
+            s.serious_mode,
+        )
     };
     if let Some(obj) = settings.as_object_mut() {
-        obj.insert("lockdown".to_string(), lockdown_field(&view, &allow));
+        obj.insert("lockdown".to_string(), lockdown_field(&view, &allow, escalate));
+        // Serious Mode (UX Direction §1) is injected from the BACKEND's
+        // persisted settings, never from whatever the renderer last pushed —
+        // the renderer's copy is a mirror, and a mirror must not be able to
+        // tell the extension that Serious Mode is off. The extension reads
+        // this for both halves of the flip: its strict enforcement presets,
+        // and the voice its pages speak in (voice-sync.js).
+        obj.insert("serious".to_string(), serde_json::Value::Bool(serious));
     }
     let msg = serde_json::json!({ "type": "set_blocking", "settings": settings });
     broadcast_to_extensions(state, &msg)
@@ -777,6 +987,9 @@ fn notify_contact(app: &AppHandle, event_kind: &str) {
         "uninstall_requested" => contact.notify.uninstall_requested,
         "lockdown_cancelled" => contact.notify.lockdown_cancelled,
         "password_removal_requested" => contact.notify.password_removal_requested,
+        "ext_removed" => contact.notify.ext_removed,
+        "block_burst" => contact.notify.block_burst,
+        "serious_disable_requested" => contact.notify.serious_disable_requested,
         // The unwire notification (5.2's anti-weak-moment rule) and the
         // monthly heartbeat always send when a contact exists — they're not
         // per-event opt-outs.
@@ -813,6 +1026,45 @@ fn notify_contact(app: &AppHandle, event_kind: &str) {
             }
         }
     });
+}
+
+/// Restore the display when a grayscale vulnerable-hours window ends (5.6).
+///
+/// Only ever turns grayscale OFF, and only when Oath Light is the one that
+/// turned it on (`GRAYSCALE_UNTIL != 0`). A user who runs the Windows colour
+/// filter themselves, all day, every day, is never touched by this.
+fn tick_grayscale() {
+    let until = GRAYSCALE_UNTIL.load(Ordering::SeqCst);
+    if until == 0 || now_unix_ms() < until {
+        return;
+    }
+    GRAYSCALE_UNTIL.store(0, Ordering::SeqCst);
+    match grayscale::set(false) {
+        Ok(()) => log::info!("grayscale window ended — display restored"),
+        Err(e) => log::warn!("could not restore colour after the grayscale window: {e}"),
+    }
+}
+
+/// Toggle grayscale-during-vulnerable-hours (5.6).
+///
+/// Instant in BOTH directions, unlike every protection toggle in this file —
+/// see `SettingsV1::grayscale_vulnerable_hours` and grayscale.rs for why the
+/// friction rule deliberately doesn't apply to an environment nudge. Turning
+/// it off also lifts the filter immediately if a window is currently running,
+/// rather than leaving the user monochrome until the window would have ended.
+#[tauri::command]
+fn set_grayscale_vulnerable_hours(
+    app: AppHandle,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    enabled: bool,
+) -> Result<bool, String> {
+    settings.update(|s| s.grayscale_vulnerable_hours = enabled);
+    if !enabled && GRAYSCALE_UNTIL.load(Ordering::SeqCst) != 0 {
+        GRAYSCALE_UNTIL.store(0, Ordering::SeqCst);
+        let _ = grayscale::set(false);
+    }
+    log_event(&app, "grayscale_setting_changed", serde_json::json!({ "enabled": enabled }));
+    Ok(enabled)
 }
 
 /// Monthly "still protecting" heartbeat (5.2's silent-failure mitigation): if
@@ -886,143 +1138,14 @@ fn start_tcp_server(app: AppHandle, state: Arc<Mutex<AppState>>) {
 }
 
 // ============================================================================
-// Update server — serves the packed CRX + update manifest over localhost so the
-// Chromium force-install policy can pull the extension fully offline.
+// Elevated-setup coordination
 // ============================================================================
-
-/// Port the update server binds. MUST match the port in `CHROMIUM_UPDATE_URL`
-/// (browsers.rs) and the codebase URL baked into `scripts/pack-extension.mjs`.
-const UPDATE_SERVER_PORT: u16 = 17244;
-
-/// Flipped true once the update server has bound its port AND holds the packed
-/// CRX + manifest. Enforcement MUST NOT write a force-install policy until this
-/// is true: a policy points browsers at our update URL, and if nothing answers
-/// there the browser locks itself to an extension it can never install —
-/// policy-forced and un-removable. Gating on this is what stops that brick.
-static UPDATE_SERVER_READY: AtomicBool = AtomicBool::new(false);
 
 /// Set after an elevated setup pass completes, to tell the monitor to flush its
 /// per-session enforcement memo and re-read the policy state (which the elevated
 /// pass just wrote). Without this the monitor would keep showing the pre-
 /// elevation "needs admin" result it had already memoized.
 static RE_ENFORCE_REQUESTED: AtomicBool = AtomicBool::new(false);
-
-/// Bind the localhost update server. The Chromium `ExtensionInstallForcelist`
-/// policy points browsers at `http://127.0.0.1:17244/update_manifest.xml`; this
-/// serves that manifest and the signed `oathlight.crx` next to it. Two static
-/// files, hand-rolled HTTP/1.1, no dependency.
-///
-/// Reads both files once at startup (they're bundled Tauri resources produced by
-/// `pack-extension.mjs`). If they can't be found — e.g. the packer didn't run —
-/// it logs and does **not** bind, so browsers simply fail to resolve the update
-/// rather than being served a broken response.
-/// Load the packed CRX + update manifest, trying the bundled resource dir first
-/// (production) and then the dev source tree (`CARGO_MANIFEST_DIR/resources`,
-/// where `pack-extension.mjs` writes during `tauri dev` — the Resource base
-/// dir does not point there in dev). `None` if either file is missing anywhere.
-fn load_update_assets(app: &AppHandle) -> Option<(Vec<u8>, Vec<u8>)> {
-    let mut roots: Vec<std::path::PathBuf> = Vec::new();
-    if let Ok(p) = app.path().resolve("resources", BaseDirectory::Resource) {
-        roots.push(p);
-    }
-    roots.push(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources"));
-
-    let read_first = |name: &str| -> Option<Vec<u8>> {
-        roots.iter().find_map(|r| std::fs::read(r.join(name)).ok())
-    };
-    match (read_first("update_manifest.xml"), read_first("oathlight.crx")) {
-        (Some(x), Some(c)) => Some((x, c)),
-        _ => None,
-    }
-}
-
-fn start_update_server(app: AppHandle) {
-    let (xml, crx) = match load_update_assets(&app) {
-        Some((x, c)) => (Arc::new(x), Arc::new(c)),
-        None => {
-            // Do not start, and leave UPDATE_SERVER_READY false so enforcement
-            // never points a browser at a URL nothing will answer.
-            log::error!(
-                "update server: packed extension resources not found — not starting (enforcement stays off)"
-            );
-            return;
-        }
-    };
-
-    std::thread::spawn(move || {
-        let addr = format!("127.0.0.1:{}", UPDATE_SERVER_PORT);
-        let listener = match TcpListener::bind(&addr) {
-            Ok(l) => {
-                log::info!("update server listening on {}", addr);
-                l
-            }
-            Err(e) => {
-                log::error!("update server: failed to bind {}: {}", addr, e);
-                return;
-            }
-        };
-        // Bound and holding the assets — only now is it safe for enforcement to
-        // point browsers at us.
-        UPDATE_SERVER_READY.store(true, Ordering::SeqCst);
-        for stream in listener.incoming() {
-            let stream = match stream {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            let xml = xml.clone();
-            let crx = crx.clone();
-            std::thread::spawn(move || serve_update_conn(stream, &xml, &crx));
-        }
-    });
-}
-
-/// Handle one update-server request. We only need the request line's path; the
-/// two routes serve static bytes with `Connection: close`.
-fn serve_update_conn(mut stream: TcpStream, xml: &[u8], crx: &[u8]) {
-    use std::io::{Read, Write};
-    let peer = stream
-        .peer_addr()
-        .map(|a| a.to_string())
-        .unwrap_or_else(|_| "?".to_string());
-    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
-    let mut buf = [0u8; 1024];
-    let n = match stream.read(&mut buf) {
-        Ok(n) if n > 0 => n,
-        _ => return,
-    };
-    let req = String::from_utf8_lossy(&buf[..n]);
-    let path = req
-        .lines()
-        .next()
-        .and_then(|l| l.split_whitespace().nth(1))
-        .unwrap_or("");
-
-    let (status, ctype, body): (&str, &str, &[u8]) = if path.starts_with("/update_manifest.xml") {
-        ("200 OK", "application/xml", xml)
-    } else if path.starts_with("/oathlight.crx") {
-        ("200 OK", "application/x-chrome-extension", crx)
-    } else {
-        ("404 Not Found", "text/plain", b"not found")
-    };
-
-    // These are the only signal we have that a real Chrome ever reached the
-    // localhost update endpoint, vs. the policy silently not taking effect.
-    if status == "200 OK" {
-        log::info!("update server: {} GET {} -> 200 ({} bytes)", peer, path, body.len());
-    } else {
-        log::warn!("update server: {} GET {} -> 404", peer, path);
-    }
-
-    let header = format!(
-        "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        status,
-        ctype,
-        body.len()
-    );
-    let _ = stream.write_all(header.as_bytes());
-    let _ = stream.write_all(body);
-    let _ = stream.flush();
-}
 
 /// One native-host connection. The host sends `host_hello` first (identifying
 /// the browser that spawned it), then relays the extension's messages (which
@@ -1150,6 +1273,15 @@ fn enforce_str(outcome: EnforceOutcome) -> &'static str {
         // the UI must not claim it's un-removable — the user can delete it.
         EnforceOutcome::EnforcedUser => "enforced_user",
         EnforceOutcome::Failed => "failed",
+        // Registered for auto-install via the external-extensions registry (the
+        // Edge path). The browser fetches it on its own, then waits for the user
+        // to approve it once — so the UI asks for that click, not for admin.
+        EnforceOutcome::AutoInstallPendingApproval => "needs_approval",
+        // No store will force-install us in this browser on this machine (Edge,
+        // unmanaged, no Edge Add-ons listing) and auto-install couldn't be
+        // registered either. Admin does not fix it, so the UI must offer a
+        // manual install rather than a UAC prompt.
+        EnforceOutcome::StoreUnavailable => "store_unavailable",
         EnforceOutcome::Unsupported => "unsupported",
     }
 }
@@ -1206,7 +1338,7 @@ fn build_status(
     let mut out: Vec<BrowserStatus> = BROWSERS
         .iter()
         .map(|def| {
-            let running_now = running.iter().any(|r| *r == def.key);
+            let running_now = running.contains(&def.key);
             let dormant_enf =
                 if browsers::enforcement_configured(def.engine) { "off" } else { "dormant" }.to_string();
 
@@ -1254,6 +1386,13 @@ fn build_status(
                     };
 
                     BrowserStatus {
+                        pending_approval: list.iter().any(|p| p.pending_approval),
+                        extension_outdated: browsers::version_is_older(
+                            &version,
+                            browsers::EXPECTED_EXTENSION_VERSION,
+                        ),
+                        locked_out: false,   // filled in by the monitor (needs settings)
+                        lock_grace_secs: 0,  // …and the live BrowserLockState
                         key: def.key.to_string(),
                         name: def.name.to_string(),
                         engine: engine_str(def.engine).to_string(),
@@ -1289,6 +1428,16 @@ fn build_status(
                         "not_installed"
                     };
                     BrowserStatus {
+                        // No prefs to read, so no evidence either way — and this
+                        // branch is Firefox/unknown, which `browser_lock` never
+                        // touches anyway.
+                        pending_approval: false,
+                        extension_outdated: browsers::version_is_older(
+                            &version,
+                            browsers::EXPECTED_EXTENSION_VERSION,
+                        ),
+                        locked_out: false,
+                        lock_grace_secs: 0,
                         key: def.key.to_string(),
                         name: def.name.to_string(),
                         engine: engine_str(def.engine).to_string(),
@@ -1324,6 +1473,16 @@ fn build_status(
             "idle"
         };
         out.push(BrowserStatus {
+            // A custom browser is only known to us *because* its extension
+            // connected over the native host, so it is protected by definition
+            // and never a browser-lock candidate.
+            pending_approval: false,
+            extension_outdated: browsers::version_is_older(
+                &version,
+                browsers::EXPECTED_EXTENSION_VERSION,
+            ),
+            locked_out: false,
+            lock_grace_secs: 0,
             key,
             name: cb.name,
             engine: "custom".to_string(),
@@ -1418,7 +1577,7 @@ fn enforce_processes(
         sys.refresh_processes_specifics(ProcessRefreshKind::new());
         for proc in sys.processes().values() {
             let name = proc.name().to_lowercase();
-            if !cfg.blocked_processes.iter().any(|b| *b == name) {
+            if !cfg.blocked_processes.contains(&name) {
                 continue;
             }
             // The kill itself is never throttled — only the log/event noise.
@@ -1520,14 +1679,22 @@ fn enforce_processes(
 // and (when configured + guard on) enforce reinstallation of a missing ext.
 // ============================================================================
 
+/// Extension-missing trusted-contact debounce (5.2): a browser must sit
+/// continuously in `extension_missing` for at least this long (while the
+/// uninstall guard is on) before `ext_removed` fires — a brief reconnect blip
+/// (browser restart, profile reload) never triggers it, only a removal that
+/// genuinely doesn't come back.
+const EXT_MISSING_NOTIFY_AFTER_MS: u64 = 5 * 60 * 1000; // 5 minutes
+
 fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
     std::thread::spawn(move || {
         // Browsers we've already enforced this session, remembering the outcome
         // (which hive/scope the write landed in) so each tick can report it
-        // without touching the registry again. Write-once: once the policy is
-        // present, the browser reinstalls a removed extension on its own next
-        // launch, so there's nothing to re-do until the guard is toggled off.
-        // (Re-asserting a *deleted* policy key is Stage 2, the SYSTEM service.)
+        // without touching the registry again. Not write-once: it is re-checked
+        // against the registry on the ~30s deep cadence below and dropped for
+        // any browser whose policy has gone or weakened, which is what makes it
+        // an optimisation rather than an assumption that the policy is still
+        // there. See `browsers::enforcement_still_present`.
         let mut enforced: HashMap<String, EnforceOutcome> = HashMap::new();
         // Browsers currently seen in the `extension_missing` state, so the
         // event log (4.5) records the EDGE (entering/leaving) rather than one
@@ -1535,6 +1702,16 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
         // from `enforced` (which tracks policy writes) — this is purely the
         // missing/restored transition memo.
         let mut missing_seen: HashSet<String> = HashSet::new();
+        // When each currently-missing browser FIRST went missing (unix ms) —
+        // the debounce source for the `ext_removed` trusted-contact
+        // notification (5.2): a browser must sit continuously missing for at
+        // least `EXT_MISSING_NOTIFY_AFTER_MS` before it fires, so a brief
+        // reconnect blip (browser restart, profile reload) never triggers it.
+        let mut missing_since: HashMap<String, u64> = HashMap::new();
+        // Browsers already notified for the CURRENT missing streak, so the
+        // notification fires once per streak, not on every tick past the
+        // threshold. Cleared when the browser is restored.
+        let mut missing_notified: HashSet<String> = HashSet::new();
         // Process-blocking / evasion-detection noise memo (1.3) — see
         // `enforce_processes`'s doc comment for what's throttled and why.
         let mut process_memo: HashMap<String, Instant> = HashMap::new();
@@ -1547,6 +1724,19 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
         // every tick. Cleared when the DNS filter is off (so a re-enable
         // rewrites it) and by `RE_ENFORCE_REQUESTED` (set on enable).
         let mut dns_doh_enforced: HashSet<String> = HashSet::new();
+        // Incognito/guest/private lockdown memo (1.5): same idea as the DoH memo,
+        // but gated on the guard rather than the DNS filter. Cleared when the
+        // guard is off and by `RE_ENFORCE_REQUESTED`.
+        let mut lockdown_enforced: HashSet<String> = HashSet::new();
+        // Browsers whose external-uninstall record has been checked this session
+        // (see `profiles::clear_external_uninstall_record`). The read parses a
+        // multi-hundred-KB prefs file per profile, and the record only ever
+        // appears when the user removes the extension by hand — which puts the
+        // browser straight into the lock, whose restore path clears it again. So
+        // once per session, plus whenever the memo is flushed, is the right
+        // cadence; every 30s would be paying that parse forever for a file that
+        // almost never changes.
+        let mut refusals_checked: HashSet<String> = HashSet::new();
 
         loop {
             let now = now_unix_ms();
@@ -1566,14 +1756,41 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
 
             // System DNS filter (1.1/1.2): while it's active, (a) health-check
             // the resolver every tick and fail open if it dies (the failsafe),
-            // (b) revert adapter-DNS drift on a throttled cadence (~30s), and
-            // (c) keep the DoH-disable policy written for every browser. When
-            // it's off, drop the DoH memo so a later enable re-writes it.
+            // (b) re-pick upstreams if the pair chosen at enable time has gone
+            // unreachable (cheap atomic guard, so every tick), (c) revert
+            // adapter-DNS drift and check whether anything is answering DNS
+            // instead of us, both on a throttled cadence (~30s), and (d) keep
+            // the DoH-disable policy written for every browser. When it's off,
+            // drop the DoH memo so a later enable re-writes it.
             if let Some(dns) = app.try_state::<Arc<dns_filter::DnsFilterState>>() {
                 if dns.is_active() {
                     dns.tick_health_check();
+                    if dns.tick_recheck_upstreams() {
+                        log_event(&app, "dns_upstreams_repicked", serde_json::json!({}));
+                    }
                     if enforce_tick % 10 == 1 {
-                        dns.tick_revert_drift();
+                        // Running but never redirected — almost always because
+                        // the app wasn't elevated at launch. Keep asking: the
+                        // elevated pass (or the next elevated logon) makes this
+                        // succeed without the user having to find the switch
+                        // again.
+                        if dns.tick_retry_takeover() {
+                            log_event(&app, "dns_takeover_recovered", serde_json::json!({}));
+                        }
+                        let reverted = dns.tick_revert_drift();
+                        if reverted > 0 {
+                            log_event(&app, "dns_changed", serde_json::json!({ "adapters_reverted": reverted }));
+                        }
+                        // Event only, never content (4.5): counts and flags, not
+                        // adapter names — the status card carries those for the
+                        // user, the log only needs the transition.
+                        if let Some(ex) = dns.tick_detect_exposure() {
+                            log_event(&app, "dns_exposure", serde_json::json!({
+                                "clear": ex.is_clear(),
+                                "adapters": ex.adapters.len(),
+                                "nrpt_catch_all": ex.nrpt_catch_all,
+                            }));
+                        }
                     }
                     if RE_ENFORCE_REQUESTED.load(Ordering::SeqCst) {
                         dns_doh_enforced.clear();
@@ -1585,9 +1802,40 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
                             log::info!("[{}] DoH-disable policy write: {}", def.key, enforce_str(o));
                         }
                     }
-                } else if !dns_doh_enforced.is_empty() {
-                    dns_doh_enforced.clear();
+                } else {
+                    // Not running. That is always a fault now — the filter is
+                    // mandatory — so keep trying to bring it back on the backoff
+                    // schedule instead of waiting for a restart.
+                    if dns.tick_retry() {
+                        log_event(&app, "dns_recovered", serde_json::json!({}));
+                        RE_ENFORCE_REQUESTED.store(true, Ordering::SeqCst);
+                    }
+                    if !dns_doh_enforced.is_empty() {
+                        dns_doh_enforced.clear();
+                    }
                 }
+            }
+
+            // Browser lockdown policy (1.5): while the guard is on, close the
+            // surfaces force-install can't reach — Incognito/Private windows
+            // (the extension doesn't run there) and Guest profiles (no extensions
+            // at all). Written once per session per browser (like the DoH memo);
+            // the policy itself is removed only on sanctioned uninstall, so — as
+            // with force-install — turning the guard off stops re-asserting but
+            // does not instantly reopen the bypass.
+            if guard_enabled {
+                if RE_ENFORCE_REQUESTED.load(Ordering::SeqCst) {
+                    lockdown_enforced.clear();
+                }
+                for def in BROWSERS {
+                    if !lockdown_enforced.contains(def.key) {
+                        let o = browsers::enforce_incognito_guest_policy(def);
+                        lockdown_enforced.insert(def.key.to_string());
+                        log::info!("[{}] incognito/guest lockdown policy write: {}", def.key, enforce_str(o));
+                    }
+                }
+            } else if !lockdown_enforced.is_empty() {
+                lockdown_enforced.clear();
             }
 
             let mut statuses = build_status(&state, &running, &proc_names, now);
@@ -1595,26 +1843,114 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
             // extension_missing edge tracking (4.5): log only on the
             // transition into/out of "extension_missing" (a browser is
             // running but its extension isn't present), never every tick.
-            // Also the debounce source a later 5.2 "ext removed and not
-            // restored within N minutes" contact notification would build on
-            // (TODO(5.2 v2) — the notification itself is out of v1 scope).
+            // Also the debounce source for the 5.2 "ext removed and not
+            // restored within N minutes" trusted-contact notification below.
             for st in statuses.iter() {
                 let missing = st.state == "extension_missing";
                 if missing && !missing_seen.contains(&st.key) {
                     missing_seen.insert(st.key.clone());
+                    missing_since.insert(st.key.clone(), now);
                     log_event(&app, "extension_missing", serde_json::json!({ "browser": st.key }));
                 } else if !missing && missing_seen.remove(&st.key) {
+                    missing_since.remove(&st.key);
+                    missing_notified.remove(&st.key);
                     log_event(&app, "extension_restored", serde_json::json!({ "browser": st.key }));
+                } else if missing
+                    && guard_enabled
+                    && !missing_notified.contains(&st.key)
+                    && missing_since
+                        .get(&st.key)
+                        .is_some_and(|since| now.saturating_sub(*since) >= EXT_MISSING_NOTIFY_AFTER_MS)
+                {
+                    // 5.2, Tier 2: still missing after the debounce window AND
+                    // protection is actually supposed to be on (`guard_enabled`)
+                    // — this is exactly "extension removed and not restored
+                    // within N minutes" from the plan. Tier 1 (solo, always)
+                    // gets its own log entry regardless of whether a trusted
+                    // contact is configured; `notify_contact` itself is a
+                    // no-op unless one is (solo-first).
+                    missing_notified.insert(st.key.clone());
+                    log_event(&app, "extension_missing_confirmed", serde_json::json!({ "browser": st.key }));
+                    notify_contact(&app, "ext_removed");
                 }
             }
 
             // An elevated setup pass just wrote policy — drop the memo so every
             // browser re-reads its (now written) state this tick.
-            if RE_ENFORCE_REQUESTED.swap(false, Ordering::SeqCst) {
+            // Consumed here, so anything below that also wants to react to it
+            // must read this local — the flag is already false by then.
+            let re_enforce_requested = RE_ENFORCE_REQUESTED.swap(false, Ordering::SeqCst);
+            if re_enforce_requested {
                 enforced.clear();
             }
 
-            // Proactive force-install: lock every Chromium browser present on
+            // …and on the same ~30s deep cadence the DNS drift check uses, verify
+            // that what we think we enforced is still really there, dropping the
+            // memo for anything that has gone or weakened so the write below
+            // re-runs. Polishing.md asks the app to "constantly make sure the
+            // extension is installed regardless if it was before"; the browser's
+            // own policy-driven reinstall covers the extension being removed, but
+            // nothing covered the POLICY being removed — and the HKCU fallback
+            // that most unelevated installs land on can be deleted without so
+            // much as a prompt. Until this ran, that left the row reporting a
+            // lock it no longer held for the rest of the session.
+            //
+            // Costs at most two `reg query` spawns per already-enforced browser
+            // every ~30s (outcomes that wrote nothing are free), which is the
+            // same order as the `is_installed_cached` probe on the tick above.
+            if guard_enabled && enforce_tick % 10 == 1 {
+                enforced.retain(|key, outcome| {
+                    browsers::browser_by_key(key)
+                        .is_some_and(|def| browsers::enforcement_still_present(def, *outcome))
+                });
+                if re_enforce_requested {
+                    refusals_checked.clear();
+                }
+
+                // Repair the one thing a written policy cannot survive: the
+                // browser deciding it will never install our extension again.
+                //
+                // Removing an externally-registered extension by hand makes
+                // Chromium file the id under `extensions.external_uninstalls`,
+                // after which its external provider skips that id — no download,
+                // no install, and no "a third party wants to add this extension"
+                // prompt, with our registry entry still sitting there looking
+                // perfectly healthy. On Edge, where the external registry is the
+                // only install path there is, that is the protection silently
+                // gone. Nothing else in this loop can see it, because everything
+                // else checks what *we* wrote rather than what the browser
+                // decided.
+                //
+                // Only for browsers that depend on that path, only while the
+                // extension is genuinely absent, and only while the browser is
+                // closed — Chromium keeps prefs in memory and rewrites the file
+                // on exit, so an edit under a live browser is thrown away.
+                for st in statuses.iter() {
+                    let Some(def) = browsers::browser_by_key(&st.key) else { continue };
+                    if !browsers::requires_manual_install(def)
+                        || st.installed
+                        || st.running
+                        || !refusals_checked.insert(st.key.clone())
+                    {
+                        continue;
+                    }
+                    let cleared = browsers::clear_refusals(def);
+                    if cleared > 0 {
+                        log::warn!(
+                            "[{}] cleared the browser's external-uninstall block in {cleared} profile(s) \
+                             — it can install the extension again on its next start",
+                            st.key
+                        );
+                        log_event(
+                            &app,
+                            "external_install_unblocked",
+                            serde_json::json!({ "browser": st.key, "profiles": cleared }),
+                        );
+                    }
+                }
+            }
+
+            // Proactive force-install: lock every supported browser present on
             // this machine while the guard is on — not only ones whose extension
             // already went missing — so a fresh, healthy install is pinned
             // before any removal attempt.
@@ -1629,33 +1965,31 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
                     continue;
                 }
                 if !browsers::enforcement_configured(def.engine) {
-                    // Gecko while Firefox is on hold.
+                    // No store URL configured for this engine (defensive — both
+                    // Chromium and Gecko are configured now).
                     st.enforcement = "dormant".to_string();
                     continue;
                 }
-                if !(st.installed || st.running) {
+                // "Is this browser on the machine", which is NOT `st.installed`.
+                // For a Chromium browser whose profiles we can read, `installed`
+                // means *the extension* is present in some profile — so gating
+                // enforcement on it made the policy conditional on the extension
+                // already being there, and a browser that never had it (the only
+                // case that needs pinning) was skipped unless it happened to be
+                // running at that moment. That is why a fresh install left Chrome
+                // unpinned until the user opened it with the app already up.
+                if !(st.running || st.installed || browsers::is_installed_cached(def)) {
                     // Not present on this machine — nothing to pin.
                     st.enforcement = "off".to_string();
                     continue;
                 }
-                // Chrome/Edge silently drop an off-Web-Store force-install on an
-                // unmanaged consumer machine (see `offstore_forceinstall_supported`).
-                // Writing the policy there only produces a "managed by your
-                // organization" browser and a dead forcelist entry that never
-                // installs anything — so we don't write it, and we report the
-                // truth. This is a hard platform limit, not a retryable failure.
-                if !browsers::offstore_forceinstall_supported() {
-                    enforced.remove(&st.key);
-                    st.enforcement = "unsupported_device".to_string();
-                    continue;
-                }
-                if !UPDATE_SERVER_READY.load(Ordering::SeqCst) {
-                    // The update server isn't serving (still starting, or its
-                    // assets are missing). Writing a policy now would point the
-                    // browser at a dead URL and lock it there — so we don't.
-                    st.enforcement = "off".to_string();
-                    continue;
-                }
+                // Web-Store force-install (STORE_EXTENSION_ID via the CWS update
+                // URL) needs neither of the guards the old self-hosted path did:
+                // it is honored on ordinary *unmanaged* consumer machines, and
+                // Google serves the CRX — so there is no enterprise-only gate and
+                // no localhost update server that has to be "ready" first. With a
+                // real published extension behind the canonical CWS URL there is
+                // no dead-URL brick to guard against either.
                 let outcome = if let Some(&cached) = enforced.get(&st.key) {
                     cached
                 } else {
@@ -1671,17 +2005,33 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
                 // not merely that the policy was written — that conflation is what
                 // made the UI claim "locked" while nothing was installed. Re-derive
                 // the reported status from profile ground truth each tick: a written
-                // policy with no real install is "pending" (a managed device may
-                // still be fetching the CRX), never a green "locked".
+                // policy with no real install is "pending" (the browser may still
+                // be fetching the extension from the Web Store), never a green
+                // "locked".
+                //
+                // Machine and user scope stay distinguishable while pending,
+                // because the useful next action differs: a user-scope policy can
+                // still be upgraded to the machine-wide lock with one UAC prompt,
+                // and offering that upgrade is the whole point of the button.
+                // Collapsing both into a single "pending" is what left the UI with
+                // nothing to offer but a re-apply that changed nothing.
                 st.enforcement = match outcome {
-                    EnforceOutcome::EnforcedMachine | EnforceOutcome::EnforcedUser
-                        if !st.installed =>
-                    {
-                        "pending".to_string()
+                    EnforceOutcome::EnforcedMachine if !st.installed => "pending".to_string(),
+                    EnforceOutcome::EnforcedUser if !st.installed => "pending_user".to_string(),
+                    // Auto-install landed and the user has approved it — the
+                    // extension is genuinely running. Report that plainly and
+                    // stop nagging, but never as "locked": nothing pins it.
+                    EnforceOutcome::AutoInstallPendingApproval if st.installed => {
+                        "auto_installed".to_string()
                     }
                     other => enforce_str(other).to_string(),
                 };
             }
+
+            // Browser lock: a browser that can't be force-installed doesn't get
+            // to run without the extension. Runs after the loop above so it sees
+            // this tick's freshly-written policy rather than last tick's.
+            enforce_browser_lock(&app, &cfg, guard_enabled, &mut statuses);
 
             let _ = app.emit("browsers-status", &statuses);
             std::thread::sleep(MONITOR_TICK);
@@ -1689,11 +2039,181 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
     });
 }
 
+/// How long a "killed <browser>" browser-lock event stays suppressed after the
+/// last one. The kill itself is never throttled — only the log/event noise.
+///
+/// This needs to be generous because Edge does not stay dead politely: startup
+/// boost and background mode respawn `msedge.exe` on their own, so a locked-out
+/// Edge produces a kill every few seconds indefinitely. That is the feature
+/// working, but it must not also mean an event-log entry every few seconds
+/// forever.
+const BROWSER_LOCK_EMIT_THROTTLE: Duration = Duration::from_secs(60);
+
+/// Kill any browser that cannot be force-installed and is running without the
+/// extension, unless it holds a restore window (see `browser_lock`).
+///
+/// **Why killing is the only lever here.** For every other browser the app pins
+/// the extension with a policy and the browser itself puts it back. Edge on a
+/// consumer machine refuses that policy outright, so "protected" there is
+/// whatever the user last chose — which on a machine running this app is exactly
+/// the thing that shouldn't be up to the user at 2am. Making the browser
+/// unusable until the extension is on is the remaining lever.
+///
+/// Two guards keep this from being a browser that randomly dies:
+///   * it only ever touches `browsers::requires_manual_install` browsers, so a
+///     force-installable one is never killed (killing one would *prevent* the
+///     launch during which its policy reinstalls the extension); and
+///   * it needs real ground truth from the profile scan. Unreadable prefs are
+///     not evidence, and must never be able to brick a browser.
+///
+/// There used to be a third — "the user turned this on" — and a fourth, the
+/// only-browser-on-the-machine exemption. Both are gone: the lock is mandatory
+/// and `settings::force_mandatory` holds the flag true, so the early return
+/// below is now unreachable defence rather than a real off state.
+fn enforce_browser_lock(
+    app: &AppHandle,
+    cfg: &settings::SettingsV1,
+    guard_enabled: bool,
+    statuses: &mut [BrowserStatus],
+) {
+    let Some(locks) = app.try_state::<Arc<browser_lock::BrowserLockState>>() else { return };
+    if !cfg.lock_unverified_browsers || !guard_enabled {
+        // Turning it off (or the guard off) must not leave a stale window that
+        // would grant a free pass the moment it comes back on.
+        locks.clear_all();
+        return;
+    }
+
+    // Which browsers need killing this tick, decided before any process work —
+    // the enumeration below is only worth paying for if something is actually
+    // going to be killed, and in the steady state nothing is.
+    let mut condemned: Vec<&'static browsers::BrowserDef> = Vec::new();
+    for st in statuses.iter_mut() {
+        let Some(def) = browsers::browser_by_key(&st.key) else { continue };
+        if !browsers::requires_manual_install(def) {
+            continue;
+        }
+        // No exemptions. This used to stand down when the browser was the only
+        // one on the machine; that made the protection weakest on exactly the
+        // stock consumer PC it exists for, and made "uninstall your other
+        // browsers" a working bypass. See `browser_lock`'s module doc — the
+        // Read the profiles directly: a browser is protected if all currently
+        // running profiles carry the extension. If an active running profile lacks
+        // the extension, the browser is locked out and killed.
+        let facts = match profiles::cached_profiles(def) {
+            Some(list) => {
+                if list.is_empty() {
+                    browser_lock::BrowserFacts {
+                        protected: false,
+                        ground_truth: true,
+                    }
+                } else {
+                    let running_dirs = profiles::detect_running_profiles(def);
+                    let protected = if running_dirs.is_empty() {
+                        list.iter().all(|p| p.installed)
+                    } else {
+                        list.iter().all(|p| {
+                            let dir_name = std::path::Path::new(&p.profile_dir)
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_default();
+                            !running_dirs.contains(&dir_name) || p.installed
+                        })
+                    };
+                    browser_lock::BrowserFacts {
+                        protected,
+                        ground_truth: true,
+                    }
+                }
+            }
+            None => browser_lock::BrowserFacts { protected: false, ground_truth: false },
+        };
+        st.locked_out = !facts.protected;
+
+        if locks.decide(&st.key, facts) == browser_lock::LockDecision::Kill && st.running {
+            condemned.push(def);
+        }
+        st.lock_grace_secs = locks.remaining_secs(&st.key);
+    }
+    if condemned.is_empty() {
+        return;
+    }
+
+    let names: HashSet<String> =
+        condemned.iter().flat_map(|d| d.process_names.iter().map(|n| n.to_string())).collect();
+    use sysinfo::{ProcessRefreshKind, System};
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(ProcessRefreshKind::new());
+    let mut killed: HashMap<&'static str, usize> = HashMap::new();
+    for proc in sys.processes().values() {
+        let name = proc.name().to_lowercase();
+        if !names.contains(&name) {
+            continue;
+        }
+        let Some(def) = browsers::match_browser_process(&name) else { continue };
+        if !condemned.iter().any(|d| d.key == def.key) {
+            continue;
+        }
+        proc.kill();
+        *killed.entry(def.key).or_default() += 1;
+    }
+
+    let now = Instant::now();
+    let mut memo = browser_lock_emit_memo().lock().unwrap();
+    for (key, count) in killed {
+        if count == 0 {
+            continue;
+        }
+        let stale = memo
+            .get(key)
+            .map(|t| now.duration_since(*t) >= BROWSER_LOCK_EMIT_THROTTLE)
+            .unwrap_or(true);
+        if !stale {
+            continue;
+        }
+        memo.insert(key, now);
+        log::warn!(
+            "browser_lock: killed {count} '{key}' process(es) — the extension is not installed \
+             and no restore window is open"
+        );
+        let _ = app.emit(
+            "browser-locked-out",
+            serde_json::json!({ "browser": key, "processes": count }),
+        );
+        log_event(app, "browser_locked_out", serde_json::json!({ "browser": key }));
+    }
+}
+
+/// Last browser-lock emit per browser, for `BROWSER_LOCK_EMIT_THROTTLE`.
+///
+/// A process-wide `static` rather than a monitor-loop local because
+/// `request_browser_restore` clears it: someone who has just deliberately asked
+/// for a window deserves to see the outcome of *that* attempt, not silence
+/// because an identical kill happened to be logged 40s ago. Same `OnceLock<
+/// Mutex<HashMap<…>>>` shape as `browsers::is_installed_cached`.
+fn browser_lock_emit_memo() -> &'static Mutex<HashMap<&'static str, Instant>> {
+    static MEMO: OnceLock<Mutex<HashMap<&'static str, Instant>>> = OnceLock::new();
+    MEMO.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 // ============================================================================
 // Native host registration (on every startup — idempotent)
 // ============================================================================
 
 fn register_native_host(app: &AppHandle) {
+    // Create every browser's policy key tree first, before the user is likely
+    // to have opened a browser this session. An empty policy key changes no
+    // behaviour, but it is what lets a RUNNING Chromium notice the
+    // force-install policy we write later WITHOUT being restarted: the browser
+    // registers a registry change-notification on its policy key at launch, and
+    // a key that does not exist yet cannot be watched. This is the fix for "the
+    // extension only appeared after I restarted the browser". Idempotent and
+    // unelevated-safe — an HKLM failure just leaves the HKCU key, which is the
+    // hive the fallback write targets anyway.
+    for def in BROWSERS {
+        browsers::ensure_policy_key(def);
+    }
+
     let app_data_dir = match app.path().app_data_dir() {
         Ok(d) => d,
         Err(e) => {
@@ -1913,7 +2433,7 @@ fn remove_custom_domain(
     if norm.is_empty() {
         return Err("Not a valid domain.".to_string());
     }
-    let present = state.lock().unwrap().custom_domains.iter().any(|d| *d == norm);
+    let present = state.lock().unwrap().custom_domains.contains(&norm);
     if !present {
         return Err(format!("{norm} is not in the custom blocklist."));
     }
@@ -1985,109 +2505,214 @@ pub struct WeakeningOutcome {
     pub pending: Option<friction::PendingView>,
 }
 
-/// Toggle the "keep the extension installed" guard (the uninstall-guard
-/// switch). Turning it ON is always instant (a strengthening) and withdraws
-/// any pending disable. Turning it OFF is a weakening (4.1): the guard stays
-/// ON until the friction delay elapses and the applier thread (in `setup`)
-/// actually flips it — this only registers the request and returns it.
+/// The message every mandatory-protection command returns when something asks
+/// it to switch off. One string for all three so the refusal reads the same
+/// wherever it surfaces, and so it stays a plain statement of fact rather than
+/// an argument — there is no delay to wait out and no password to find, because
+/// there is no off state to reach.
+const NOT_OPTIONAL: &str = "This protection is part of Oath Light and cannot be turned off.";
+
+/// Re-assert the "keep the extension installed" guard.
 ///
-/// Master-password gate (4.2) applies ONLY to the actual off-and-currently-on
-/// path below: enabling and the already-off no-op are both intentionally
-/// ungated (see `auth.rs`'s module doc — strengthenings and no-ops never
-/// require the password, only the one branch that actually starts a
-/// weakening's cool-off).
+/// The guard used to be a switch: on instantly, off through the master password
+/// plus a `guard.disable` cool-off. It isn't one any more — it is the thing that
+/// keeps the extension in place, and an anti-addiction tool whose enforcement
+/// layer has an off switch is a tool that gets switched off. `enabled: false`
+/// is refused outright rather than filed as a weakening, and `settings.rs`'s
+/// `force_mandatory` holds the same floor against anything that edits the file
+/// directly.
+///
+/// The command survives (rather than being deleted) because the renderer's
+/// reconciliation effect and the onboarding flow both call it to push the guard
+/// ON, and because a hostile or stale caller asking for OFF should get a clear
+/// refusal instead of a missing-command error.
+///
+/// `auth` is still accepted so the renderer's call sites need no signature
+/// change; nothing consults it now, since neither branch starts a weakening.
 #[tauri::command]
 fn set_guard_enabled(
-    app: AppHandle,
     state: tauri::State<'_, Arc<Mutex<AppState>>>,
     settings: tauri::State<'_, Arc<settings::SettingsState>>,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
     enabled: bool,
-    auth: Option<String>,
+    _auth: Option<String>,
 ) -> Result<WeakeningOutcome, String> {
-    if enabled {
-        state.lock().unwrap().guard_enabled = true;
-        settings.update(|s| s.guard_enabled = true);
-        friction.cancel("guard.disable");
-        log::info!("Guard enabled set to true");
-        return Ok(WeakeningOutcome { applied: true, pending: None });
+    if !enabled {
+        log::warn!("guard disable refused — the uninstall guard is not optional");
+        return Err(NOT_OPTIONAL.to_string());
     }
-
-    let already_off = !state.lock().unwrap().guard_enabled;
-    if already_off {
-        return Ok(WeakeningOutcome { applied: true, pending: None });
-    }
-
-    auth::require_auth(&app, &auth)?;
-
-    let view = friction.request("guard.disable", "Turn off the uninstall guard", serde_json::json!({}));
-    log::warn!(
-        "guard disable requested — {}s cool-off started (guard stays on until it elapses)",
-        view.delay_secs
-    );
-    log_event(&app, "friction_requested", serde_json::json!({ "action": "guard.disable" }));
-    Ok(WeakeningOutcome { applied: false, pending: Some(view) })
+    state.lock().unwrap().guard_enabled = true;
+    settings.update(|s| s.guard_enabled = true);
+    // Withdraw a cool-off filed by an older build, so an upgrade can't have one
+    // land after the protection became mandatory.
+    friction.cancel("guard.disable");
+    Ok(WeakeningOutcome { applied: true, pending: None })
 }
 
 // ============================================================================
 // System-level DNS filtering (plan items 1.1 + 1.2) — commands.
 // Lifecycle/health/takeover live in `dns_filter.rs`; these mirror the
-// `set_guard_enabled` pattern exactly: enabling is a strengthening (instant),
-// disabling is a friction-gated weakening (`dns.disable`).
+// `set_guard_enabled` pattern exactly: the filter is mandatory, so the only
+// thing a caller can ask for is another attempt at bringing it up.
 // ============================================================================
 
 /// Live status the renderer's "System DNS filter" card reads:
-/// `{ running, taken_over, last_error, upstreams }`.
+/// `{ running, taken_over, last_error, upstreams, upstream_warning,
+/// exposure_warning }` — see `DnsStatus` for why the three failure strings are
+/// separate fields rather than one message.
 #[tauri::command]
 fn get_dns_status(dns: tauri::State<'_, Arc<dns_filter::DnsFilterState>>) -> dns_filter::DnsStatus {
     dns.status()
 }
 
-/// Turn the system DNS filter on or off.
+/// Bring the system DNS filter up now.
 ///
-/// ON is a strengthening — applied instantly: start the resolver, verify it's
-/// healthy, then capture + take over adapter DNS. Also cancels any pending
-/// `dns.disable` weakening. A bind conflict (port 53 already in use) or a
-/// failed takeover surfaces as an `Err` string the UI shows verbatim, and no
-/// adapter is touched in the bind-conflict case.
+/// The filter is mandatory (`settings::force_mandatory`), so this is no longer a
+/// toggle — it is the "try again now" the UI offers when the resolver is down or
+/// couldn't take over an adapter, and the retry loop on the monitor tick is
+/// doing the same thing on its own in the background. Start the resolver, verify
+/// it's healthy, then capture + take over adapter DNS; a bind conflict (port 53
+/// in use) or a refused takeover surfaces as an `Err` string the UI shows
+/// verbatim, and no adapter is touched in the bind-conflict case.
 ///
-/// OFF is a weakening — `require_auth` (master password, 4.2) then a
-/// `dns.disable` friction entry; the filter stays fully ON until the delay
-/// elapses and the applier thread actually stops the resolver + restores DNS.
+/// `enabled: false` is refused. There is nothing to gate it behind: the whole
+/// point of this layer is that it covers the apps a browser extension can't
+/// reach, and those are exactly the ones worth reaching at 2am.
 #[tauri::command]
 fn set_dns_filter_enabled(
-    app: AppHandle,
     settings: tauri::State<'_, Arc<settings::SettingsState>>,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
     dns: tauri::State<'_, Arc<dns_filter::DnsFilterState>>,
     enabled: bool,
-    auth: Option<String>,
+    _auth: Option<String>,
 ) -> Result<WeakeningOutcome, String> {
-    if enabled {
-        // Strengthening: bring the resolver up + take over now. If this
-        // fails (port conflict / no admin), report it and DON'T flip the
-        // persisted flag — the filter genuinely isn't on.
-        dns.enable()?;
-        settings.update(|s| s.dns_filter_enabled = true);
-        friction.cancel("dns.disable");
-        RE_ENFORCE_REQUESTED.store(true, Ordering::SeqCst); // reapply DoH policy this tick
-        log::info!("DNS filter enabled");
-        return Ok(WeakeningOutcome { applied: true, pending: None });
+    if !enabled {
+        log::warn!("DNS filter disable refused — the system DNS filter is not optional");
+        return Err(NOT_OPTIONAL.to_string());
+    }
+    // A manual retry clears the backoff: the user has just done something (most
+    // often granting admin) that the schedule knows nothing about, so making
+    // them wait out a delay computed from earlier failures would be punishing
+    // them for fixing it.
+    dns.reset_retry();
+    dns.enable()?;
+    settings.update(|s| s.dns_filter_enabled = true);
+    friction.cancel("dns.disable"); // withdraw a cool-off filed by an older build
+    RE_ENFORCE_REQUESTED.store(true, Ordering::SeqCst); // reapply DoH policy this tick
+    log::info!("DNS filter enabled");
+    Ok(WeakeningOutcome { applied: true, pending: None })
+}
+
+// ============================================================================
+// Browser lock (Edge) — commands. The state machine is `browser_lock`, the
+// killing is `enforce_browser_lock` on the monitor tick; these are the two
+// things the user can do about it.
+// ============================================================================
+
+/// Re-assert the browser lock.
+///
+/// Mandatory, for the plainest reason in the app: a browser running without the
+/// extension is not a slightly weaker Oath Light, it is no Oath Light at all on
+/// the surface that matters most. Offering that as a switch — even one behind a
+/// password and a 24-hour delay — meant the answer to "how do I browse
+/// unfiltered" was printed on the settings page.
+///
+/// `enabled: false` is refused. The way back into a locked-out browser is the
+/// restore window (`request_browser_restore`), which grants seconds and not
+/// access, and can be asked for as many times as it takes.
+#[tauri::command]
+fn set_browser_lock_enabled(
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    locks: tauri::State<'_, Arc<browser_lock::BrowserLockState>>,
+    enabled: bool,
+    _auth: Option<String>,
+) -> Result<WeakeningOutcome, String> {
+    if !enabled {
+        log::warn!("browser lock disable refused — the browser lock is not optional");
+        return Err(NOT_OPTIONAL.to_string());
+    }
+    settings.update(|s| s.lock_unverified_browsers = true);
+    friction.cancel("browser_lock.disable"); // withdraw an older build's cool-off
+    // A window opened before an older build turned the lock off must not survive
+    // into this session as a free pass.
+    locks.clear_all();
+    Ok(WeakeningOutcome { applied: true, pending: None })
+}
+
+/// Open a restore window for one locked-out browser: re-assert the auto-install
+/// registration, launch the browser at its own extensions page, and stop killing
+/// it for `browser_lock::GRACE_WINDOW`.
+///
+/// **Not a weakening, and deliberately not friction-gated.** It grants seconds,
+/// not access: the only thing a user can do with the window is *install the
+/// extension*, which is the outcome the lock exists to produce. Putting a
+/// 24-hour cool-off in front of the one action that ends the lockout would make
+/// the lockout unrecoverable rather than strict.
+///
+/// Launching the browser ourselves is load-bearing, not a convenience. The
+/// extension can only download while the browser runs, and the approval toggle
+/// only exists inside it — so a window with no browser in it is 20 seconds of
+/// nothing. Starting it at `edge://extensions` also puts the user on the exact
+/// page holding the switch they need.
+#[tauri::command]
+fn request_browser_restore(
+    app: AppHandle,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    locks: tauri::State<'_, Arc<browser_lock::BrowserLockState>>,
+    browser_key: String,
+) -> Result<u64, String> {
+    let def = browsers::browser_by_key(&browser_key).ok_or("Unknown browser")?;
+    if !browsers::requires_manual_install(def) {
+        return Err(format!("{} isn't locked — it force-installs the extension", def.name));
+    }
+    if !settings.get().lock_unverified_browsers {
+        return Err("The browser lock is off — nothing is being blocked".to_string());
     }
 
-    let already_off = !settings.get().dns_filter_enabled;
-    if already_off {
-        return Ok(WeakeningOutcome { applied: true, pending: None });
+    // Clear the browser's own "never install this again" record FIRST, while it
+    // is still dead. Once an externally-registered extension has been removed by
+    // hand, Chromium files the id under `extensions.external_uninstalls` and the
+    // external provider skips it forever — so the browser launches, does nothing
+    // at all, never prompts, and the window is burned on a download that was
+    // never going to start. That, not the length of the window, is why the "a
+    // third party wants to add this extension" prompt stopped appearing.
+    //
+    // It has to happen before the launch below: Chromium holds prefs in memory
+    // and rewrites the file on exit, so an edit under a live browser is
+    // discarded. Skipped (with a log line) if it is somehow already running.
+    if browsers::detect_running_from(&browsers::running_process_names()).contains(&def.key) {
+        log::warn!(
+            "browser_lock: [{browser_key}] is running — skipping the external-uninstall repair; \
+             it would be overwritten when the browser exits"
+        );
+    } else {
+        let cleared = browsers::clear_refusals(def);
+        if cleared > 0 {
+            log::warn!("browser_lock: [{browser_key}] cleared external-uninstall block in {cleared} profile(s)");
+        }
     }
 
-    auth::require_auth(&app, &auth)?;
+    // Make sure the thing the window exists to complete is actually registered.
+    // If an earlier write failed (or the user deleted the key), the browser
+    // would launch, find nothing to install, and burn the window for nothing.
+    let outcome = browsers::enforce_policy(def);
+    log::info!("browser_lock: [{browser_key}] restore requested — registration: {}", enforce_str(outcome));
 
-    let view = friction.request("dns.disable", "Turn off the system DNS filter", serde_json::json!({}));
-    log::warn!(
-        "DNS filter disable requested — {}s cool-off started (filter stays on until it elapses)",
-        view.delay_secs
-    );
-    Ok(WeakeningOutcome { applied: false, pending: Some(view) })
+    let secs = locks.grant(&browser_key);
+    // Let the next failure speak even if one was just logged.
+    browser_lock_emit_memo().lock().unwrap().remove(def.key);
+    log_event(&app, "browser_restore_granted", serde_json::json!({ "browser": def.key, "seconds": secs }));
+
+    // Best-effort: a launch failure is not fatal — the window is open either
+    // way and the user can start the browser themselves.
+    if let Some(exe) = browsers::installed_exe_path(def) {
+        let url = browsers::restore_target_url(def);
+        if let Err(e) = std::process::Command::new(exe).arg(url).spawn() {
+            log::warn!("browser_lock: could not launch {} for its restore window: {e}", def.name);
+        }
+    }
+    Ok(secs)
 }
 
 // ============================================================================
@@ -2101,7 +2726,155 @@ fn set_dns_filter_enabled(
 /// rather than the renderer's own possibly-stale localStorage copy).
 #[tauri::command]
 fn get_app_settings(settings: tauri::State<'_, Arc<settings::SettingsState>>) -> settings::SettingsV1 {
-    settings.get()
+    let mut s = settings.get();
+    // The mentor's API key is the one field on this struct that must never
+    // cross into the webview. Everything else here is already visible in the
+    // UI; a credential is not, and a renderer that never receives it cannot
+    // leak it through devtools, a crash report, or a future bug. `get_mentor_config`
+    // reports whether a key exists without ever handing over its value.
+    s.mentor.api_key = String::new();
+    s
+}
+
+// ============================================================================
+// AI mentor (optional, opt-in) — see mentor.rs for the four safety layers.
+// ============================================================================
+
+/// What the renderer is allowed to know about the mentor's configuration.
+/// Note `has_key` rather than the key itself — see `get_app_settings`.
+#[derive(serde::Serialize)]
+struct MentorConfigView {
+    enabled: bool,
+    has_key: bool,
+    model: String,
+    /// Selected provider id (always resolved — never the empty string, so the
+    /// renderer's picker has something concrete to select).
+    provider: String,
+    base_url: String,
+    /// The full provider catalog, so Settings builds its picker from the same
+    /// source of truth the request path uses rather than a duplicated list.
+    providers: Vec<MentorProviderView>,
+}
+
+/// One selectable provider, as the renderer needs it.
+#[derive(serde::Serialize)]
+struct MentorProviderView {
+    id: String,
+    name: String,
+    default_model: String,
+    keys_url: String,
+    /// True for the custom/local option, which needs a URL instead of a key.
+    needs_url: bool,
+}
+
+fn mentor_view(m: &settings::MentorV1) -> MentorConfigView {
+    let p = mentor::provider_by_id(&m.provider);
+    MentorConfigView {
+        enabled: m.enabled,
+        has_key: !m.api_key.trim().is_empty(),
+        model: if m.model.trim().is_empty() {
+            p.default_model.to_string()
+        } else {
+            m.model.clone()
+        },
+        provider: p.id.to_string(),
+        base_url: m.base_url.clone(),
+        providers: mentor::PROVIDERS
+            .iter()
+            .map(|p| MentorProviderView {
+                id: p.id.to_string(),
+                name: p.name.to_string(),
+                default_model: p.default_model.to_string(),
+                keys_url: p.keys_url.to_string(),
+                needs_url: p.base_url.is_empty(),
+            })
+            .collect(),
+    }
+}
+
+#[tauri::command]
+fn get_mentor_config(settings: tauri::State<'_, Arc<settings::SettingsState>>) -> MentorConfigView {
+    mentor_view(&settings.get().mentor)
+}
+
+/// Update the mentor's configuration. Not friction-gated in either direction:
+/// the mentor is not a protection, and making someone wait 24 hours to STOP
+/// sending their words to a third party would be the asymmetry pointed
+/// backwards (see `settings::MentorV1`).
+///
+/// `api_key` is tri-state on purpose: `None` leaves the stored key untouched
+/// (so toggling `enabled` from the UI doesn't require the renderer to hold
+/// the key), `Some("")` clears it, `Some(k)` replaces it.
+#[tauri::command]
+fn set_mentor_config(
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    enabled: bool,
+    api_key: Option<String>,
+    model: Option<String>,
+    provider: Option<String>,
+    base_url: Option<String>,
+) -> MentorConfigView {
+    settings.update(|s| {
+        s.mentor.enabled = enabled;
+        if let Some(k) = api_key {
+            s.mentor.api_key = k.trim().to_string();
+        }
+        if let Some(m) = model {
+            s.mentor.model = m.trim().to_string();
+        }
+        if let Some(b) = base_url {
+            s.mentor.base_url = b.trim().to_string();
+        }
+        if let Some(p) = provider {
+            // Resolve through the catalog so an unknown id can never be
+            // persisted — it would leave the mentor pointing at nothing.
+            let resolved = mentor::provider_by_id(&p);
+            if resolved.id != s.mentor.provider {
+                // Switching provider invalidates the stored model: a model name
+                // is provider-specific, and carrying e.g. a Claude id over to
+                // OpenAI produces a confusing 404 on first use. Empty means
+                // "use the new provider's default".
+                s.mentor.model = String::new();
+            }
+            s.mentor.provider = resolved.id.to_string();
+        }
+        // Enabling without the credential that provider actually needs would
+        // leave a surface that looks armed and fails on first use. The custom /
+        // local option needs a URL rather than a key.
+        let p = mentor::provider_by_id(&s.mentor.provider);
+        let unusable = if p.base_url.is_empty() {
+            s.mentor.base_url.trim().is_empty()
+        } else {
+            s.mentor.api_key.trim().is_empty()
+        };
+        if unusable {
+            s.mentor.enabled = false;
+        }
+    });
+    mentor_view(&settings.get().mentor)
+}
+
+/// Send the conversation and return the reply.
+///
+/// `async` + `spawn_blocking` because `mentor::send` is a blocking HTTPS call
+/// that can legitimately take a minute: running it on a sync command would
+/// freeze the window for the duration. Note the mentor gets no `AppHandle`
+/// and no other state — it has no route to any protection command, which is
+/// layer 1 of the four in mentor.rs and the only one that holds structurally.
+#[tauri::command]
+async fn mentor_send(
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    history: Vec<mentor::Turn>,
+) -> Result<mentor::MentorReply, String> {
+    let cfg = settings.get().mentor;
+    if !cfg.enabled {
+        return Err("The AI mentor is turned off.".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        mentor::send(&cfg.provider, &cfg.base_url, &cfg.api_key, &cfg.model, &history)
+    })
+    .await
+    .map_err(|e| format!("mentor request failed to run: {e}"))?
 }
 
 /// Add a process image name to the blocked-process list. A strengthening —
@@ -2125,7 +2898,7 @@ fn add_blocked_process(
         return Err("Enter a bare process image name (e.g. discord.exe), not a path.".to_string());
     }
     let mut list = settings.get().blocked_processes;
-    if !list.iter().any(|p| *p == norm) {
+    if !list.contains(&norm) {
         list.push(norm.clone());
         settings.update(|s| s.blocked_processes = list.clone());
         log::info!("process blocking: added '{norm}' to the blocked-process list");
@@ -2149,7 +2922,7 @@ fn remove_blocked_process(
 ) -> Result<friction::PendingView, String> {
     crate::auth::require_auth(&app, &auth)?;
     let norm = name.trim().to_lowercase();
-    let present = settings.get().blocked_processes.iter().any(|p| *p == norm);
+    let present = settings.get().blocked_processes.contains(&norm);
     if !present {
         return Err(format!("{norm} is not in the blocked-process list."));
     }
@@ -2336,6 +3109,135 @@ fn request_lockdown_allow(
     let view = friction.request(&action_id, &format!("Allow {norm} during lockdown"), serde_json::json!({ "domain": norm }));
     log_event(&app, "friction_requested", serde_json::json!({ "action": "lockdown.allow" }));
     Ok(view)
+}
+
+/// Toggle schedule-from-vulnerable-hours (4.4 v2): let the configured
+/// vulnerable-hours window automatically escalate into a (non-frozen)
+/// Lockdown instead of only showing reminder pop-ups — see the
+/// `"vulnerable_window_active"` arm in `handle_extension_message` for the
+/// actual escalation. Same asymmetry as `set_dns_filter_enabled`/`dns.disable`:
+/// turning it ON is instant (a strengthening — opting IN to more automatic
+/// protection); turning it OFF is a weakening and goes through the ordinary
+/// friction delay under the `"lockdown.escalation_disable"` action id, gated
+/// by the master password if one is set. Never touches an already-active
+/// lockdown either way — that still only ever ends via `lockdown.cancel` or
+/// natural expiry.
+#[tauri::command]
+fn set_lockdown_escalation(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Mutex<AppState>>>,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    enabled: bool,
+    auth: Option<String>,
+) -> Result<WeakeningOutcome, String> {
+    if enabled {
+        settings.update(|s| s.lockdown.escalate_vulnerable_hours = true);
+        state.lock().unwrap().lockdown_escalate = true;
+        friction.cancel("lockdown.escalation_disable");
+        log_event(&app, "lockdown_escalation_enabled", serde_json::json!({}));
+        return Ok(WeakeningOutcome { applied: true, pending: None });
+    }
+
+    let already_off = !settings.get().lockdown.escalate_vulnerable_hours;
+    if already_off {
+        return Ok(WeakeningOutcome { applied: true, pending: None });
+    }
+
+    auth::require_auth(&app, &auth)?;
+    let view = friction.request(
+        "lockdown.escalation_disable",
+        "Turn off automatic lockdown during vulnerable hours",
+        serde_json::json!({}),
+    );
+    log::warn!(
+        "lockdown escalation disable requested — {}s cool-off started (escalation stays on until it elapses)",
+        view.delay_secs
+    );
+    log_event(&app, "friction_requested", serde_json::json!({ "action": "lockdown.escalation_disable" }));
+    Ok(WeakeningOutcome { applied: false, pending: Some(view) })
+}
+
+// ============================================================================
+// Serious Mode (UX Direction §1) — the one toggle that flips the whole app to
+// its strictest configuration AND its hard voice, with no per-feature
+// exceptions. The asymmetry is the entire product: ON is one click, OFF is the
+// longest cool-off in the app.
+// ============================================================================
+
+/// Turn Serious Mode on or off.
+///
+/// **ON is instant and unconditional** — it's a strengthening, and the whole
+/// design depends on a person in a strong moment being able to commit without
+/// friction. Turning it on also switches ON the protections it implies
+/// (lockdown escalation today) and withdraws any pending disable request: a
+/// strengthening always cancels the matching weakening, same rule as
+/// everywhere else in this file.
+///
+/// **OFF is a weakening** and goes through `friction.rs` under the
+/// `"serious.disable"` action id — which carries double the ordinary
+/// weakening delay (`friction::delay_for`), because this is the strongest
+/// commitment the app offers. Serious Mode stays *fully* active for the whole
+/// wait; nothing about the app softens until the applier arm actually fires.
+/// The master password gates the request if one is set, and the trusted
+/// contact (if any) is told at REQUEST time rather than at apply time — the
+/// same anti-weak-moment rule as `request_remove_trusted_contact`.
+///
+/// The strictness this mode implies is enforced where each layer lives: the
+/// extension reads `serious` off the pushed blocking settings (see
+/// `broadcast_blocking`) and forces its strict presets from there; the
+/// renderer reads it back through `get_app_settings` and flips voice + visuals.
+#[tauri::command]
+fn set_serious_mode(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Mutex<AppState>>>,
+    settings: tauri::State<'_, Arc<settings::SettingsState>>,
+    friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    lockdown: tauri::State<'_, Arc<lockdown::LockdownStore>>,
+    enabled: bool,
+    auth: Option<String>,
+) -> Result<WeakeningOutcome, String> {
+    if enabled {
+        state.lock().unwrap().serious_mode = true;
+        settings.update(|s| {
+            s.serious_mode = true;
+            // "It covers everything — no per-feature exceptions." Lockdown
+            // escalation is the one protection Serious Mode subsumes that has
+            // its own persisted flag, so turn it on here rather than leaving
+            // the user to find it. It is NOT turned back off on disable —
+            // un-strengthening something the user may have wanted anyway would
+            // be a weakening we never asked about.
+            s.lockdown.escalate_vulnerable_hours = true;
+        });
+        state.lock().unwrap().lockdown_escalate = true;
+        friction.cancel("serious.disable");
+        let _ = broadcast_blocking(&state, &lockdown);
+        log_event(&app, "serious_mode_enabled", serde_json::json!({}));
+        log::warn!("serious mode ENABLED (instant — strengthening)");
+        return Ok(WeakeningOutcome { applied: true, pending: None });
+    }
+
+    if !settings.get().serious_mode {
+        // Already off — nothing to weaken, so don't open a pointless pending
+        // change the user would then have to cancel.
+        return Ok(WeakeningOutcome { applied: true, pending: None });
+    }
+
+    auth::require_auth(&app, &auth)?;
+    let view = friction.request(
+        "serious.disable",
+        "Turn off Serious Mode",
+        serde_json::json!({}),
+    );
+    // Told now, not when it applies: the point of the notification is that the
+    // weak moment isn't private, and by apply time the moment has passed.
+    notify_contact(&app, "serious_disable_requested");
+    log::warn!(
+        "serious mode disable requested — {}s cool-off started (mode stays FULLY on until it elapses)",
+        view.delay_secs
+    );
+    log_event(&app, "friction_requested", serde_json::json!({ "action": "serious.disable" }));
+    Ok(WeakeningOutcome { applied: false, pending: Some(view) })
 }
 
 // ============================================================================
@@ -2570,10 +3472,11 @@ fn verify_master_password(
 /// Set or change the master password. First-time set needs no `current`
 /// (setting a password from nothing is a strengthening, never gated);
 /// changing an existing one requires `current` to verify — see
-/// `auth::AuthState::set_password`. Also withdraws any pending
-/// `"password.remove"` weakening: re-setting the password is itself a
-/// strengthening, the same "turning it back on cancels the pending turn-off"
-/// rule every other weakening in this codebase follows.
+/// `auth::AuthState::set_password`. Also withdraws any pending removal of
+/// **either** kind: re-setting the password is itself a strengthening, the same
+/// "turning it back on cancels the pending turn-off" rule every other weakening
+/// in this codebase follows. Cancelling only one of the two ids would leave the
+/// other quietly running out behind a freshly-set password.
 #[tauri::command]
 fn set_master_password(
     auth_state: tauri::State<'_, Arc<auth::AuthState>>,
@@ -2582,7 +3485,8 @@ fn set_master_password(
     new: String,
 ) -> Result<(), String> {
     auth_state.set_password(current.as_deref(), &new)?;
-    friction.cancel("password.remove");
+    friction.cancel(auth::PASSWORD_REMOVE);
+    friction.cancel(auth::PASSWORD_REMOVE_FORGOTTEN);
     Ok(())
 }
 
@@ -2600,37 +3504,37 @@ fn request_password_removal(
     current: String,
 ) -> Result<friction::PendingView, String> {
     auth_state.verify_only(&current)?;
-    let view = friction.request("password.remove", "Remove the master password", serde_json::json!({}));
+    let view =
+        friction.request(auth::PASSWORD_REMOVE, "Remove the master password", serde_json::json!({}));
     log::warn!(
         "master-password removal requested — {}s cool-off started (password still required until it elapses)",
         view.delay_secs
     );
-    log_event(&app, "friction_requested", serde_json::json!({ "action": "password.remove" }));
+    log_event(&app, "friction_requested", serde_json::json!({ "action": auth::PASSWORD_REMOVE }));
     notify_contact(&app, "password_removal_requested");
     Ok(view)
 }
 
-/// The "forgot it" recovery path: no current password needed, but the
-/// request goes through the exact same `"password.remove"` friction delay as
-/// `request_password_removal` above — forgetting the password can't shortcut
-/// the wait, it only skips proving you know a password you've said you don't
-/// remember. This is the documented recovery story for a lockout: wait out
-/// the delay, don't reach for a backdoor. The pending removal shows up in
-/// Settings -> Pending changes the entire time, so a stronger-willed future
-/// self (or a partner who remembers the password) can still cancel it.
+/// The "forgot it" recovery path: no current password needed, and no way to
+/// refuse it — a genuine lockout has to have a way out, and in this app that way
+/// is always *waiting*, never a backdoor. The pending removal shows up in
+/// Settings -> Pending changes the entire time, so a stronger-willed future self
+/// (or a partner who remembers the password) can still cancel it.
 ///
-/// TODO(near-Alpha): this reuses the standard weakening delay via the shared
-/// `"password.remove"` action id — `friction::delay_for` doesn't yet have a
-/// distinct "uninstall-length" delay class for a password-less path like this
-/// one. Before Alpha, give this its own longer (24h-class) delay so a brief
-/// unattended moment can't be used to start this clock and walk away.
+/// **It costs more time than the proved route**, under its own action id
+/// (`auth::PASSWORD_REMOVE_FORGOTTEN`, doubled in `friction::delay_for`). It
+/// used to share `"password.remove"` and therefore its ordinary 24h cool-off,
+/// which made the one request that proves nothing at all exactly as cheap as
+/// the one that proves the password — startable by anyone at an unlocked
+/// machine, in a moment, and then simply walked away from. Price is the only
+/// lever available here, so it is the one that is used.
 #[tauri::command]
 fn request_password_removal_forgotten(
     app: AppHandle,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
 ) -> friction::PendingView {
     let view = friction.request(
-        "password.remove",
+        auth::PASSWORD_REMOVE_FORGOTTEN,
         "Remove the master password (forgotten)",
         serde_json::json!({}),
     );
@@ -2638,7 +3542,11 @@ fn request_password_removal_forgotten(
         "master-password removal requested via the forgotten-password path — {}s cool-off started",
         view.delay_secs
     );
-    log_event(&app, "friction_requested", serde_json::json!({ "action": "password.remove", "forgotten": true }));
+    log_event(
+        &app,
+        "friction_requested",
+        serde_json::json!({ "action": auth::PASSWORD_REMOVE_FORGOTTEN, "forgotten": true }),
+    );
     notify_contact(&app, "password_removal_requested");
     view
 }
@@ -2674,7 +3582,8 @@ fn open_external(url: String) -> Result<(), String> {
 }
 
 /// Manually (re)apply the force-install policy for one browser, or all if
-/// `browser_key` is None. No-op ("dormant") until the release update URL is set.
+/// `browser_key` is None. Chromium force-installs from the Web Store, Firefox
+/// from AMO; an engine with no store URL configured is a no-op ("dormant").
 #[tauri::command]
 fn enforce_extension(browser_key: Option<String>) -> Vec<(String, String)> {
     let targets: Vec<&BrowserDef> = match &browser_key {
@@ -2684,44 +3593,191 @@ fn enforce_extension(browser_key: Option<String>) -> Vec<(String, String)> {
     targets
         .into_iter()
         .map(|def| {
-            // Same honesty gate as the monitor: on an unmanaged device an
-            // off-store force-install can't take, so don't write a dead policy —
-            // report why instead.
-            let status = if def.engine == Engine::Chromium
-                && browsers::enforcement_configured(def.engine)
-                && !browsers::offstore_forceinstall_supported()
-            {
-                "unsupported_device".to_string()
-            } else {
-                enforce_str(browsers::enforce_policy(def)).to_string()
-            };
+            // Web-Store force-install works on unmanaged machines, so there is no
+            // "unsupported device" case to report anymore — just apply the policy
+            // (elevation still required; an unelevated write reports "failed").
+            let status = enforce_str(browsers::enforce_policy(def)).to_string();
+            // Close the incognito/guest/private bypass in the same pass (1.5);
+            // reported status stays the force-install one the UI reads.
+            let _ = browsers::enforce_incognito_guest_policy(def);
             (def.key.to_string(), status)
         })
         .collect()
 }
 
-/// Ask for admin once and lock the extension. Writing a browser force-install
-/// policy requires elevation (the `Software\Policies` registry key is admin-only
-/// in *both* hives), so an unelevated app can't do it. This relaunches ourselves
-/// elevated (a single UAC prompt) with `--elevated-setup`; that short-lived
-/// instance writes the policy and registers an elevated login task, then exits.
-/// When it finishes we flush the monitor's memo so the UI flips to "locked".
+/// One browser's line in the Refresh result.
+#[derive(Debug, Clone, Serialize)]
+pub struct RefreshReport {
+    pub key: String,
+    pub name: String,
+    /// The same vocabulary `enforce_str` produces, so the UI can reuse the
+    /// enforcement copy it already has.
+    pub status: String,
+    /// One plain sentence about what actually happened for this browser, and —
+    /// where the answer is "nothing yet" — what it is waiting on.
+    pub detail: String,
+    /// True when finishing needs the browser closed and reopened. Firefox reads
+    /// `ExtensionSettings` only at startup, so a refresh there is genuinely
+    /// pending until it restarts; Chromium reloads policy live.
+    pub needs_restart: bool,
+}
+
+/// Re-install the extension in every browser (or one), from scratch.
+///
+/// This is the "Refresh" button, and it exists because three different things
+/// can leave a browser stuck on an old build — or on no build — with every
+/// registry key we wrote looking perfectly correct:
+///
+///   1. **Firefox never re-installs.** Its policy engine compares the installed
+///      add-on's `sourceURI` against the policy's `install_url` and returns
+///      early when they match, so a bare `latest.xpi` in the policy pins the
+///      add-on to whatever version it first fetched. `refresh_policy` writes a
+///      URL with a fresh nonce, which is what makes Firefox actually go back to
+///      AMO. Takes effect on the next Firefox start.
+///   2. **Chromium refuses to install at all** once the id is in the profile's
+///      `extensions.external_uninstalls` — the Edge case, where that record is
+///      why the "a third party wants to add this extension" prompt stopped
+///      appearing entirely. Cleared here, per profile, while the browser is
+///      closed.
+///   3. **The policy was never written, or was deleted.** Re-asserted for every
+///      browser on the machine.
+///
+/// What it deliberately does NOT do is delete a healthy Chromium force-install
+/// and let the browser re-download it. That would uninstall the extension —
+/// wiping its `chrome.storage.local` (stats, streak, local lists) — to obtain
+/// the exact same build, because a Chromium force-install resolves to whatever
+/// version the Web Store is currently serving. There is no version the store
+/// won't give us that a reinstall would.
+#[tauri::command]
+fn refresh_extensions(app: AppHandle, browser_key: Option<String>) -> Vec<RefreshReport> {
+    let targets: Vec<&BrowserDef> = match &browser_key {
+        Some(k) => browsers::browser_by_key(k).into_iter().collect(),
+        None => BROWSERS.iter().collect(),
+    };
+    let running = browsers::detect_running_from(&browsers::running_process_names());
+
+    let mut out = Vec::new();
+    for def in targets {
+        // Browsers that aren't on this machine have nothing to refresh; saying
+        // so for all seven would bury the two lines that matter.
+        let present = browsers::is_installed(def) || running.contains(&def.key);
+        if !present {
+            continue;
+        }
+        let is_running = running.contains(&def.key);
+
+        // Clearing the refusal record edits the profile's `Preferences`, which a
+        // live browser holds in memory and rewrites on exit — so under a running
+        // browser the edit is simply discarded. Say that plainly instead of
+        // reporting a repair that didn't stick.
+        let cleared = if is_running { 0 } else { browsers::clear_refusals(def) };
+        let outcome = browsers::refresh_policy(def);
+        let _ = browsers::enforce_incognito_guest_policy(def);
+
+        let needs_restart = def.engine == Engine::Gecko && is_running;
+        let mut detail = match def.engine {
+            // Firefox reads `ExtensionSettings` only at startup, so the work is
+            // real but genuinely pending until it restarts. Say which.
+            Engine::Gecko if is_running => {
+                "Re-pointed at the current Add-ons build. Restart Firefox to finish."
+            }
+            Engine::Gecko => "Re-pointed at the current Add-ons build. It installs on the next start.",
+            Engine::Chromium => match outcome {
+                EnforceOutcome::AutoInstallPendingApproval => {
+                    "Registered to install again — approve it when the browser asks."
+                }
+                EnforceOutcome::StoreUnavailable => "No store will install it here — add it by hand.",
+                EnforceOutcome::Failed => "Couldn't write the policy — grant admin.",
+                _ => "Force-install re-applied.",
+            },
+        }
+        .to_string();
+        if cleared > 0 {
+            detail = format!("Cleared a block that was stopping the install. {detail}");
+        } else if is_running && browsers::requires_manual_install(def) {
+            detail = format!("{detail} Close it first if the prompt still doesn't appear.");
+        }
+
+        log::warn!(
+            "[{}] refresh requested — outcome {}, refusal records cleared: {}",
+            def.key,
+            enforce_str(outcome),
+            cleared
+        );
+        out.push(RefreshReport {
+            key: def.key.to_string(),
+            name: def.name.to_string(),
+            status: enforce_str(outcome).to_string(),
+            detail,
+            needs_restart,
+        });
+    }
+
+    // The 30s profile cache would otherwise show the pre-refresh row for up to
+    // half a minute, which reads as the button having done nothing. Same for the
+    // enforcement memo: without dropping it the monitor would keep reporting
+    // whatever it last wrote.
+    profiles::invalidate_cache();
+    RE_ENFORCE_REQUESTED.store(true, Ordering::SeqCst);
+    log_event(&app, "extensions_refreshed", serde_json::json!({ "browsers": out.len() }));
+    out
+}
+
+/// Open a browser at its own extensions page.
+///
+/// Only reachable from the "turn it on" action, which exists because Chromium
+/// leaves an auto-installed extension switched off until the user approves it
+/// once — and a user who dismissed that prompt has no obvious way back to the
+/// toggle. `edge://extensions` and friends are private schemes only that
+/// browser understands, so this launches the browser itself rather than going
+/// through the shell. The URL is taken from our own table, never from the
+/// caller; the frontend only picks which browser.
+#[tauri::command]
+fn open_extensions_page(browser_key: String) -> Result<(), String> {
+    let def = browsers::browser_by_key(&browser_key).ok_or("Unknown browser")?;
+    let url = browsers::restore_target_url(def);
+    if url.is_empty() {
+        return Err("No extensions page known for this browser".to_string());
+    }
+    let exe = browsers::installed_exe_path(def).ok_or("Browser is not installed")?;
+    std::process::Command::new(exe)
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Ask for admin once and lock everything that needs it. Writing a browser
+/// force-install policy requires elevation (the `Software\Policies` registry key
+/// is admin-only in *both* hives) and so does pointing an adapter's DNS at the
+/// local resolver, so an unelevated app can't do either. This relaunches
+/// ourselves elevated (a single UAC prompt) with `--elevated-setup`; that
+/// short-lived instance writes the policy, takes over adapter DNS and registers
+/// an elevated login task, then exits. When it finishes we flush the monitor's
+/// memo so the UI flips to "locked".
+///
+/// The app data dir is handed over explicitly rather than re-derived in the
+/// child: the elevated pass runs before Tauri is built, so it has no `AppHandle`
+/// to ask, and a second guess at where `dns.json` lives is exactly the kind of
+/// near-miss that would write a restore point somewhere nothing reads.
 ///
 /// Fire-and-forget from the UI's side: it returns immediately and a background
 /// thread waits on the elevated pass. Windows-only; a no-op error elsewhere.
 #[tauri::command]
-fn request_elevated_setup() -> Result<(), String> {
+fn request_elevated_setup(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let udd = app.path().app_data_dir().map_err(|e| e.to_string())?;
         // Single-quote for PowerShell, escaping embedded quotes by doubling.
         let exe_ps = exe.to_string_lossy().replace('\'', "''");
+        let udd_ps = udd.to_string_lossy().replace('\'', "''");
         std::thread::spawn(move || {
             let ps = format!(
-                "Start-Process -FilePath '{}' -ArgumentList '--elevated-setup' -Verb RunAs -Wait",
-                exe_ps
+                "Start-Process -FilePath '{exe_ps}' -ArgumentList '--elevated-setup',\
+                 '--app-data-dir','{udd_ps}' -Verb RunAs -Wait"
             );
             let status = std::process::Command::new("powershell")
                 .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps])
@@ -2744,42 +3800,50 @@ fn request_elevated_setup() -> Result<(), String> {
 }
 
 /// The elevated one-shot (`--elevated-setup`). Runs with admin rights, writes the
-/// force-install policy for every Chromium browser, and registers an elevated
-/// logon task so future sessions re-assert the lock without a prompt. Then exits.
+/// force-install policy for every configured browser (Chromium via the Web Store,
+/// Firefox via AMO), points every network adapter at the local DNS resolver, and
+/// registers an elevated logon task so future sessions re-assert the lock without
+/// a prompt. Then exits.
 ///
-/// BRICK SAFETY: it writes a policy **only** if the localhost update server is
-/// actually answering (the running unelevated app serves it — binding a high
-/// port needs no admin). If nothing is serving, no policy is written, so a
-/// browser is never locked to a dead update URL.
+/// BRICK SAFETY: each force-install points at the published extension via its
+/// store's canonical URL (Chrome Web Store / AMO) — the store always answers and
+/// the extension is really published — so there is no dead-URL to lock a browser
+/// against (the old self-hosted path guarded this by checking a localhost server
+/// was serving first; the store path needs no such check).
 #[cfg(target_os = "windows")]
 fn elevated_setup() {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-    let addr: std::net::SocketAddr = match format!("127.0.0.1:{}", UPDATE_SERVER_PORT).parse() {
-        Ok(a) => a,
-        Err(_) => return,
-    };
-    let serving =
-        TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2)).is_ok();
-
-    if !browsers::offstore_forceinstall_supported() {
-        // Admin doesn't help here: Chrome/Edge won't honor an off-store
-        // force-install on an unmanaged device no matter who writes the key.
-        // Writing HKLM policy would just brand the browser "managed by your
-        // organization" for nothing, so skip it.
-        log::error!(
-            "elevated-setup: unmanaged device — Chrome/Edge won't honor an off-store force-install; skipping policy write"
-        );
-    } else if !serving {
-        log::error!("elevated-setup: update server not reachable — skipping policy write (no brick)");
-    } else {
-        for def in BROWSERS {
-            if def.engine == Engine::Chromium {
-                let _ = browsers::enforce_policy(def); // elevated -> writes HKLM
-            }
-        }
+    // enforce_policy is a no-op (Dormant) for any engine not yet configured, so
+    // this safely covers both Chromium and Firefox. Also write the incognito/
+    // guest/private lockdown (1.5) in the same elevated pass — it too needs HKLM.
+    for def in BROWSERS {
+        let _ = browsers::enforce_policy(def); // elevated -> writes HKLM
+        let _ = browsers::enforce_incognito_guest_policy(def);
     }
+
+    // Companion binaries. On a per-machine install these live in Program Files,
+    // so the unelevated app's own repair pass can find a stale one and be unable
+    // to do anything about it. This is that repair, with the rights to finish
+    // it — which is why "grant admin" is one prompt and not three.
+    let report = sidecars::repair();
+    if report.changed() {
+        log::warn!("elevated setup: repaired {} companion binary/ies", report.replaced);
+    }
+
+    // Adapter DNS takeover — the other thing on this machine that needs admin,
+    // and the reason "grant admin" used to fix the extension lock while leaving
+    // the DNS filter exactly as broken as it was. Only the *write* needs
+    // elevation; the resolver itself is already listening in the ordinary
+    // unelevated app, so pointing the adapters at 127.0.0.1 from here is enough
+    // and the running filter picks it up on its next drift check.
+    //
+    // Deliberately does not start a resolver of its own: this process is about
+    // to exit, and taking over DNS on behalf of a resolver that is about to
+    // disappear is the one thing this whole subsystem promises not to do. If the
+    // main app isn't serving, the takeover is undone by its own health check.
+    elevated_dns_takeover();
 
     // Elevated logon task: re-asserts the lock on future logins with no prompt.
     // Best-effort — the policy just written persists regardless, so the lock
@@ -2793,6 +3857,47 @@ fn elevated_setup() {
             ])
             .creation_flags(CREATE_NO_WINDOW)
             .status();
+    }
+}
+
+/// Point every adapter at the local resolver, from inside the elevated one-shot.
+///
+/// Two preconditions, both non-negotiable, because getting either wrong turns a
+/// protection into a machine with no working DNS:
+///
+/// 1. **The app data dir must have been handed to us** (`--app-data-dir`). That
+///    is where `dns.json` — the pre-takeover restore point — is written and where
+///    every restore path (`dns_filter::disable`, the health-check failsafe, the
+///    guardian's last act) looks for it. Writing it anywhere else would mean the
+///    takeover has no reachable undo, so with no path we do nothing at all.
+/// 2. **The resolver must already be answering on 127.0.0.1:53.** This process
+///    exits in a moment and hosts nothing; the resolver lives in the ordinary
+///    unelevated app. If that isn't serving right now, redirecting adapters at it
+///    would break DNS for as long as it took something else to notice.
+#[cfg(target_os = "windows")]
+fn elevated_dns_takeover() {
+    let mut args = std::env::args();
+    let mut app_data_dir: Option<std::path::PathBuf> = None;
+    while let Some(a) = args.next() {
+        if a == "--app-data-dir" {
+            app_data_dir = args.next().map(std::path::PathBuf::from);
+            break;
+        }
+    }
+    let Some(dir) = app_data_dir else {
+        log::warn!("elevated setup: no --app-data-dir; skipping DNS takeover");
+        return;
+    };
+    if !oathlight_dns::health_check(Duration::from_secs(2)) {
+        log::warn!(
+            "elevated setup: the resolver is not answering on 127.0.0.1:53 — skipping DNS \
+             takeover rather than pointing adapters at nothing"
+        );
+        return;
+    }
+    match oathlight_dns::takeover::takeover(&dir.join("dns.json")) {
+        Ok(_) => log::info!("elevated setup: adapter DNS takeover applied"),
+        Err(e) => log::warn!("elevated setup: DNS takeover failed: {e}"),
     }
 }
 
@@ -3015,6 +4120,133 @@ fn dismiss_overlay(
     overlay::dismiss(&app, overlay_state.inner(), monitor_id)
 }
 
+// ============================================================================
+// Recovery data (plan items 5.4 + 5.5) — commands. See recovery.rs for why
+// this lives in Rust rather than the renderer's localStorage.
+// ============================================================================
+
+/// The whole recovery view: streak, best streak, urge log, slip log, and every
+/// derived value (gentle mode, clean days, the canonical milestone list). One
+/// call, everything derived server-side, so no two surfaces can disagree.
+#[tauri::command]
+fn get_recovery_log(state: tauri::State<'_, Arc<recovery::RecoveryState>>) -> recovery::RecoveryView {
+    state.view()
+}
+
+/// Log one urge (5.4). `trigger` is a fixed-vocabulary id or null; `source` is
+/// `panic` | `manual`. Never free text — see recovery.rs.
+#[tauri::command]
+fn log_urge(
+    state: tauri::State<'_, Arc<recovery::RecoveryState>>,
+    trigger: Option<String>,
+    source: Option<String>,
+) -> recovery::RecoveryView {
+    state.log_urge(trigger, source.as_deref().unwrap_or("manual"))
+}
+
+/// Log a slip (5.5). Not a reset: the best streak is kept, the slip is
+/// recorded as data, and it mirrors into the urge log for trigger analytics.
+///
+/// Deliberately NOT friction-gated. Logging a slip honestly is an act of
+/// recovery, not a weakening of protection — putting a cool-off in front of it
+/// would teach people to lie to their own log, which is the one outcome that
+/// would make the whole feature worthless.
+#[tauri::command]
+fn log_slip(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<recovery::RecoveryState>>,
+    trigger: Option<String>,
+) -> recovery::RecoveryView {
+    let view = state.log_slip(trigger);
+    // Event log (4.5): the FACT only — no trigger, no time-of-day pattern, no
+    // content. A slip is the user's own data; the event log just shows their
+    // future self that the app was running and honest about it.
+    log_event(&app, "slip_logged", serde_json::json!({}));
+    view
+}
+
+/// Record that a streak milestone has been celebrated, so it fires exactly
+/// once. Monotonic and idempotent — safe to call from a render effect.
+#[tauri::command]
+fn mark_milestone(
+    state: tauri::State<'_, Arc<recovery::RecoveryState>>,
+    days: u64,
+) -> recovery::RecoveryView {
+    state.mark_milestone(days)
+}
+
+/// One-time migration of a streak that predates this store (5.4/5.5). The
+/// renderer offers whatever `streakStart`/`bestStreak` it still has in
+/// localStorage; the backend adopts the anchor only if it is EARLIER than its
+/// own and only while it has no history of its own, so this can carry a real
+/// streak across the move but can never be used to fabricate one afterwards.
+#[tauri::command]
+fn migrate_recovery_streak(
+    state: tauri::State<'_, Arc<recovery::RecoveryState>>,
+    streak_start: u64,
+    best_streak: u64,
+) -> recovery::RecoveryView {
+    state.migrate_streak_start(streak_start, best_streak)
+}
+
+/// Report the current overlay as a FALSE POSITIVE (plan item 2.4).
+///
+/// Callable only from an overlay window — like `dismiss_overlay`, the monitor
+/// id comes from the calling window's own label, so no caller can report on
+/// another monitor's behalf. The scores recorded are the ones the monitor
+/// thread stashed at escalation time, never anything the webview supplies:
+/// a self-reported score would make the eval log worthless as a record of what
+/// the model actually did.
+///
+/// Recording a report immediately re-derives the dwell, so the pause on THIS
+/// overlay shortens straight away rather than only affecting future ones.
+/// Returns the new dwell in seconds so the overlay can update its countdown.
+#[tauri::command]
+fn report_false_positive(
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+    overlay_state: tauri::State<'_, Arc<overlay::OverlayState>>,
+) -> Result<u64, String> {
+    let monitor_id: u32 = window
+        .label()
+        .strip_prefix("pp-overlay-")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| "not an overlay window".to_string())?;
+
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let ev = overlay_state.evidence(monitor_id);
+    let entry = evallog::EvalEntry {
+        ts: now,
+        monitor_id,
+        siglip_nsfw: ev.as_ref().map(|e| e.siglip_nsfw).unwrap_or(0.0),
+        nudenet_explicit: ev.as_ref().map(|e| e.nudenet_explicit).unwrap_or(0.0),
+        // No evidence recorded (an overlay left open across an app restart) —
+        // log the report anyway with an explicit marker rather than silently
+        // dropping the user's feedback. It just can't be deduplicated.
+        screen_hash: ev.map(|e| e.screen_hash).unwrap_or_else(|| "unknown".to_string()),
+        dwell_secs: evallog::tuned_dwell_secs(&dir, now),
+    };
+    evallog::append(&dir, &entry)?;
+
+    // Event log (4.5): the FACT of the report, never the scores or the hash —
+    // same "event only, no content" rule the escalation entry follows.
+    log_event(&app, "false_positive_reported", serde_json::json!({ "monitor_id": monitor_id }));
+    Ok(evallog::tuned_dwell_secs(&dir, now))
+}
+
+/// The local false-positive eval log (2.4), newest first, capped at `limit`.
+/// Purely for the user to read their own history — there is no upload path in
+/// this app, by design.
+#[tauri::command]
+fn get_eval_log(app: AppHandle, limit: Option<usize>) -> Vec<evallog::EvalEntry> {
+    let Ok(dir) = app.path().app_data_dir() else { return Vec::new() };
+    let mut all = evallog::read_all(&dir);
+    all.reverse();
+    all.truncate(limit.unwrap_or(50));
+    all
+}
+
 /// Authorize a real shutdown of the dual-process watchdog so closing the app no
 /// longer triggers resurrection. The legitimate quit path (the uninstall flow,
 /// `perform_uninstall`) calls `watchdog::request_shutdown()` directly — it does
@@ -3056,6 +4288,13 @@ fn uninstall_state_from(store: &friction::FrictionStore) -> uninstall::Uninstall
             elapsed_secs: p.elapsed_secs,
             remaining_secs: p.remaining_secs,
             ready: p.ready,
+            // 4.6: the phrase generated when the request was filed. Empty for
+            // a request made by a build that predates this, which
+            // `phrase_matches` treats as "nothing to type".
+            confirm_phrase: store
+                .payload_of("uninstall")
+                .and_then(|v| v.get("phrase").and_then(|p| p.as_str()).map(String::from))
+                .unwrap_or_default(),
         },
         None => {
             let delay = friction::delay_for("uninstall");
@@ -3066,6 +4305,7 @@ fn uninstall_state_from(store: &friction::FrictionStore) -> uninstall::Uninstall
                 elapsed_secs: 0,
                 remaining_secs: delay,
                 ready: false,
+                confirm_phrase: String::new(),
             }
         }
     }
@@ -3093,7 +4333,17 @@ fn request_uninstall(
 ) -> Result<uninstall::UninstallState, String> {
     auth::require_auth(&app, &auth)?;
     let existing = friction.get("uninstall").is_some();
-    let view = friction.request("uninstall", "Remove Oath Light from this computer", serde_json::json!({}));
+    // 4.6: mint the confirmation phrase once, at request time, and persist it
+    // with the request. Re-requesting an already-pending uninstall must NOT
+    // roll a new phrase — `friction.request` is idempotent for an existing
+    // action id, so the original payload (and phrase) stands, which is what
+    // keeps the phrase stable for the whole 24 hours and across restarts.
+    let phrase = uninstall::generate_phrase();
+    let view = friction.request(
+        "uninstall",
+        "Remove Oath Light from this computer",
+        serde_json::json!({ "phrase": phrase }),
+    );
     if let Ok(dir) = app.path().app_data_dir() {
         uninstall::write_marker(&dir, Some(view.requested_at));
     }
@@ -3379,7 +4629,7 @@ fn perform_uninstall(app: &AppHandle) -> Result<String, String> {
     // touched. If it's no longer ready, unlatch so a future genuine attempt
     // isn't permanently blocked.
     if let Some(friction) = app.try_state::<Arc<friction::FrictionStore>>() {
-        if !friction.get("uninstall").map_or(false, |p| p.ready) {
+        if !friction.get("uninstall").is_some_and(|p| p.ready) {
             UNINSTALL_FIRED.store(false, Ordering::SeqCst);
             return Err("The waiting period hasn't elapsed yet.".to_string());
         }
@@ -3474,9 +4724,21 @@ fn perform_uninstall(app: &AppHandle) -> Result<String, String> {
 fn complete_uninstall(
     app: AppHandle,
     friction: tauri::State<'_, Arc<friction::FrictionStore>>,
+    confirm: Option<String>,
 ) -> Result<String, String> {
-    if !friction.get("uninstall").map_or(false, |p| p.ready) {
+    if !friction.get("uninstall").is_some_and(|p| p.ready) {
         return Err("The waiting period hasn't elapsed yet.".to_string());
+    }
+    // 4.6 — type-the-phrase friction. The 24h wait guards the impulsive
+    // moment; this guards the moment it ends, when the button is finally live
+    // and a whole day of anticipation is behind it. Checked in Rust, not the
+    // renderer, so it holds for any caller of this command.
+    let expected = friction
+        .payload_of("uninstall")
+        .and_then(|v| v.get("phrase").and_then(|p| p.as_str()).map(String::from))
+        .unwrap_or_default();
+    if !uninstall::phrase_matches(&expected, confirm.as_deref().unwrap_or("")) {
+        return Err("The confirmation phrase doesn't match. Type it out exactly as shown.".to_string());
     }
     // Event log (4.5): record that removal was actually executed, before the
     // app tears itself down — the app-data dir (and this log with it) is
@@ -3487,11 +4749,221 @@ fn complete_uninstall(
 }
 
 // ============================================================================
+// Update mode (see `update.rs`) — commands.
+//
+// The problem these solve is stated in full in that module's doc: every guard
+// that makes Oath Light hard to remove also makes it impossible to install a
+// new build over, because both executables are running and each resurrects the
+// other. `begin_update` opens a bounded window in which the resurrection guards
+// alone stand aside, closes the app so its files unlock, and arms a one-shot
+// task that brings everything back if the update never happens.
+//
+// Note what is NOT in here. No blocklist is unloaded, no browser policy is
+// removed, no extension enforcement is relaxed, the uninstall friction is
+// untouched, and autostart stays registered. An update window is not a way to
+// turn Oath Light off for a quarter of an hour; it is a way to let a file be
+// replaced.
+// ============================================================================
+
+/// What the Settings card renders.
+#[derive(Debug, Clone, serde::Serialize)]
+struct UpdateStateView {
+    /// Whether a window is open right now (re-validated on read — a stale or
+    /// hand-edited `update.json` reports `false`, see `update::window_active_at`).
+    active: bool,
+    /// Seconds left on it; `0` when none is open.
+    seconds_left: u64,
+    /// The full window length, so the UI can state the bound without hardcoding
+    /// its own copy of the constant.
+    window_secs: u64,
+    /// The running build, shown so the user can tell what they are updating
+    /// from before they close it.
+    app_version: String,
+    /// Whether the expiry-recovery task is armed. Reported honestly rather than
+    /// assumed: if `schtasks` failed, the user is owed the fact that nothing
+    /// will bring the app back on its own.
+    recovery_armed: bool,
+}
+
+fn update_state_view(app: &AppHandle, recovery_armed: bool) -> UpdateStateView {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let (active, seconds_left) = match app.path().app_data_dir() {
+        Ok(d) => {
+            let p = update::path_in(&d);
+            (update::window_active_at(&p), update::seconds_left_at(&p, now))
+        }
+        Err(_) => (false, 0),
+    };
+    UpdateStateView {
+        active,
+        seconds_left,
+        window_secs: update::WINDOW_SECS,
+        app_version: app.package_info().version.to_string(),
+        recovery_armed,
+    }
+}
+
+#[tauri::command]
+fn get_update_state(app: AppHandle) -> UpdateStateView {
+    // `recovery_armed` is only meaningful in the reply to `begin_update`, which
+    // is the one call that knows whether `schtasks` succeeded. A plain status
+    // poll reports it as armed exactly when a window is open, which is the
+    // state `begin_update` leaves behind on the happy path.
+    let active = app
+        .path()
+        .app_data_dir()
+        .map(|d| update::window_active_at(&update::path_in(&d)))
+        .unwrap_or(false);
+    update_state_view(&app, active)
+}
+
+/// Best-effort: end the native-messaging host processes.
+///
+/// `oath-light-host.exe` is spawned by the browsers, not by us, so it can be
+/// running (and therefore locked) with no Oath Light window open at all. The
+/// installer cannot replace a locked file, which makes this the most likely
+/// remaining way for an update to half-succeed. Killing it costs nothing — the
+/// browser respawns one on its next connection, against whichever binary is
+/// there by then.
+#[cfg(target_os = "windows")]
+fn kill_native_hosts() {
+    use std::os::windows::process::CommandExt;
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/IM", "oath-light-host.exe", "/T"])
+        .creation_flags(0x0800_0000)
+        .output();
+}
+
+#[cfg(not(target_os = "windows"))]
+fn kill_native_hosts() {}
+
+/// Open an update window and close the app so an installer can replace it.
+///
+/// Gated on the master password (4.2), same as every other command that makes
+/// the app easier to get around, and recorded in the tamper-evident event log
+/// (4.5) — the point is not that this is dangerous, it is that a window where
+/// the watchdog stands down should never be something the user's future self
+/// can't see happened.
+///
+/// Deliberately NOT friction-gated. A cool-off on updating would mean shipping
+/// a security fix that users have to wait a day to apply, and the bound that
+/// makes this safe is the window's own one-minute expiry, not a delay in
+/// front of it.
+///
+/// Order matters, and mirrors `perform_uninstall`: arm the recovery FIRST,
+/// while everything is still intact, so the failure mode of a broken
+/// `schtasks` is "the update didn't start" rather than "the guards are down and
+/// nothing is coming back."
+#[tauri::command]
+fn begin_update(app: AppHandle, auth: Option<String>) -> Result<UpdateStateView, String> {
+    auth::require_auth(&app, &auth)?;
+
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Could not resolve the app data directory ({e}); nothing was changed."))?;
+
+    let version = app.package_info().version.to_string();
+    let window = update::open(&app_data_dir, &version)?;
+
+    // Arm the recovery before standing anything down. If this fails the window
+    // is still openable — an update that can't be undone by a timer is a
+    // choice the user is allowed to make — but they are told, and the UI says
+    // so rather than quietly implying a safety net that isn't there.
+    let recovery_armed = match std::env::current_exe() {
+        Ok(exe) => match update::schedule_recovery(&exe, window.expires_at) {
+            Ok(()) => true,
+            Err(e) => {
+                log::warn!("update: could not arm the expiry recovery task: {e}");
+                false
+            }
+        },
+        Err(e) => {
+            log::warn!("update: could not resolve our own exe path for recovery: {e}");
+            false
+        }
+    };
+
+    // Now stand the resurrection guards down on both sides.
+    watchdog::request_update_standdown(&update::path_in(&app_data_dir));
+
+    // Stop the in-process DNS resolver and hand the adapters back their real
+    // upstreams. Without this the machine would be pointed at a resolver that
+    // is about to exit — the same reasoning as `perform_uninstall`, and the
+    // guardian repeats it as its own last act.
+    if let Some(dns) = app.try_state::<Arc<dns_filter::DnsFilterState>>() {
+        dns.disable();
+    }
+
+    kill_native_hosts();
+
+    log::warn!(
+        "update window opened (expires in {}s, recovery {}) — watchdog standing down, app closing",
+        update::WINDOW_SECS,
+        if recovery_armed { "armed" } else { "NOT armed" }
+    );
+    log_event(
+        &app,
+        "update_started",
+        serde_json::json!({
+            "from_version": version,
+            "window_secs": update::WINDOW_SECS,
+            "recovery_armed": recovery_armed,
+        }),
+    );
+
+    let view = update_state_view(&app, recovery_armed);
+
+    // Same 2-second grace as the uninstall path: long enough for this reply to
+    // reach the webview and for the UI to say what is about to happen.
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(2000));
+        app2.exit(0);
+    });
+
+    Ok(view)
+}
+
+/// Close an open update window without updating: clear the file, drop the
+/// sentinel, disarm the recovery task. Ungated — re-arming the guards early is
+/// a strengthening, and nothing that makes protection stronger has ever needed
+/// the password (see auth.rs's module doc).
+///
+/// Mostly reachable in one narrow case, since `begin_update` closes the app:
+/// the user changed their mind in the two seconds before it did. It also runs
+/// on startup, which is the path that actually matters.
+#[tauri::command]
+fn cancel_update(app: AppHandle) -> Result<UpdateStateView, String> {
+    if let Ok(d) = app.path().app_data_dir() {
+        update::clear(&d);
+    }
+    watchdog::clear_update_standdown();
+    update::cancel_recovery();
+    log::info!("update window cancelled — guards re-armed");
+    Ok(update_state_view(&app, false))
+}
+
+// ============================================================================
 // Entry point
 // ============================================================================
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Uninstall CLI modes (`--uninstall-check` / `--uninstall-teardown`), before
+    // anything else in the process does any work. These are how the NSIS
+    // uninstaller asks whether removal is authorized and, if it is, has the app
+    // reverse its own machine state — see `cli` for why `uninstall.exe` must go
+    // through this gate rather than around it.
+    //
+    // First, and with an immediate `exit`, for two reasons: this instance must
+    // never take the watchdog's main-role mutex (it would be seen as the running
+    // app and fight the very removal it is performing), and the check mode must
+    // stay side-effect-free so that a refusal genuinely touches nothing.
+    if let Some(code) = cli::dispatch() {
+        std::process::exit(code);
+    }
+
     // Elevated one-shot: this instance was relaunched with admin rights for the
     // sole purpose of writing the force-install policy (which *requires*
     // elevation — the `Software\Policies` key is admin-only) and registering the
@@ -3501,6 +4973,18 @@ pub fn run() {
         elevated_setup();
         return;
     }
+
+    // Companion binaries, BEFORE anything spawns one.
+    //
+    // An installer cannot overwrite `oathlightguard.exe` or
+    // `oath-light-host.exe` while they are running — which, by design, they
+    // usually are — so an upgrade can leave a new app driving two old
+    // companions and say nothing about it. The app carries its own copies and
+    // rewrites whatever doesn't match (see `sidecars`). Ordering is the whole
+    // point of doing it here: `init_main` just below is what spawns the
+    // guardian, and repairing afterwards would mean the stale one runs anyway
+    // for the rest of the session.
+    let sidecar_report = sidecars::repair();
 
     // Dual-process watchdog (Phase 4 tamper resistance). Acquire the main-role
     // mutex and start guarding the guardian *before* the window comes up; this
@@ -3517,6 +5001,10 @@ pub fn run() {
         .manage(NsfwState::default())
         .manage(MonitorState::default())
         .manage(Arc::new(overlay::OverlayState::default()))
+        // Restore windows are deliberately in-memory only: a grace window is a
+        // supervised 20 seconds, and one that survived a restart would be a
+        // pass the user could bank by closing the app.
+        .manage(Arc::new(browser_lock::BrowserLockState::default()))
         .invoke_handler(tauri::generate_handler![
             get_extension_stats,
             get_extension_blocklists,
@@ -3529,6 +5017,9 @@ pub fn run() {
             get_browsers_status,
             set_guard_enabled,
             get_app_settings,
+            get_mentor_config,
+            set_mentor_config,
+            mentor_send,
             add_blocked_process,
             remove_blocked_process,
             set_block_unknown_browsers,
@@ -3539,6 +5030,10 @@ pub fn run() {
             open_external,
             set_app_streak,
             enforce_extension,
+            refresh_extensions,
+            open_extensions_page,
+            set_browser_lock_enabled,
+            request_browser_restore,
             request_elevated_setup,
             request_sync,
             update_blocklist_domains,
@@ -3550,12 +5045,23 @@ pub fn run() {
             stop_nsfw_monitor,
             nsfw_monitor_running,
             dismiss_overlay,
+            report_false_positive,
+            get_eval_log,
+            get_recovery_log,
+            log_urge,
+            log_slip,
+            mark_milestone,
+            migrate_recovery_streak,
+            set_grayscale_vulnerable_hours,
             stop_watchdog,
             get_uninstall_state,
             request_uninstall,
             reset_uninstall_timer,
             cancel_uninstall,
             complete_uninstall,
+            get_update_state,
+            begin_update,
+            cancel_update,
             take_panic_pending,
             get_auth_status,
             verify_master_password,
@@ -3566,6 +5072,8 @@ pub fn run() {
             start_lockdown,
             cancel_lockdown,
             request_lockdown_allow,
+            set_lockdown_escalation,
+            set_serious_mode,
             get_trusted_contact,
             set_trusted_contact,
             request_remove_trusted_contact,
@@ -3688,6 +5196,19 @@ pub fn run() {
             // shutdown sentinel, and so the guardian can be told the same path.
             watchdog::set_uninstall_json_path(udd.join("uninstall.json"));
 
+            // Consume any update window (see `update.rs`). This instance is up
+            // and holding the main mutex, so whatever the window was for is
+            // over: either the installer finished and launched this build, or
+            // it never ran and the recovery task brought the old one back.
+            // Either way the guards belong back on, and the one-shot recovery
+            // task has done its job or is no longer needed.
+            //
+            // `init_main()` already dropped the sentinel — it had to, since the
+            // guard loop starts there — so this is the other half: the window
+            // file itself, and the scheduled task.
+            update::clear(&udd);
+            update::cancel_recovery();
+
             // Generalized friction store (4.1/4.3) + backend-owned settings
             // (A.3 seed). `friction::FrictionStore::load` migrates a legacy
             // pending uninstall request out of `uninstall.json` on its own —
@@ -3696,19 +5217,38 @@ pub fn run() {
             app.manage(friction_store.clone());
             let settings_state = Arc::new(settings::SettingsState::load(&udd));
             app.manage(settings_state.clone());
+            // Recovery data — urge log, slip log, streak (5.4/5.5). Moved out
+            // of the renderer's localStorage so a browser-data reset or a
+            // devtools edit can't erase or rewrite a ninety-day streak; see
+            // recovery.rs for the full reasoning.
+            app.manage(Arc::new(recovery::RecoveryState::load(&udd)));
             // System DNS filter (1.1/1.2). Managed here so commands + the
-            // monitor tick share one instance. If it was on at last shutdown,
-            // start + re-takeover now (idempotent) — off the startup path so
-            // a couple of PowerShell spawns don't block the window coming up.
+            // monitor tick share one instance. Started unconditionally now that
+            // the filter is mandatory — off the startup path, because a couple
+            // of PowerShell spawns must not hold the window back.
+            //
+            // A failure here is not the end of it: the monitor's retry loop
+            // (`tick_retry`) picks it up on a backoff, so a machine that was
+            // mid-reconnect, mid-VPN or momentarily holding port 53 at launch
+            // comes up filtered a few seconds later instead of staying off for
+            // the session.
             let dns_state = Arc::new(dns_filter::DnsFilterState::new(&udd));
             app.manage(dns_state.clone());
-            if settings_state.get().dns_filter_enabled {
+            {
                 let dns2 = dns_state.clone();
                 std::thread::spawn(move || {
                     if let Err(e) = dns2.enable() {
-                        log::warn!("DNS filter auto-start failed: {e}");
+                        log::warn!("DNS filter auto-start failed ({e}) — the retry loop has it");
                     }
                 });
+            }
+            // Protections that used to be optional and no longer are: withdraw
+            // any cool-off an older build left pending against them, so an
+            // upgrade never carries a scheduled weakening into a build where
+            // that weakening has no meaning. The applier drops these too — this
+            // is what stops one sitting in the UI as a countdown to nothing.
+            for stale in ["guard.disable", "browser_lock.disable", "dns.disable"] {
+                friction_store.cancel(stale);
             }
             // Tamper-evident event log (4.5) — managed before anything that
             // might append (the TCP server / monitor threads below), so the
@@ -3717,6 +5257,21 @@ pub fn run() {
             // was edited/truncated/deleted since last run — see eventlog.rs.
             let event_log = Arc::new(EventLog::load(&udd));
             app.manage(event_log.clone());
+            // Companion-binary repair (run before the builder, so it could not
+            // reach the log then). Recorded only when something actually
+            // happened: a healthy install would otherwise write an entry every
+            // launch saying nothing, and the entries that matter here are
+            // "your last update left a stale companion behind" and "we could
+            // not fix it" — both of which are the user's business.
+            if sidecar_report.changed() || sidecar_report.failed > 0 {
+                event_log.append(
+                    "sidecars_repaired",
+                    serde_json::json!({
+                        "replaced": sidecar_report.replaced,
+                        "failed": sidecar_report.failed,
+                    }),
+                );
+            }
             // Lockdown Mode (4.4) — clock-immune credited-time engine, same
             // pattern as the friction store.
             let lockdown_store = Arc::new(lockdown::LockdownStore::load(&udd));
@@ -3736,8 +5291,17 @@ pub fn run() {
             ota::init(app.handle(), &udd);
             // AppState was constructed with the hardcoded pre-setup default
             // (`guard_enabled: true`) before the persisted settings file could
-            // be read — now that it's loaded, the persisted value wins.
-            shared_state.lock().unwrap().guard_enabled = settings_state.get().guard_enabled;
+            // be read — now that it's loaded, the persisted value wins. Same
+            // for the lockdown-escalation mirror (4.4 v2) and the Serious Mode
+            // mirror (UX Direction §1), which `broadcast_blocking` reads
+            // instead of holding a `SettingsState` handle of its own.
+            {
+                let mut s0 = shared_state.lock().unwrap();
+                let persisted = settings_state.get();
+                s0.guard_enabled = persisted.guard_enabled;
+                s0.lockdown_escalate = persisted.lockdown.escalate_vulnerable_hours;
+                s0.serious_mode = persisted.serious_mode;
+            }
             // No background watcher for the uninstall request specifically:
             // the cool-off elapsing only flips `UninstallState.ready`,
             // unlocking the explicit "Remove Oath Light now" action in the UI
@@ -3760,9 +5324,13 @@ pub fn run() {
                 let state2 = shared_state.clone();
                 let settings2 = settings_state.clone();
                 let auth2 = auth_state.clone();
-                let dns2 = dns_state.clone();
                 let lockdown2 = lockdown_store.clone();
                 let event_log2 = event_log.clone();
+                // Owned by this thread alone — the nudge's rate limit is not
+                // state anything else reads, and deliberately does NOT persist:
+                // a restart may fire one reminder early, which is harmless, and
+                // that is a better trade than another file on disk.
+                let reminder2 = reminder::ReminderState::new();
                 std::thread::spawn(move || {
                     let mut tick: u64 = 0;
                     loop {
@@ -3804,15 +5372,45 @@ pub fn run() {
                         // one, send "still protecting <name>'s computer" so that
                         // silence itself becomes a signal. Checked cheaply once a
                         // minute; the 30-day gate makes the actual send rare.
+                        // Grayscale window expiry (5.6) — hand the display
+                        // back the moment the window ends, and also if the
+                        // extension went away mid-window (the deadline is
+                        // absolute; see GRAYSCALE_UNTIL).
+                        tick_grayscale();
+
                         if tick % 60 == 0 {
                             maybe_send_contact_heartbeat(&app2, &settings2);
+
+                            // Vulnerable-hours nudge (moved here from the
+                            // browser extension — see reminder.rs). Checked
+                            // once a minute, but `reminder::tick` rate-limits
+                            // itself to one card per 30 minutes and returns
+                            // immediately unless the window is open and a
+                            // nudge type is switched on, so this is a no-op
+                            // almost every time it runs.
+                            let (blocking, serious) = {
+                                let s = state2.lock().unwrap();
+                                (s.ext_blocking.clone(), s.serious_mode)
+                            };
+                            reminder::tick(&app2, &reminder2, blocking.as_ref(), serious);
                         }
 
                         for (action_id, payload) in friction2.take_ready() {
-                            if action_id == "guard.disable" {
-                                state2.lock().unwrap().guard_enabled = false;
-                                settings2.update(|s| s.guard_enabled = false);
-                                log::warn!("friction: uninstall guard disabled (weakening applied)");
+                            // Weakenings that no longer exist. A cool-off filed
+                            // by an older build can still come due here after an
+                            // upgrade, and the one thing it must not do is land:
+                            // the protections it points at are mandatory now, so
+                            // the request is dropped rather than applied. The
+                            // commands cancel these on sight too — this is the
+                            // arm that catches one that ripened first.
+                            if matches!(
+                                action_id.as_str(),
+                                "guard.disable" | "browser_lock.disable" | "dns.disable"
+                            ) {
+                                log::warn!(
+                                    "friction: '{action_id}' came due but that protection is no \
+                                     longer optional — dropped"
+                                );
                             } else if action_id == "monitor.disable" {
                                 if let Some(monitor) = app2.try_state::<MonitorState>() {
                                     monitor.running.store(false, Ordering::SeqCst);
@@ -3845,16 +5443,20 @@ pub fn run() {
                                 let msg = serde_json::json!({ "type": "set_custom_domains", "domains": merged });
                                 let _ = broadcast_to_extensions(&state2, &msg);
                                 log::warn!("friction: custom block on {domain} removed (weakening applied)");
-                            } else if action_id == "password.remove" {
+                            } else if action_id == auth::PASSWORD_REMOVE
+                                || action_id == auth::PASSWORD_REMOVE_FORGOTTEN
+                            {
                                 // Applies both `request_password_removal` (current
                                 // password verified up front) and the "forgot it"
-                                // path (`request_password_removal_forgotten`) —
-                                // both register under the same action id, see
-                                // that command's doc comment for why. Deletes
-                                // auth.json and drops every live session token;
-                                // idempotent if the file is already gone.
+                                // path (`request_password_removal_forgotten`).
+                                // They are separate action ids so the unproven
+                                // path can carry a longer cool-off, but they end
+                                // in the same place: delete auth.json and drop
+                                // every live session token. Idempotent if the
+                                // file is already gone, which is what makes it
+                                // safe for both to fire.
                                 auth2.remove_password_file();
-                                log::warn!("friction: master password removed (weakening applied)");
+                                log::warn!("friction: master password removed via '{action_id}' (weakening applied)");
                             } else if action_id.starts_with("process_block.remove:") {
                                 // 1.3: actually drop the process from the
                                 // blocked list now that the delay elapsed.
@@ -3876,17 +5478,6 @@ pub fn run() {
                                 // the default log-only tier.
                                 settings2.update(|s| s.block_unknown_browsers = false);
                                 log::warn!("friction: evasion-browser kill switch disabled (weakening applied)");
-                            } else if action_id == "dns.disable" {
-                                // 1.1/1.2: stop the resolver + restore adapter
-                                // DNS, persist the flag off, and drop the DoH
-                                // policy from every browser (the reason it was
-                                // written is gone).
-                                dns2.disable();
-                                settings2.update(|s| s.dns_filter_enabled = false);
-                                for def in BROWSERS {
-                                    browsers::remove_dns_policy(def);
-                                }
-                                log::warn!("friction: system DNS filter disabled (weakening applied)");
                             } else if action_id == "lockdown.cancel" {
                                 // 4.4: a NORMAL lockdown's early-end delay
                                 // elapsed — actually end it now and push the
@@ -3908,7 +5499,7 @@ pub fn run() {
                                 }
                                 let allow = {
                                     let mut s = state2.lock().unwrap();
-                                    if !s.lockdown_allow.iter().any(|d| *d == domain) {
+                                    if !s.lockdown_allow.contains(&domain) {
                                         s.lockdown_allow.push(domain.clone());
                                     }
                                     s.lockdown_allow.clone()
@@ -3916,6 +5507,31 @@ pub fn run() {
                                 save_lockdown_allow(&app2, &allow);
                                 let _ = broadcast_blocking(&state2, &lockdown2);
                                 log::warn!("friction: lockdown-allowed {domain} (applied)");
+                            } else if action_id == "lockdown.escalation_disable" {
+                                // 4.4 v2: the disable delay elapsed — actually
+                                // turn schedule-from-vulnerable-hours off. Does
+                                // NOT touch any lockdown already in progress
+                                // (started by this schedule or manually) — that
+                                // still only ends via `lockdown.cancel` or
+                                // natural expiry, same as always.
+                                settings2.update(|s| s.lockdown.escalate_vulnerable_hours = false);
+                                state2.lock().unwrap().lockdown_escalate = false;
+                                let _ = broadcast_blocking(&state2, &lockdown2);
+                                log::warn!("friction: lockdown schedule-from-vulnerable-hours disabled (weakening applied)");
+                            } else if action_id == "serious.disable" {
+                                // UX Direction §1: the doubled Serious Mode
+                                // cool-off elapsed — only NOW does the mode
+                                // actually come off. It stayed fully active
+                                // for the whole wait, which is the entire
+                                // point of the asymmetry. Everything Serious
+                                // Mode turned ON stays on: this un-forces the
+                                // strictness, it doesn't undo protections the
+                                // user may independently want (see
+                                // `set_serious_mode`).
+                                settings2.update(|s| s.serious_mode = false);
+                                state2.lock().unwrap().serious_mode = false;
+                                let _ = broadcast_blocking(&state2, &lockdown2);
+                                log::warn!("friction: serious mode disabled (weakening applied)");
                             } else if action_id == "trusted_contact.remove" {
                                 // 5.2: the unwire delay elapsed — actually
                                 // clear the contact. The contact was already
@@ -3952,7 +5568,6 @@ pub fn run() {
                 });
             }
 
-            start_update_server(app.handle().clone());
             start_tcp_server(app.handle().clone(), shared_state.clone());
             start_monitor(app.handle().clone(), shared_state.clone());
 

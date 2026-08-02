@@ -1,0 +1,45 @@
+{
+  "_meta": {
+    "platform": "wattpad",
+    "field": "mature",
+    "url": "https://www.wattpad.com/api/v3/stories?query=romance&limit=4",
+    "itemsPath": "stories",
+    "captured": "2026-08-01",
+    "flaggedAreDerived": true,
+    "why": "Clean items are a live capture. The public endpoint would not serve a flagged item, so the flagged one is a real item with ONLY `mature` flipped. The rename canary still holds: the field name is asserted present in the LIVE clean capture."
+  },
+  "payload": {
+    "stories": [
+      {
+        "id": "358371807",
+        "title": "Whispers of Romance",
+        "mature": false
+      },
+      {
+        "id": "295638501",
+        "title": "Bromance turned Romance",
+        "mature": false
+      },
+      {
+        "id": "290143023",
+        "title": "SURRENDER - Mafia Romance",
+        "mature": false
+      },
+      {
+        "id": "32481065",
+        "title": "Just One Night (MC Romance)",
+        "mature": false
+      },
+      {
+        "id": "358371807",
+        "title": "Whispers of Romance",
+        "mature": true
+      }
+    ],
+    "total": 5
+  },
+  "expect": {
+    "kept": 4,
+    "removed": 1
+  }
+}

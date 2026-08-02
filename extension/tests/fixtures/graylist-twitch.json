@@ -1,0 +1,202 @@
+{
+  "_meta": {
+    "source": "https://gql.twitch.tv/gql — raw GraphQL query, public web Client-ID, logged out",
+    "captured": "2026-08-01",
+    "query": "{ streams(first:30) { edges { cursor node { id title viewersCount contentClassificationLabels { id localizedName } broadcaster { login displayName broadcastSettings { isMature title } } } } } }",
+    "why": "Locks the two field names the Twitch signal depends on: Stream.contentClassificationLabels[].id and broadcastSettings.isMature. If Twitch renames either, this fixture stops stripping and the test fails loudly instead of the filter going quietly dead.",
+    "labels_seen_live": {
+      "MatureGame": "Mature-rated game",
+      "DebatedSocialIssuesAndPolitics": "Politics and Sensitive Social Issues",
+      "ProfanityVulgarity": "Significant Profanity or Vulgarity"
+    },
+    "note_on_sexual_themes": "SexualThemes is a real id in Twitch's published label set, but logged-out clients cannot see streams carrying it (the Pools/Hot-Tubs category returns zero edges), so no live sample could be captured. The `synthetic_sexual` block below is hand-built on the VERIFIED shape of a captured edge, with only the label id swapped. Re-capture it from a logged-in session when one is available."
+  },
+
+  "captured": {
+    "data": {
+      "streams": {
+        "edges": [
+          {
+            "cursor": "eyJzIjo3MTkxMy41NTA0NDc4NTIyNSwiZCI6ZmFsc2UsInQiOnRydWV9",
+            "node": {
+              "id": "318155183974",
+              "title": "KINGS WORLD CUP CLUBS - QUARTI DI FINALE",
+              "viewersCount": 71913,
+              "contentClassificationLabels": [],
+              "broadcaster": {
+                "login": "tumblurr",
+                "displayName": "Tumblurr",
+                "broadcastSettings": { "isMature": false, "title": "KINGS WORLD CUP CLUBS - QUARTI DI FINALE" }
+              }
+            }
+          },
+          {
+            "cursor": "eyJzIjo2MjI1NC44MzEwMTc0MjA1OSwiZCI6ZmFsc2UsInQiOnRydWV9",
+            "node": {
+              "id": "317944443751",
+              "title": "PARIS WIR KOMMEN...",
+              "viewersCount": 62254,
+              "contentClassificationLabels": [],
+              "broadcaster": {
+                "login": "canerkrd",
+                "displayName": "canerkrd",
+                "broadcastSettings": { "isMature": false, "title": "PARIS WIR KOMMEN..." }
+              }
+            }
+          },
+          {
+            "cursor": "eyJzIjo1MTY1Mi4zNjkwOTE1NTI3NywiZCI6ZmFsc2UsInQiOnRydWV9",
+            "node": {
+              "id": "317775339736",
+              "title": "Marvel Rivals Ignite Mid-Season Finals Main Stage",
+              "viewersCount": 23325,
+              "contentClassificationLabels": [],
+              "broadcaster": {
+                "login": "marvelrivals",
+                "displayName": "MarvelRivals",
+                "broadcastSettings": { "isMature": false, "title": "Marvel Rivals Ignite Mid-Season Finals Main Stage" }
+              }
+            }
+          },
+          {
+            "cursor": "eyJzIjo0MjI5MS40NDQyMjQ2NTg5OSwiZCI6ZmFsc2UsInQiOnRydWV9",
+            "node": {
+              "id": "317775505752",
+              "title": "[575/730] SOLO TO DIAMOND",
+              "viewersCount": 42291,
+              "contentClassificationLabels": [{ "id": "MatureGame", "localizedName": "Mature-rated game" }],
+              "broadcaster": {
+                "login": "jynxzi",
+                "displayName": "Jynxzi",
+                "broadcastSettings": { "isMature": false, "title": "[575/730] SOLO TO DIAMOND" }
+              }
+            }
+          },
+          {
+            "cursor": "eyJzIjozNzI4MS41NjM5NTk2MTM4MDYsImQiOmZhbHNlLCJ0Ijp0cnVlfQ==",
+            "node": {
+              "id": "319686418396",
+              "title": "[DROPS ON] BIG DAY HUGE DRAMA NEW GAMES TODAY",
+              "viewersCount": 37281,
+              "contentClassificationLabels": [{ "id": "DebatedSocialIssuesAndPolitics", "localizedName": "Politics and Sensitive Social Issues" }],
+              "broadcaster": {
+                "login": "zackrawrr",
+                "displayName": "zackrawrr",
+                "broadcastSettings": { "isMature": false, "title": "[DROPS ON] BIG DAY HUGE DRAMA NEW GAMES TODAY" }
+              }
+            }
+          },
+          {
+            "cursor": "eyJzIjoyNjc1Ny4xNDUyNDU1NzU2MSwiZCI6ZmFsc2UsInQiOnRydWV9",
+            "node": {
+              "id": "319687161564",
+              "title": "[DROPS] RUST: GLOBAL WARFARE | DAY 2/3",
+              "viewersCount": 26757,
+              "contentClassificationLabels": [{ "id": "MatureGame", "localizedName": "Mature-rated game" }],
+              "broadcaster": {
+                "login": "theburntpeanut",
+                "displayName": "TheBurntPeanut",
+                "broadcastSettings": { "isMature": false, "title": "[DROPS] RUST: GLOBAL WARFARE | DAY 2/3" }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+
+  "synthetic_sexual": {
+    "data": {
+      "streams": {
+        "edges": [
+          {
+            "cursor": "c2FmZQ==",
+            "node": {
+              "id": "1000000001",
+              "title": "ordinary stream that must survive",
+              "viewersCount": 1200,
+              "contentClassificationLabels": [],
+              "broadcaster": {
+                "login": "safechannel",
+                "displayName": "safechannel",
+                "broadcastSettings": { "isMature": false, "title": "ordinary stream that must survive" }
+              }
+            }
+          },
+          {
+            "cursor": "c2V4dWFs",
+            "node": {
+              "id": "1000000002",
+              "title": "labelled stream that must be stripped",
+              "viewersCount": 900,
+              "contentClassificationLabels": [{ "id": "SexualThemes", "localizedName": "Sexual Themes" }],
+              "broadcaster": {
+                "login": "labelledchannel",
+                "displayName": "labelledchannel",
+                "broadcastSettings": { "isMature": true, "title": "labelled stream that must be stripped" }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+
+  "captured_channel_page": {
+    "_why": "VERBATIM capture of the operation that carries the labels on a real channel page (twitch.tv/jynxzi), pulled from the ~30-operation batch the client POSTs on load. Two things here are load-bearing and were both wrong when this fixture was invented rather than captured: (1) the top level is an ARRAY of operations, not a single object; (2) the user in THIS operation has `displayName` and NO `login`, which is why ownerOf() has to accept displayName — keying on login alone made the page-block silently never fire. The label here is MatureGame, so this payload must NOT block.",
+    "batch": [
+      {
+        "data": {
+          "user": {
+            "id": "411377640",
+            "stream": {
+              "id": "317775505752",
+              "game": { "id": "460630", "name": "Rainbow Six Siege", "__typename": "Game" },
+              "contentClassificationLabels": [
+                { "id": "MatureGame", "localizedName": "Mature-rated game", "__typename": "ContentClassificationLabel" }
+              ],
+              "contentClassificationLabelPolicyProperties": {
+                "signPostProperties": { "signPost": "SIGN_POST_NOT_REQUIRED", "contentClassificationLabels": [], "__typename": "ContentClassificationLabelPolicySignPostProperties" },
+                "contentGateProperties": { "contentGate": "CONTENT_GATE_NOT_REQUIRED", "__typename": "ContentClassificationLabelPolicyContentGateProperties" },
+                "__typename": "ContentClassificationLabelPolicyProperties"
+              },
+              "__typename": "Stream"
+            },
+            "displayName": "Jynxzi",
+            "__typename": "User"
+          }
+        },
+        "extensions": { "durationMilliseconds": 62, "operationName": "ContentClassificationContext", "requestID": "01KYX0F9JKQWY985EQCTWSKWPB" }
+      }
+    ]
+  },
+
+  "captured_channel_page_sexual": {
+    "_why": "The capture above with ONLY the label id swapped to SexualThemes — the real shape (batched array, displayName-only user), the one field changed. This is the case that must hard-block, and it is the closest reachable stand-in for a labelled channel, which a logged-out session cannot load.",
+    "batch": [
+      {
+        "data": {
+          "user": {
+            "id": "411377640",
+            "stream": {
+              "id": "317775505752",
+              "game": { "id": "460630", "name": "Rainbow Six Siege", "__typename": "Game" },
+              "contentClassificationLabels": [
+                { "id": "SexualThemes", "localizedName": "Sexual Themes", "__typename": "ContentClassificationLabel" }
+              ],
+              "contentClassificationLabelPolicyProperties": {
+                "signPostProperties": { "signPost": "SIGN_POST_NOT_REQUIRED", "contentClassificationLabels": [], "__typename": "ContentClassificationLabelPolicySignPostProperties" },
+                "contentGateProperties": { "contentGate": "CONTENT_GATE_REQUIRED", "__typename": "ContentClassificationLabelPolicyContentGateProperties" },
+                "__typename": "ContentClassificationLabelPolicyProperties"
+              },
+              "__typename": "Stream"
+            },
+            "displayName": "Jynxzi",
+            "__typename": "User"
+          }
+        },
+        "extensions": { "durationMilliseconds": 62, "operationName": "ContentClassificationContext", "requestID": "01KYX0F9JKQWY985EQCTWSKWPB" }
+      }
+    ]
+  }
+}

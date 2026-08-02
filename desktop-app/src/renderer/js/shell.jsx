@@ -1,13 +1,19 @@
 /* shell.jsx — window chrome, sidebar, and the hub menu (starting page) */
 
+// One flat list — there is no "Main" vs "Support" split any more. The sidebar
+// is short enough that grouping headings only added chrome to read past, and
+// the panic entry below is set apart by its own styling, not by a heading.
+//
+// AI Monitor is deliberately absent: it now lives inside Blocking Settings
+// (it is a protection, configured with the other protections) rather than
+// standing on its own as a top-level destination.
 const NAV = [
-{ id: 'overview', label: 'Overview', icon: IconGrid },
-{ id: 'monitor', label: 'AI Monitor', icon: IconSearch },
-{ id: 'blocklist', label: 'Blocklist', icon: IconShield },
-{ id: 'blocking', label: 'Blocking Settings', icon: IconSliders },
-{ id: 'mentor', label: 'Personal Mentor', icon: IconChat },
-{ id: 'tips', label: 'Tips & Questions', icon: IconSpark },
-{ id: 'themes', label: 'Themes', icon: IconPalette }];
+  { id: 'overview', label: 'Overview', icon: IconGrid },
+  { id: 'blocklist', label: 'Blocklist', icon: IconShield },
+  { id: 'blocking', label: 'Blocking Settings', icon: IconSliders },
+  { id: 'mentor', label: 'Recovery Program', icon: IconChat },
+  { id: 'tips', label: 'Tips & Questions', icon: IconSpark },
+  { id: 'themes', label: 'Themes', icon: IconPalette }];
 
 
 // Window controls for the frameless Tauri window (withGlobalTauri = true).
@@ -16,13 +22,13 @@ function winCtl(action) {
     const w = window.__TAURI__ && window.__TAURI__.window;
     const appWin = w && (w.getCurrentWindow ? w.getCurrentWindow() : w.getCurrent && w.getCurrent());
     if (appWin && appWin[action]) appWin[action]();
-  } catch (e) {/* running outside Tauri (e.g. plain browser preview) */}
+  } catch (e) {/* running outside Tauri (e.g. plain browser preview) */ }
 }
 
 function WinBtn({ label, action, danger, children }) {
   return (
     <button className={'win-btn' + (danger ? ' win-close' : '')}
-            title={label} aria-label={label} onClick={() => winCtl(action)}>
+      title={label} aria-label={label} onClick={() => winCtl(action)}>
       {children}
     </button>);
 
@@ -34,7 +40,19 @@ function TitleBar({ s }) {
       <div className="tl-brand" data-tauri-drag-region>
         <span className="tl-logo"><Logo size={18} /></span>
         <span className="tl-title">Oath Light</span>
-        <span className="beta-badge" title="Open beta build — features are still in testing and may change or misbehave.">BETA</span>
+        {/* 1.0.0 is the first public build, not a proven one. The badge says
+            EARLY RELEASE rather than ALPHA — the code is finished and the
+            version is real, but it has never been red-teamed and most of the
+            enforcement path has only ever run on the machines that wrote it.
+            Kept permanently visible on purpose: someone deciding how much to
+            lean on this should be able to see what it is without going
+            looking. */}
+        <span
+          className="stage-badge"
+          title="Early release — 1.0.0 is the first public build. It has not been independently security-tested; treat it as one layer, not your only safeguard."
+        >
+          Early release
+        </span>
       </div>
       <div className="tl-drag" data-tauri-drag-region style={{ flex: 1, alignSelf: 'stretch' }} />
       <div className="win-ctrls">
@@ -63,10 +81,9 @@ function Sidebar({ s, go }) {
         </div>
       </div>
 
-      <div className="nav-label">Main</div>
       <nav className="nav">
         {NAV.map((n) =>
-        <button key={n.id} className={'nav-item' + (s.page === n.id ? ' active' : '')} onClick={() => go(n.id)}>
+          <button key={n.id} className={'nav-item' + (s.page === n.id ? ' active' : '')} onClick={() => go(n.id)}>
             <n.icon />
             <span>{n.label}</span>
 
@@ -74,14 +91,16 @@ function Sidebar({ s, go }) {
         )}
       </nav>
 
-      {/* Panic / SOS (5.1) — deliberately its own section, always visible,
-          never buried in the page list. Also reachable from the tray item,
-          Ctrl+Shift+Space, and the extension's blocked page. */}
-      <div className="nav-label" style={{ marginTop: 16 }}>Support</div>
-      <nav className="nav">
+      {/* Panic (5.1) — set apart by a rule and its own styling, always
+          visible, never buried in the page list. Also reachable from the tray
+          item, Ctrl+Shift+Space, and the extension's blocked page. The label
+          matches every other entry point ("I need help now") instead of
+          shouting SOS at someone who is already having a hard time. */}
+      <nav className="nav" style={{ marginTop: 14 }}>
+        <div className="divider" style={{ margin: '0 6px 10px' }} />
         <button className={'nav-item nav-sos' + (s.page === 'panic' ? ' active' : '')} onClick={() => go('panic')}>
           <IconHeart />
-          <span>SOS — I need help</span>
+          <span>I need help</span>
         </button>
       </nav>
 
@@ -93,7 +112,7 @@ function Sidebar({ s, go }) {
             <b>{s.profile.name}</b>
             <span>{s.profile.email}</span>
           </div>
-          <IconGear size={17} style={{ marginLeft: 'auto', opacity: .6 }} />
+          <IconGear size={17} style={{ marginInlineStart: 'auto', opacity: .6 }} />
         </div>
       </div>
     </aside>);
@@ -102,41 +121,42 @@ function Sidebar({ s, go }) {
 
 /* ---------- HUB MENU (starting page) ---------- */
 const HUB_CARDS = [
-{ id: 'overview', icon: IconGrid, title: 'Overview', desc: 'Your streak, progress and daily intention at a glance.', stat: (s) => `Day ${s.streak}` },
-{ id: 'blocklist', icon: IconShield, title: 'Blocklist', desc: 'Check what gets blocked — blacklist, graylist and custom sites.', stat: () => 'Blocklist' },
-{ id: 'blocking', icon: IconSliders, title: 'Blocking Settings', desc: 'Strictness, schedules and tamper protection.', stat: (s) => 'Manage settings' },
-{ id: 'mentor', icon: IconChat, title: 'Personal Mentor', desc: 'A calm companion for the hard moments. Always here.', stat: () => 'Coming soon' },
-{ id: 'tips', icon: IconSpark, title: 'Tips & Questions', desc: 'Questions you might encounter, and tips to guide you.', stat: () => '15 items' },
-{ id: 'themes', icon: IconPalette, title: 'Themes', desc: 'Make the space yours — light, dark and atmosphere.', stat: (s) => s.display.style }];
+  { id: 'overview', icon: IconGrid, title: 'Overview', desc: 'Your streak, progress and daily intention at a glance.', stat: (s) => `Day ${s.streak}` },
+  { id: 'blocklist', icon: IconShield, title: 'Blocklist', desc: 'Check what gets blocked — blacklist, graylist and custom sites.', stat: () => 'Blocklist' },
+  { id: 'blocking', icon: IconSliders, title: 'Blocking Settings', desc: 'Strictness, schedules and tamper protection.', stat: (s) => 'Manage settings' },
+  { id: 'mentor', icon: IconChat, title: 'Recovery Program', desc: 'Guided CBT/ACT exercises for the hard moments. Always here.', stat: () => '4 exercises' },
+  { id: 'tips', icon: IconSpark, title: 'Tips & Questions', desc: 'Questions you might encounter, and tips to guide you.', stat: () => '15 items' },
+  { id: 'themes', icon: IconPalette, title: 'Themes', desc: 'Light, dark, the look behind the app, and your own colours.', stat: (s) => (s.display.theme === 'light' ? 'Light' : 'Dark') }];
 
 
 function HubMenu({ s, go }) {
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const name = s.profile.name.split(' ')[0];
+  // Voice layer (UX Direction §2): every line of hero copy comes from the
+  // strings layer, so Serious Mode flips the whole greeting register — not
+  // just a banner bolted on top of soft copy.
+  const greetKey = hour < 12 ? 'app.greeting_morning' : hour < 18 ? 'app.greeting_afternoon' : 'app.greeting_evening';
   // Live domain count for the Blocklist card's stat chip (null until loaded /
   // outside Tauri) — guarded so a not-yet-wired hook can't crash the hub.
   const counts = (window.useBlocklistCounts || (() => null))();
   return (
     <div className="page hub" style={{ maxWidth: 1040 }}>
-      <div className="beta-banner fade-up" role="note">
-        <span className="beta-banner-tag">OPEN BETA</span>
-        <span className="beta-banner-text">
-          You're running an early public build of Oath Light. It's still in active
-          testing — some protection may be incomplete and things can change or break.
-          Please don't rely on it as your only safeguard yet.
-        </span>
-      </div>
+      {/* The "you're running an early build" banner came off for 1.0.0. What it
+          was really saying — no blocker catches everything, don't lean on this
+          alone — is not a build-stage caveat and belongs where it is now: the
+          install-time notice (installer/POLICY.md §1), where it is read once and
+          deliberately, rather than as a permanent strip of doubt above the
+          greeting of an app someone opens on a bad day. */}
       <div className="hub-hero fade-up">
         <div className="hub-mark"><Logo size={56} /></div>
-        <div className="eyebrow" style={{ marginTop: 22 }}>{greeting}, {name}</div>
-        <h1 className="hub-title">Welcome back.</h1>
+        <div className="eyebrow" style={{ marginTop: 22 }}>{PP.t(greetKey, { name })}</div>
+        <h1 className="hub-title">{PP.t('app.welcome_title')}</h1>
         <p className="page-sub" style={{ margin: '0 auto', fontSize: 16.5 }}>
-          You're on a <b style={{ color: 'var(--text)' }}>{s.streak}-day</b> streak. Every clear choice is a vote for the person you're becoming.
+          {PP.t('app.welcome_sub', { days: s.streak })}
         </p>
         <div className="row" style={{ justifyContent: 'center', marginTop: 22, gap: 12 }}>
-          <button className="btn btn-primary" onClick={() => go('overview')}><IconArrowUp size={17} /> See my progress</button>
-          <button className="btn btn-ghost" onClick={() => go('mentor')}><IconChat size={17} /> Talk it through</button>
+          <button className="btn btn-primary" onClick={() => go('overview')}><IconArrowUp size={17} /> {PP.t('app.cta_see_progress')}</button>
+          <button className="btn btn-ghost" onClick={() => go('mentor')}><IconChat size={17} /> {PP.t('app.cta_talk_it_through')}</button>
         </div>
       </div>
 
@@ -146,8 +166,8 @@ function HubMenu({ s, go }) {
           // list, not the card's own stat() fn — every other card keeps the
           // plain stat-function architecture.
           const stat = c.id === 'blocklist' ?
-          counts ? `${counts.domain_count.toLocaleString()} domains` : 'View list' :
-          c.stat(s);
+            counts ? `${counts.domain_count.toLocaleString()} domains` : 'View list' :
+            c.stat(s);
           return (
             <button key={c.id} className="card hover hub-card" onClick={() => go(c.id)}>
               <div className="hub-card-ico"><c.icon size={22} /></div>

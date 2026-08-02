@@ -196,6 +196,18 @@ pub fn message_for(kind: &str, name: &str) -> (String, String) {
             "Oath Light's trusted-contact setting is being removed",
             "You're being told BECAUSE the setting is being removed — this is the last message you'll get. If that's a surprise, it might be worth a gentle check-in.",
         ),
+        "ext_removed" => (
+            "a browser extension went missing and wasn't restored",
+            "A browser's Oath Light extension was removed and hasn't come back after several minutes. It might be nothing — a browser update, a profile reset — but it's also how someone would try to turn off protection. Worth a check-in.",
+        ),
+        "block_burst" => (
+            "saw an unusually high number of blocked sites in a short time",
+            "This isn't about what was blocked — only that a lot of blocks happened close together. Could be nothing (a bad link, a burst of ads), but it's the kind of moment this notification exists for.",
+        ),
+        "serious_disable_requested" => (
+            "asked to turn Serious Mode off",
+            "Serious Mode is Oath Light's strictest configuration. Turning it off starts a waiting period, and it stays fully active the whole time — nothing has weakened yet, and the request can still be cancelled. This note fires at request time on purpose, so the moment isn't a private one.",
+        ),
         "heartbeat" => (
             "is still protecting this computer",
             "This is a routine monthly note so that silence itself would be a signal. Nothing happened — Oath Light is simply still installed and running.",

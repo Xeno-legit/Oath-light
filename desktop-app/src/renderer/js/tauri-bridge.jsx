@@ -23,17 +23,50 @@
     // Re-apply the force-install policy. Live for Chromium (user-scope by
     // default); still dormant for Firefox while it's on hold.
     enforce(browserKey) { return invoke('enforce_extension', { browserKey: browserKey || null }); },
+    // Install the extension again from scratch, in every browser (or one).
+    // Re-asserts the policy, clears the record Chromium keeps that makes it
+    // refuse to auto-install an extension the user once removed (the reason
+    // Edge stopped prompting), and re-points Firefox at the current Add-ons
+    // build — Firefox will not re-install an add-on whose source URL it already
+    // has, so a plain re-apply there is a no-op.
+    //
+    // Resolves to [{ key, name, status, detail, needs_restart }], one line per
+    // browser actually present on the machine.
+    refreshExtensions(browserKey) {
+      return invoke('refresh_extensions', { browserKey: browserKey || null })
+        .catch((e) => { console.warn('[OathLight] refreshExtensions failed:', e); return []; });
+    },
     // Ask for admin once (UAC) and lock the extension. Writing the policy needs
     // elevation; this relaunches elevated, writes it, and sets up silent
     // elevated re-assertion at future logins.
     requestElevatedSetup() { return invoke('request_elevated_setup'); },
-    // Toggle the "keep the extension installed" guard. Turning it ON is
-    // instant; turning it OFF is a friction-gated weakening (4.1) — resolves
-    // to { applied, pending }. When `applied` is false the guard is still ON
-    // and stays that way until `pending`'s delay elapses; callers must not
-    // treat the guard as off just because this resolved. `auth` is a master-
-    // password session token (4.2) — required only when turning OFF a guard
-    // that's currently on; every other caller passes null.
+    // Open a browser at its own extensions page. Needed where the extension is
+    // auto-installed rather than force-installed (Edge): the browser downloads
+    // it but leaves it switched off until the user approves it once.
+    openExtensionsPage(browserKey) {
+      return invoke('open_extensions_page', { browserKey })
+        .catch((e) => console.warn('[OathLight] openExtensionsPage failed:', e));
+    },
+    // Open a restore window for a locked-out browser (Edge): re-asserts the
+    // auto-install registration, launches the browser at its extensions page,
+    // and suspends the kill for ~20s. Resolves to the seconds granted.
+    //
+    // Not friction-gated, deliberately: it grants seconds, not access, and the
+    // only thing it enables is installing the extension — the outcome the lock
+    // exists to produce. Gating it would make the lockout unrecoverable.
+    requestBrowserRestore(browserKey) {
+      return invoke('request_browser_restore', { browserKey })
+        .catch((e) => console.warn('[OathLight] requestBrowserRestore failed:', e));
+    },
+    // Re-assert the browser lock (kill a browser that can't be force-installed
+    // until it carries the extension). Mandatory: `false` REJECTS rather than
+    // filing a weakening, so there is nothing here for a caller to gate.
+    setBrowserLock(enabled, auth) {
+      return invoke('set_browser_lock_enabled', { enabled: !!enabled, auth: auth || null });
+    },
+    // Re-assert the "keep the extension installed" guard. Also mandatory —
+    // `setGuard(false)` rejects. The `auth` parameter survives on both of these
+    // only so existing call sites keep working; nothing consults it.
     setGuard(enabled, auth) { return invoke('set_guard_enabled', { enabled: !!enabled, auth: auth || null }); },
     // Ask all connected extensions to push fresh stats/blocklists.
     requestSync() { return invoke('request_sync'); },
@@ -71,6 +104,38 @@
     // `auth` (4.2) is only required while the monitor is actually running.
     startNsfwMonitor() { return invoke('start_nsfw_monitor'); },
     stopNsfwMonitor(auth) { return invoke('stop_nsfw_monitor', { auth: auth || null }); },
+
+    // AI mentor (optional, opt-in — see src-tauri/src/mentor.rs). The API key
+    // lives in Rust and never crosses this bridge: `getMentorConfig` reports
+    // `has_key`, never the key, and `setMentorConfig` is write-only for it.
+    // Resolves to { enabled, has_key, model, provider, base_url, providers },
+    // where `providers` is the catalog the Settings picker is built from —
+    // sourced from Rust so the UI can't offer a provider the request path
+    // doesn't know how to talk to.
+    getMentorConfig() {
+      return invoke('get_mentor_config').catch(() => ({
+        enabled: false, has_key: false, model: '',
+        provider: 'anthropic', base_url: '', providers: [],
+      }));
+    },
+    // `apiKey`/`model`/`provider`/`baseUrl` are tri-state: omit (or pass null)
+    // to leave the stored value alone, pass '' to clear it. That's what lets
+    // the enable toggle work without the renderer ever holding the key.
+    setMentorConfig({ enabled, apiKey, model, provider, baseUrl }) {
+      return invoke('set_mentor_config', {
+        enabled: !!enabled,
+        apiKey: apiKey === undefined ? null : apiKey,
+        model: model === undefined ? null : model,
+        provider: provider === undefined ? null : provider,
+        baseUrl: baseUrl === undefined ? null : baseUrl,
+      });
+    },
+    // Send the conversation, get one reply. `history` is [{role, text}, …]
+    // oldest first, ending with the new user message. Resolves to
+    // { text, blocked_locally, model }; `blocked_locally` means the text came
+    // from Rust (a refusal or a withheld reply), NOT from the model — the UI
+    // must label those differently rather than passing them off as the AI.
+    mentorSend(history) { return invoke('mentor_send', { history }); },
 
     // Friction (4.1/4.3): every pending "weakening" of protection (uninstall
     // guard, AI monitor, a custom-block removal) — the backend is the source
@@ -117,11 +182,11 @@
     },
 
     // System DNS filter (1.1/1.2). `getDnsStatus` -> { running, taken_over,
-    // last_error, upstreams }. `setDnsFilter(true)` is a strengthening —
-    // instant, and REJECTS (throws) on a port-53 conflict / no-admin so the
-    // caller can show the error verbatim; `setDnsFilter(false, auth)` is a
-    // friction-gated weakening (same { applied, pending } shape as setGuard)
-    // and requires the master-password token if one is set.
+    // last_error, upstreams, upstream_warning, exposure_warning }.
+    // `setDnsFilter(true)` brings the resolver up now and REJECTS (throws) on a
+    // port-53 conflict / refused takeover, so the caller can show the error
+    // verbatim — it is the UI's "try again", not a toggle. Rust retries on its
+    // own schedule regardless. `setDnsFilter(false)` rejects: mandatory.
     getDnsStatus() {
       return invoke('get_dns_status')
         .catch((e) => { console.warn('[OathLight] getDnsStatus failed:', e); return null; });
@@ -164,7 +229,10 @@
     resetUninstallTimer() { return invoke('reset_uninstall_timer'); },
     cancelUninstall() { return invoke('cancel_uninstall'); },
     // Resolves to "launched" (uninstaller started, app will close) or "manual".
-    completeUninstall() { return invoke('complete_uninstall'); },
+    // `confirm` is the typed confirmation phrase (4.6) — the backend compares
+    // it against the one it minted when the request was filed and rejects a
+    // mismatch, so this is not a renderer-side check that can be skipped.
+    completeUninstall(confirm) { return invoke('complete_uninstall', { confirm: confirm || null }); },
 
     // OTA blocklist updates (3.5). Status shape:
     //   { installed_version, loaded_version, last_check, last_result, checking }
@@ -182,6 +250,178 @@
       if (!available) return Promise.resolve(() => {});
       return T.event.listen('ota-status', (evt) => { if (evt && evt.payload) cb(evt.payload); });
     },
+
+    // Trusted contact (5.2, Tier 2) — optional, solo-first accountability
+    // amplifier. `getTrustedContact` resolves the configured contact or
+    // `null` (nothing configured — the honest solo default). `setTrustedContact`
+    // is a strengthening (instant) when wiring a NEW contact or editing one
+    // in place (same email); the backend itself refuses an email change on an
+    // existing contact (that's a weakening — see `requestRemoveTrustedContact`).
+    // `notify` is the raw `NotifyEventsV1` shape (snake_case keys — it's
+    // deserialized directly, not through Tauri's camelCase arg mapping):
+    // `{ uninstall_requested, lockdown_cancelled, password_removal_requested,
+    // ext_removed, block_burst }`.
+    getTrustedContact() {
+      return invoke('get_trusted_contact').catch((e) => { console.warn('[OathLight] getTrustedContact failed:', e); return null; });
+    },
+    setTrustedContact(name, email, notify) {
+      return invoke('set_trusted_contact', { name, email, notify });
+    },
+    // Removing a contact is a weakening (5.2's anti-weak-moment rule): friction-
+    // gated AND the contact is notified of the REQUEST immediately, before the
+    // delay even starts. Requires the master-password token if one is set.
+    // Resolves to the same `{ action_id, label, ..., remaining_secs, ready }`
+    // shape as `removeCustomDomain` — it shows up in `usePendingWeakenings()`
+    // like any other pending change.
+    requestRemoveTrustedContact(auth) {
+      return invoke('request_remove_trusted_contact', { auth: auth || null });
+    },
+
+    // Tamper-evident event log (4.5) — see core/eventlog.rs for the format.
+    // `getEventLog` resolves the most recent entries in the CURRENT log
+    // segment, newest first, capped at `limit`. Never contains browsing
+    // history or screen content — event only.
+    getEventLog(limit) {
+      return invoke('get_event_log', { limit: limit == null ? null : limit })
+        .catch((e) => { console.warn('[OathLight] getEventLog failed:', e); return []; });
+    },
+    // Re-walks the WHOLE hash chain from genesis, across every rotated
+    // segment, on demand — the "Verify integrity" button. Resolves to
+    // `{ intact, entries, first_break_seq, chain_started, restarts }`; once
+    // `intact` goes false it never "heals" even if the chain resumes
+    // correctly afterward — see `VerifyReport`'s doc comment in eventlog.rs.
+    verifyEventLog() {
+      return invoke('verify_event_log')
+        .catch((e) => { console.warn('[OathLight] verifyEventLog failed:', e); return null; });
+    },
+
+    // Lockdown Mode (4.4) — whitelist-only browsing, on demand. `getLockdownState`
+    // resolves the clock-tamper-immune credited-time view:
+    // `{ active, frozen, remaining_secs, active_until }`. `active_until` is a
+    // wall-clock display estimate only, never authoritative — see lockdown.rs.
+    getLockdownState() {
+      return invoke('get_lockdown_state').catch((e) => { console.warn('[OathLight] getLockdownState failed:', e); return null; });
+    },
+    // Start (or extend/upgrade) a lockdown. STRENGTHENING — always instant,
+    // never gated: extending never shortens the remaining time, and
+    // upgrading normal -> frozen is monotonic (frozen never downgrades back).
+    // Resolves to the same `LockdownView` shape as `getLockdownState`.
+    startLockdown(durationSecs, frozen) {
+      return invoke('start_lockdown', { durationSecs, frozen: !!frozen, auth: null });
+    },
+    // End a lockdown early — the WEAKENING half of 4.4's asymmetry. A normal
+    // (non-frozen) lockdown goes through the ordinary friction delay under
+    // the "lockdown.cancel" action id (master-password gated if one is set)
+    // and resolves to the same `{ action_id, label, ..., remaining_secs,
+    // ready }` shape as `removeCustomDomain` — it shows up in
+    // `usePendingWeakenings()` like any other pending change. A FROZEN
+    // lockdown REJECTS outright (no friction entry is ever registered for
+    // one) — the promise rejects with the honest "wait it out" message;
+    // callers must not treat that as a generic error to retry.
+    cancelLockdown(auth) {
+      return invoke('cancel_lockdown', { auth: auth || null });
+    },
+    // Additively allow one domain through an active lockdown (4.4's
+    // anti-brick valve) — a short 60s friction delay under
+    // "lockdown.allow:<domain>", master-password gated if one is set.
+    requestLockdownAllow(domain, auth) {
+      return invoke('request_lockdown_allow', { domain, auth: auth || null });
+    },
+    // Schedule-from-vulnerable-hours escalation (4.4 v2): auto-start a
+    // (non-frozen) lockdown during the configured vulnerable-hours window
+    // instead of only showing reminder pop-ups. Turning ON is instant (a
+    // strengthening); turning OFF is a weakening — friction-gated under
+    // "lockdown.escalation_disable", same `{ applied, pending }`
+    // WeakeningOutcome shape as `setGuard`/`setDnsFilter`. Never touches an
+    // already-active lockdown either way.
+    setLockdownEscalation(enabled, auth) {
+      return invoke('set_lockdown_escalation', { enabled: !!enabled, auth: auth || null });
+    },
+
+    // Grayscale during vulnerable hours (5.6). Instant in BOTH directions —
+    // unlike every protection toggle here, this is an environment nudge and
+    // deliberately isn't friction-gated (see grayscale.rs). Turning it off
+    // also lifts the filter immediately if a window is running. Rejects with
+    // a message on a platform/registry failure, so the caller can show it.
+    setGrayscaleVulnerableHours(enabled) {
+      return invoke('set_grayscale_vulnerable_hours', { enabled: !!enabled });
+    },
+
+    // Recovery data — urge log, slip log, streak (5.4/5.5). The BACKEND owns
+    // this now (recovery.rs); the renderer's localStorage copy is only an
+    // offline mirror for the standalone preview. Every one of these resolves
+    // the full `RecoveryView` — `{ streak, best_streak, last_milestone, urges,
+    // slips, gentle, clean_days_this_month, milestones }` — with everything
+    // derived server-side, so the caller just replaces its state wholesale
+    // rather than recomputing anything.
+    getRecoveryLog() {
+      return invoke('get_recovery_log').catch((e) => { console.warn('[OathLight] getRecoveryLog failed:', e); return null; });
+    },
+    logUrge(trigger, source) {
+      return invoke('log_urge', { trigger: trigger || null, source: source || 'manual' })
+        .catch((e) => { console.warn('[OathLight] logUrge failed:', e); return null; });
+    },
+    // Deliberately NOT friction-gated in the backend — see `log_slip`'s doc
+    // comment. Logging a slip honestly is recovery, not a weakening.
+    logSlip(trigger) {
+      return invoke('log_slip', { trigger: trigger || null })
+        .catch((e) => { console.warn('[OathLight] logSlip failed:', e); return null; });
+    },
+    markMilestone(days) {
+      return invoke('mark_milestone', { days: days | 0 })
+        .catch((e) => { console.warn('[OathLight] markMilestone failed:', e); return null; });
+    },
+    // One-time carry-over of a streak that predates the backend store. The
+    // backend refuses anything that would shorten a streak or that arrives
+    // after it has history of its own, so this is safe to call unconditionally.
+    migrateRecoveryStreak(streakStart, bestStreak) {
+      return invoke('migrate_recovery_streak', { streakStart: streakStart | 0, bestStreak: bestStreak | 0 })
+        .catch(() => null);
+    },
+
+    // False-positive eval log (2.4). The user's own record of every time they
+    // told the AI monitor it was wrong: `{ ts, monitor_id, siglip_nsfw,
+    // nudenet_explicit, screen_hash, dwell_secs }`, newest first. Local only —
+    // there is no upload path anywhere in the app, deliberately.
+    getEvalLog(limit) {
+      return invoke('get_eval_log', { limit: limit == null ? null : limit })
+        .catch((e) => { console.warn('[OathLight] getEvalLog failed:', e); return []; });
+    },
+
+    // Serious Mode (UX Direction §1) — the single toggle that flips the whole
+    // app to its strictest configuration and its hard voice, no per-feature
+    // exceptions. Turning it ON is instant (a strengthening) and never needs
+    // auth. Turning it OFF is the strongest-guarded weakening in the app:
+    // friction-gated under `"serious.disable"` at DOUBLE the ordinary delay,
+    // master-password gated if one is set, and the trusted contact is told at
+    // request time. Same `{ applied, pending }` WeakeningOutcome shape as
+    // `setGuard` — when `applied` is false the mode is still FULLY on and
+    // stays that way until the delay elapses; callers must not pre-emptively
+    // render it as off.
+    setSeriousMode(enabled, auth) {
+      return invoke('set_serious_mode', { enabled: !!enabled, auth: auth || null });
+    },
+
+    // Update mode (update.rs). `getUpdateState` resolves
+    // `{ active, seconds_left, window_secs, app_version, recovery_armed }`.
+    //
+    // `beginUpdate` is the one that does something: it opens a bounded window
+    // in which the dual-process watchdog stops resurrecting, so an installer
+    // can actually replace the two executables, and then CLOSES THE APP about
+    // two seconds later. Callers must treat a resolved promise as "the app is
+    // going away now" and say so before it happens — there is no second
+    // notification. Master-password gated, so it goes through PPAuth.acquire()
+    // like every other gated call.
+    //
+    // `cancelUpdate` re-arms the guards; ungated, since strengthening never is.
+    getUpdateState() {
+      return invoke('get_update_state').catch((e) => {
+        console.warn('[OathLight] getUpdateState failed:', e);
+        return null;
+      });
+    },
+    beginUpdate(auth) { return invoke('begin_update', { auth: auth || null }); },
+    cancelUpdate() { return invoke('cancel_update'); },
 
     // Panic / SOS flow (5.1). `onOpenPanic` subscribes to the backend's
     // `open-panic` event (tray "I need help now" / Ctrl+Shift+Space / the
@@ -317,6 +557,32 @@
       return () => { cancelled = true; clearInterval(id); };
     }, []);
     return pending;
+  };
+
+  // React hook — mirrors the BACKEND's Serious Mode flag into the store
+  // (UX Direction §1). The backend is the source of truth; this only copies
+  // it down so the UI has something synchronous to render voice and visuals
+  // from. Polled rather than pushed because the flag can change without any
+  // renderer involvement at all — the friction applier thread flips it off
+  // when the cool-off elapses, possibly while this window is closed.
+  //
+  // Mount once, high in the tree (App) — every other component reads
+  // `s.serious` off the store rather than calling this again.
+  window.useSeriousMode = function useSeriousMode() {
+    React.useEffect(() => {
+      if (!available) return;
+      let cancelled = false;
+      const refresh = () => invoke('get_app_settings').then((cfg) => {
+        if (cancelled || !cfg) return;
+        const on = !!cfg.serious_mode;
+        // Only write on an actual change — PP.set notifies every subscriber,
+        // and this runs on a timer.
+        if (window.PP && window.PP.get().serious !== on) window.PP.set({ serious: on });
+      }).catch(() => {});
+      refresh();
+      const id = setInterval(refresh, 4000);
+      return () => { cancelled = true; clearInterval(id); };
+    }, []);
   };
 
   // React hook — subscribes to the monitor's per-browser status stream.

@@ -188,11 +188,11 @@ mod tests {
         }
         // From meta.json validation.onnx_logits.
         let expected = [
-            -0.5427414178848267f32,
-            -2.263718366622925,
-            5.576085090637207,
-            -3.821108818054199,
-            -1.4703426361083984,
+            -0.542_741_4_f32,
+            -2.263_718_4,
+            5.576_085,
+            -3.821_108_8,
+            -1.470_342_6,
         ];
         let clf = NsfwClassifier::load(&model).expect("load model");
         let img = image::open(&img_path).expect("open test image");

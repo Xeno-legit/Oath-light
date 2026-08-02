@@ -132,7 +132,7 @@ function BlocklistPage({ s, PP }) {
     <div className="page">
       <div className="page-head fade-up">
         <div className="eyebrow">Blocklist</div>
-        <h1 className="page-title">What gets <em style={{ fontFamily: "Manrope" }}>blocked</em></h1>
+        <h1 className="page-title">What gets <em>blocked</em></h1>
         <p className="page-sub">Search any site to see if it's blocked outright or filtered for explicit content. Changes apply instantly across every browser and app.</p>
       </div>
 
@@ -152,7 +152,7 @@ function BlocklistPage({ s, PP }) {
             <div className="panel-head">
               <div className="ico" style={{ background: 'color-mix(in oklab, #d9534f 16%, transparent)', color: '#d9534f' }}><IconShieldOff size={20} /></div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="panel-title">Blacklist <span className="chip" style={{ marginLeft: 6, color: '#d9534f' }}>{domainCountText} domains</span></div>
+                <div className="panel-title">Blacklist <span className="chip" style={{ marginInlineStart: 6, color: '#d9534f' }}>{domainCountText} domains</span></div>
                 <div className="panel-sub">Sites that are <b>explicit by nature</b> — pornography and adult media. Blocked entirely, the instant they're detected.</div>
               </div>
             </div>
@@ -182,7 +182,7 @@ function BlocklistPage({ s, PP }) {
             <div className="panel-head">
               <div className="ico" style={{ background: 'color-mix(in oklab, #d9a441 18%, transparent)', color: '#c9962f' }}><IconList size={20} /></div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="panel-title">Graylist <span className="chip" style={{ marginLeft: 6, color: '#c9962f' }}>{bl.graylist.length} sites</span></div>
+                <div className="panel-title">Graylist <span className="chip" style={{ marginInlineStart: 6, color: '#c9962f' }}>{bl.graylist.length} sites</span></div>
                 <div className="panel-sub">Mainstream sites that <b>aren't explicit themselves</b> but can host explicit content. We filter the risky parts instead of blocking the whole site.</div>
               </div>
             </div>
@@ -220,7 +220,7 @@ function BlocklistPage({ s, PP }) {
               onClick={() => setGrayOpen((v) => !v)}
               style={{ marginTop: 14, width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 13px', background: 'color-mix(in oklab, var(--muted) 7%, transparent)', border: '1px solid color-mix(in oklab, var(--muted) 16%, transparent)', borderRadius: 10, cursor: 'pointer', font: 'inherit', color: 'var(--text)' }}>
                 <IconList size={16} style={{ color: 'var(--accent-2)', flex: '0 0 auto' }} />
-                <span style={{ flex: 1, textAlign: 'left', fontWeight: 700, fontSize: 13 }}>All {bl.graylist.length} filtered sites</span>
+                <span style={{ flex: 1, textAlign: 'start', fontWeight: 700, fontSize: 13 }}>All {bl.graylist.length} filtered sites</span>
                 <IconChevron size={16} style={{ flex: '0 0 auto', color: 'var(--muted)', transform: grayOpen ? 'rotate(90deg)' : 'none', transition: 'transform .2s ease' }} />
               </button>
               {grayOpen &&

@@ -37,6 +37,12 @@ const GRAYLIST_SITES = [
   { url: 'gamebanana.com',      kind: 'api', desc: 'NSFW/sexual mods stripped from browse & search feeds' },
   { url: 'wattpad.com',         kind: 'api', desc: 'Mature-rated stories stripped from search, browse & feeds' },
   { url: 'fanbox.cc',           kind: 'api', desc: 'R-18 creators & posts stripped from feeds (Pixiv Fanbox)' },
+  // Live video. Both platforms label their own streams and serve those labels as
+  // ordinary JSON — Twitch over gql.twitch.tv, Kick over its REST API — so the
+  // same per-item stripper works here. A labelled channel opened directly can't be
+  // stripped (the flag isn't in an array), so it blocks the tab instead.
+  { url: 'twitch.tv',           kind: 'api', desc: 'Sexually-labelled streams, VODs & clips stripped; labelled channels, the hot-tub category & explicit searches blocked' },
+  { url: 'kick.com',            kind: 'api', desc: 'Mature-flagged streams & clips stripped from browse and search; mature channels & explicit searches blocked' },
   // ── DOM-label filtering (server-rendered sites) ───────────────────────────
   { url: 'newgrounds.com',      kind: 'dom', desc: 'Adult (A-rated) work removed; adult pages blocked' },
   { url: 'archiveofourown.org', kind: 'dom', desc: 'Explicit & Mature works removed' },
@@ -52,6 +58,19 @@ const GRAYLIST_SITES = [
   // Previously whitelisted (total bypass) — now filtered (adversarial report §1.4/§3.1).
   { url: 'youtube.com',         kind: 'enforce', desc: 'Restricted Mode forced (PREF cookie); explicit/suggestive searches blocked' },
   { url: 'spotify.com',         kind: 'enforce', desc: 'Explicit erotica/adult audio searches blocked' },
+  // ── Mainstream AI platforms with NSFW corners (plan 3.3) ──────────────────
+  // The dedicated AI-erotica sites are blocked outright (blocklists/
+  // domains_ai.json + the civitai/undressai/nudify stems). These four are
+  // mainstream tools people have real reasons to use, so they're filtered in
+  // place instead: the platform works, the adult search doesn't.
+  // Short-video platforms. Verified live: neither publishes a per-item maturity
+  // label (a TikTok feed item carries 38 fields and not one), so there is nothing
+  // to strip — the enumerable adult surfaces are search and hashtags.
+  { url: 'instagram.com',       kind: 'enforce', desc: 'Explicit hashtag & search surfaces blocked; feed, profiles and DMs untouched' },
+  { url: 'tiktok.com',          kind: 'enforce', desc: 'Explicit hashtag & search surfaces blocked; feed and profiles untouched' },
+  { url: 'character.ai',        kind: 'enforce', desc: 'NSFW character searches blocked; the platform stays usable' },
+  { url: 'poe.com',             kind: 'enforce', desc: 'NSFW bot searches blocked; the platform stays usable' },
+  { url: 'huggingface.co',      kind: 'enforce', desc: 'NSFW model & dataset searches blocked; ordinary model browsing untouched' },
   // ── Discord (NSFW channels/servers blocked, platform kept) ────────────────
   { url: 'discord.com',         kind: 'discord', desc: 'Age-restricted channels & servers blocked' }
 ];

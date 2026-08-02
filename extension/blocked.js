@@ -1,157 +1,66 @@
-// Blocked page — mirrors the desktop app's design system (theme × palette × atmosphere).
+// Blocked page — mirrors the desktop app's design system (theme × look).
 
 /* ============================================================
-   THEME / PALETTE / ATMOSPHERE
+   THEME / LOOK
    Read from chrome.storage.local, falling back to desktop defaults.
+
+   There is no palette axis. `data-style` used to name one of seven palettes
+   and every stylesheet keyed its colours off it; Noir has been the only
+   built-in theme since 2026-07-19 and the others are gone from the CSS, so
+   what was left here was validating a value nothing wrote for selectors that
+   no longer existed.
+
+   There is no atmosphere axis either, as of the same rebuild. `bg` named one
+   of seven animated backgrounds and `intensity` scaled how fast they moved;
+   both are gone, along with the ~250 lines of DOM-building below that drew
+   them. What replaced them is `look`, which is a plain attribute the CSS
+   keys off — nothing is constructed in JS and nothing animates.
+
+   This page especially had no business running a hundred animations. It is
+   what someone sees at the moment they are trying to stop, and a drifting
+   lava lamp is the wrong thing to put in front of them.
    ============================================================ */
 const THEMES = ['light', 'dark'];
-const STYLES = ['aurora', 'lagoon', 'dawn', 'midnight', 'forest', 'ember', 'noir'];
-const BGS = ['both', 'orbs', 'waves', 'stars', 'ripple', 'smoke', 'off'];
-const DEFAULTS = { theme: 'dark', style: 'aurora', bg: 'both', intensity: 7 };
+const LOOKS = ['matte', 'halo', 'field', 'theatre', 'slate', 'studio',
+               'paper', 'drafting', 'cloth', 'contour', 'engrave', 'halftone'];
+const NEUTRALS = ['pure', 'cool', 'warm'];
+const DEFAULTS = { theme: 'dark', look: 'matte', neutral: 'pure' };
+
+/* Voice layer (UX Direction §2) — voice-sync.js paints every `data-ol-str`
+ * element in blocked.html on its own; this is the lookup for the handful of
+ * strings this file builds in JS. Guarded so the page still renders if the
+ * strings layer ever fails to load. */
+function t(key, params) {
+  return window.OLVoice ? window.OLVoice.t(key, params) : key;
+}
 
 function pick(value, allowed, fallback) {
   return allowed.includes(value) ? value : fallback;
 }
 
 function applyDisplay(d) {
-  const theme = pick(d.theme, THEMES, DEFAULTS.theme);
-  const style = pick(d.style, STYLES, DEFAULTS.style);
-  const bg = pick(d.bg, BGS, DEFAULTS.bg);
-  let intensity = Number.isFinite(+d.intensity) ? +d.intensity : DEFAULTS.intensity;
-  intensity = Math.max(0, Math.min(10, intensity));
-
   const el = document.documentElement;
-  el.setAttribute('data-theme', theme);
-  el.setAttribute('data-style', style);
-  el.setAttribute('data-bg', bg);
-  el.style.setProperty('--intensity', String(intensity / 10));
+  el.setAttribute('data-theme', pick(d.theme, THEMES, DEFAULTS.theme));
+  el.setAttribute('data-look', pick(d.look, LOOKS, DEFAULTS.look));
 
-  buildBG(bg, intensity);
+  // `pure` is the CSS default and is written as an absent attribute, so the
+  // :root declaration is the single source for it.
+  const neutral = pick(d.neutral, NEUTRALS, DEFAULTS.neutral);
+  if (neutral === 'pure') el.removeAttribute('data-neutral');
+  else el.setAttribute('data-neutral', neutral);
+
+  // The desktop app's wallpaper is deliberately NOT mirrored here. It is a
+  // data URL of the user's own photograph, and pushing megabytes of image
+  // through the extension's storage on every theme change — to sit behind a
+  // page whose whole job is to be unwelcoming — is the wrong trade twice.
 }
 
-/* ============================================================
-   ANIMATED BACKGROUND — mirrors desktop bg.jsx (orbs, waves,
-   particles, stars, ripple, smoke). Styling lives in desktop.css.
-   ============================================================ */
-const rand = (min, max) => min + Math.random() * (max - min);
-
-function wavePath(a) {
-  return `M0 ${a} C 180 ${a - 28}, 360 ${a + 28}, 540 ${a} S 900 ${a - 28}, 1080 ${a} `
-    + `S 1440 ${a + 28}, 1620 ${a} S 1980 ${a - 28}, 2160 ${a} V 240 H 0 Z`;
-}
-
-function buildBG(bg, intensity) {
-  const root = document.querySelector('.bg');
-  if (!root) return;
-
-  // wipe everything except the legibility veil
-  root.querySelectorAll(':scope > :not(.bg-veil)').forEach((n) => n.remove());
-
-  const frag = document.createDocumentFragment();
-  const showOrbs = bg === 'both' || bg === 'orbs';
-  const showWaves = bg === 'both' || bg === 'waves';
-  const showParticles = bg === 'both' || bg === 'orbs';
-  const i10 = intensity / 10;
-
-  // ---- ORBS ----
-  if (showOrbs) {
-    ['o1', 'o2', 'o3'].forEach((cls) => {
-      const orb = document.createElement('div');
-      orb.className = 'bg-orb ' + cls;
-      frag.appendChild(orb);
-    });
-  }
-
-  // ---- RISING PARTICLES ----
-  if (showParticles) {
-    for (let i = 0; i < 16; i++) {
-      const size = rand(3, 10);
-      const p = document.createElement('span');
-      p.className = 'bg-particle';
-      Object.assign(p.style, {
-        left: rand(0, 100) + '%', bottom: '-10px',
-        width: size + 'px', height: size + 'px',
-        animationDuration: rand(16, 38) + 's',
-        animationDelay: -rand(0, 30) + 's',
-      });
-      frag.appendChild(p);
-    }
-  }
-
-  // ---- WAVES ----
-  if (showWaves) {
-    const ns = 'http://www.w3.org/2000/svg';
-    const wrap = document.createElement('div');
-    wrap.className = 'bg-waves';
-    const svg = document.createElementNS(ns, 'svg');
-    svg.setAttribute('viewBox', '0 0 2160 240');
-    svg.setAttribute('preserveAspectRatio', 'none');
-    [['w1', 120, 'var(--orb-a)'], ['w2', 150, 'var(--orb-c)'], ['w3', 175, 'var(--orb-b)']]
-      .forEach(([cls, a, fill]) => {
-        const path = document.createElementNS(ns, 'path');
-        path.setAttribute('class', cls);
-        path.setAttribute('d', wavePath(a));
-        path.setAttribute('fill', fill);
-        svg.appendChild(path);
-      });
-    wrap.appendChild(svg);
-    frag.appendChild(wrap);
-  }
-
-  // ---- STARS ----
-  if (bg === 'stars') {
-    for (let i = 0; i < 80; i++) {
-      const size = rand(1, 3.5);
-      const op = rand(0.3, 0.9);
-      const s = document.createElement('span');
-      Object.assign(s.style, {
-        position: 'absolute',
-        left: rand(0, 100) + '%', top: rand(0, 100) + '%',
-        width: size + 'px', height: size + 'px',
-        borderRadius: '50%', background: 'var(--text)',
-        opacity: String(op * i10),
-        animation: `twinkle ${rand(2, 6)}s ${-rand(0, 6)}s var(--ease-soft) infinite`,
-        pointerEvents: 'none',
-      });
-      frag.appendChild(s);
-    }
-  }
-
-  // ---- RIPPLE ----
-  if (bg === 'ripple') {
-    for (let i = 0; i < 4; i++) {
-      const r = document.createElement('span');
-      r.className = 'bg-ripple';
-      r.style.animationDelay = (i * 1.8) + 's';
-      r.style.opacity = String(0.18 * i10);
-      frag.appendChild(r);
-    }
-  }
-
-  // ---- SMOKE ----
-  if (bg === 'smoke') {
-    const orbVars = ['a', 'b', 'c', 'a', 'b', 'c'];
-    for (let i = 0; i < 6; i++) {
-      const size = rand(260, 440);
-      const sm = document.createElement('span');
-      Object.assign(sm.style, {
-        position: 'absolute',
-        left: rand(10, 90) + '%', bottom: '-80px',
-        width: size + 'px', height: size + 'px',
-        borderRadius: '50%',
-        background: `radial-gradient(circle at 40% 40%, var(--orb-${orbVars[i]}), transparent 70%)`,
-        filter: 'blur(55px)',
-        opacity: String(0.35 * i10),
-        animation: `smoke-drift ${rand(28, 48)}s ${-rand(0, 40)}s linear infinite`,
-        pointerEvents: 'none',
-      });
-      frag.appendChild(sm);
-    }
-  }
-
-  // insert before the veil so it stays on top
-  root.insertBefore(frag, root.querySelector('.bg-veil'));
-}
+/* The ~120-line background builder that used to sit here is gone. It created
+   between 3 and 96 elements per page load depending on the `bg` value —
+   orbs, particles, an SVG wave stack, a starfield, ripple rings, smoke —
+   each with randomised durations and negative delays, then spliced them in
+   before a legibility veil. All of it has been replaced by one attribute and
+   a handful of `--ground-*` declarations in desktop.css. */
 
 /* ============================================================
    BLOCK REASON
@@ -185,10 +94,12 @@ const reasonMap = {
   graylist_explicit: `NSFW content blocked on monitored site`,
   safesearch_bypass: `SafeSearch was disabled — bypass attempt blocked`,
   // Lockdown Mode (plan 4.4) — allowlist-only browsing. Mentor-toned, not
-  // punitive: this is a wall the user chose to put up for themselves.
-  lockdown: `Lockdown is on — only your allowlist is reachable right now`,
+  // punitive: this is a wall the user chose to put up for themselves. Voiced
+  // (UX Direction §2) because it's the one reason line that's a message rather
+  // than a per-block detail; the rest stay literal on purpose.
+  lockdown: t('blocked.reason_lockdown'),
 };
-reasonEl.textContent = reasonMap[reason] || 'This page was blocked to help you stay focused.';
+reasonEl.textContent = reasonMap[reason] || t('blocked.body');
 
 // During a lockdown, add a second line of context under the reason so it reads
 // as a chosen pre-commitment, not an error. Kept out of the reasonMap so the
@@ -199,6 +110,46 @@ if (reason === 'lockdown') {
   note.textContent = "You set this up when you were thinking clearly. It lifts on its own when the timer ends — nothing to do but let it hold. If a site you genuinely need is blocked, you can add it from Oath Light (it takes effect after a short pause).";
   if (reasonEl.parentNode) reasonEl.parentNode.insertBefore(note, reasonEl.nextSibling);
 }
+
+/* ============================================================
+   HABIT REPLACEMENT (plan 5.6)
+   The user's own alternatives, pushed by the desktop app inside the blocking
+   settings. Rendered as data — this page attaches no meaning to any entry, so
+   nothing here needs updating when someone writes a new one.
+
+   Nothing is shown when the list is empty, which is the default. A block
+   screen that invents its own advice ("try going for a walk!") reads as a
+   greeting card; one that reflects back what the user themselves decided,
+   while they were thinking clearly, is the actual 5.6 mechanism.
+   ============================================================ */
+(function renderAlternatives() {
+  if (typeof chrome === 'undefined' || !chrome.storage) return;
+  chrome.storage.local.get(['ppBlocking'], (r) => {
+    const list = (r && r.ppBlocking && Array.isArray(r.ppBlocking.alternatives))
+      ? r.ppBlocking.alternatives : [];
+    if (!list.length) return;
+    const box = document.getElementById('alts');
+    const out = document.getElementById('altsList');
+    if (!box || !out) return;
+
+    list.slice(0, 6).forEach((alt) => {
+      const text = (alt && alt.text ? String(alt.text) : '').trim();
+      if (!text) return;
+      // Only http(s) links become anchors — a `javascript:` or `data:` URL in
+      // a user-supplied field must never become a clickable element on a page
+      // that runs in every tab.
+      const url = alt && alt.url ? String(alt.url).trim() : '';
+      const safe = /^https?:\/\//i.test(url);
+      const el = document.createElement(safe ? 'a' : 'div');
+      el.className = 'alt-item';
+      el.textContent = text;
+      if (safe) { el.href = url; el.rel = 'noreferrer noopener'; }
+      out.appendChild(el);
+    });
+
+    if (out.children.length) box.hidden = false;
+  });
+})();
 
 const quoteEl = document.getElementById('quote');
 const quoteTextEl = document.getElementById('quoteText');
@@ -270,8 +221,10 @@ document.getElementById('goBackBtn').addEventListener('click', () => {
    connected — this overlay runs either way, so the best moment to help
    never depends on the companion app.
    ============================================================ */
-// Verbatim from the desktop Mentor copy (pages-mentor.jsx) — one voice everywhere.
-const PANIC_WAVE_COPY = "The urge feels huge, but it's a wave — it peaks around 20 minutes and then it fades whether you feed it or not. You don't have to fight it. Just let it move through. I'm right here.";
+// The wave / breathe / exit copy now lives in the strings layer
+// (`panic.*` in strings.js) so it stays identical across every surface AND
+// follows the active voice — the grounding prompts below stay literal here
+// because they're a fixed 5-4-3-2-1 script, not voiced copy.
 const PANIC_GROUND_STEPS = [
   { count: 5, sense: 'see', prompt: 'Look around and name five things you can see.' },
   { count: 4, sense: 'hear', prompt: 'Listen for a moment. Name four things you can hear.' },
@@ -335,9 +288,9 @@ function panicRender() {
   const nextBtn = panicEl('panicNextBtn');
 
   if (panicStage === 0) {
-    eyebrow.textContent = "You're safe here";
-    title.textContent = "Let's breathe first.";
-    sub.textContent = 'In for four, hold for four, out for four, hold for four. Nothing to fix right now — just follow the circle.';
+    eyebrow.textContent = t('panic.eyebrow_safe');
+    title.textContent = t('panic.breathe_title');
+    sub.textContent = t('panic.breathe_sub');
     nextBtn.textContent = 'Continue';
     const started = Date.now();
     panicTicker = setInterval(() => {
@@ -348,26 +301,26 @@ function panicRender() {
     panicTimer = setTimeout(panicAdvance, PANIC_BREATH_SECS * 1000);
   } else if (panicStage === 1) {
     eyebrow.textContent = 'The wave';
-    title.textContent = 'This will pass.';
-    sub.textContent = PANIC_WAVE_COPY;
-    nextBtn.textContent = "I'm still here";
+    title.textContent = t('panic.wave_title');
+    sub.textContent = t('panic.wave_body');
+    nextBtn.textContent = t('panic.wave_cta');
     panicTimer = setTimeout(panicAdvance, PANIC_WAVE_SECS * 1000);
   } else if (panicStage === 2) {
     const gs = PANIC_GROUND_STEPS[panicStep];
     eyebrow.textContent = 'Grounding · 5-4-3-2-1';
-    title.textContent = 'Come back to the room.';
+    title.textContent = t('panic.ground_title');
     sub.textContent = gs.prompt;
     panicEl('panicGroundCount').textContent = String(gs.count);
     panicEl('panicGroundSense').textContent = gs.sense;
-    nextBtn.textContent = 'Done — next';
+    nextBtn.textContent = t('panic.ground_cta');
     panicTimer = setTimeout(panicAdvance, PANIC_GROUND_STEP_SECS * 1000);
   } else {
     // Exit: no auto-timer — leaving is always the user's own choice.
     // TODO(5.4): when the urge-log store exists, report a flow-completion
     // event here and offer the one-tap urge log before exit.
     eyebrow.textContent = 'You rode it out';
-    title.textContent = 'Well done. Truly.';
-    sub.textContent = "The urge is already weaker than when you arrived. Choose where to go next — somewhere that feeds the person you're becoming.";
+    title.textContent = t('panic.exit_title');
+    sub.textContent = t('panic.exit_body');
     nextBtn.textContent = 'Stay here';
     panicRedirectTarget((target) => {
       panicGoTarget = target || 'https://www.google.com';
@@ -422,27 +375,28 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ============================================================
-   APPLY DISPLAY SETTINGS (theme / palette / atmosphere / intensity)
+   APPLY DISPLAY SETTINGS (theme / look / neutral)
    ============================================================ */
 applyDisplay(DEFAULTS); // paint immediately with defaults, then refine from storage
 
 if (typeof chrome !== 'undefined' && chrome.storage) {
-  chrome.storage.local.get(['theme', 'style', 'bg', 'intensity', 'display'], (r) => {
+  // 'bg' and 'intensity' stay in this list on purpose. They are never read
+  // any more, but a profile written by an older build still has them, and a
+  // storage change that only touches those keys should still trigger a
+  // refresh — otherwise an upgrade leaves this page on stale values until
+  // something else happens to write.
+  const DISPLAY_KEYS = ['theme', 'look', 'neutral', 'bg', 'intensity', 'display'];
+  const refresh = () => chrome.storage.local.get(DISPLAY_KEYS, (r) => {
     if (chrome.runtime.lastError) return;
     const d = r.display && typeof r.display === 'object' ? r.display : r;
-    applyDisplay({
-      theme: d.theme, style: d.style, bg: d.bg, intensity: d.intensity,
-    });
+    applyDisplay({ theme: d.theme, look: d.look, neutral: d.neutral });
   });
+
+  refresh();
 
   // live-update if settings change while the page is open
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (['theme', 'style', 'bg', 'intensity', 'display'].some((k) => k in changes)) {
-      chrome.storage.local.get(['theme', 'style', 'bg', 'intensity', 'display'], (r) => {
-        const d = r.display && typeof r.display === 'object' ? r.display : r;
-        applyDisplay({ theme: d.theme, style: d.style, bg: d.bg, intensity: d.intensity });
-      });
-    }
+    if (DISPLAY_KEYS.some((k) => k in changes)) refresh();
   });
 }
