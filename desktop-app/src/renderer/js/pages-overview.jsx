@@ -301,7 +301,7 @@ function extensionAction(b) {
     return {
       labelKey: 'status.action_install_manually',
       ghost: false,
-      run: () => PPNative.openExternal('https://chromewebstore.google.com/detail/oath-light-content-filter/oigdpcdgmldgjalfnlgekcbkmniplnad?hl=en-GB&utm_source=ext_sidebar'),
+      run: () => PPNative.openExtensionsPage(b.key),
     };
   }
   switch (b.enforcement) {

@@ -2688,7 +2688,8 @@ fn request_browser_restore(
     // Best-effort: a launch failure is not fatal — the window is open either
     // way and the user can start the browser themselves.
     if let Some(exe) = browsers::installed_exe_path(def) {
-        if let Err(e) = std::process::Command::new(exe).arg(def.extensions_page).spawn() {
+        let url = browsers::restore_target_url(def);
+        if let Err(e) = std::process::Command::new(exe).arg(url).spawn() {
             log::warn!("browser_lock: could not launch {} for its restore window: {e}", def.name);
         }
     }
@@ -3715,12 +3716,13 @@ fn refresh_extensions(app: AppHandle, browser_key: Option<String>) -> Vec<Refres
 #[tauri::command]
 fn open_extensions_page(browser_key: String) -> Result<(), String> {
     let def = browsers::browser_by_key(&browser_key).ok_or("Unknown browser")?;
-    if def.extensions_page.is_empty() {
+    let url = browsers::restore_target_url(def);
+    if url.is_empty() {
         return Err("No extensions page known for this browser".to_string());
     }
     let exe = browsers::installed_exe_path(def).ok_or("Browser is not installed")?;
     std::process::Command::new(exe)
-        .arg(def.extensions_page)
+        .arg(url)
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())

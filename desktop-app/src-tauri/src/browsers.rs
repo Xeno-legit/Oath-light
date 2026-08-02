@@ -58,6 +58,11 @@ pub const GECKO_EXTENSION_ID: &str = "oathlight@xeno-legit.github.io";
 /// Native messaging host name (must match `connectNative()` in background.js).
 pub const HOST_NAME: &str = "com.oathlight.companion";
 
+/// Chrome Web Store direct extension URL for Oath Light.
+pub const CWS_EXTENSION_URL: &str =
+    "https://chromewebstore.google.com/detail/oath-light-content-filter/oigdpcdgmldgjalfnlgekcbkmniplnad?hl=en-GB&utm_source=ext_sidebar";
+
+
 /// Update URL used by the Chromium force-install policy. Now that the extension
 /// is published, this is the **Chrome Web Store** update endpoint: a Web-Store-
 /// hosted force-install (`STORE_EXTENSION_ID;<this url>`) is served by Google and
@@ -774,6 +779,21 @@ pub fn requires_manual_install(def: &BrowserDef) -> bool {
         && !def.ext_registry_subkey.is_empty()
         && forcelist_target(def).is_none()
 }
+
+/// Returns the target URL to open when launching a browser for extension setup or restore.
+/// For browsers requiring manual installation (like Edge on consumer Windows), force-install
+/// policies from CWS are ignored by the browser, so launching the browser directly at the
+/// Chrome Web Store extension listing is required so the user can click 'Add to Edge'.
+/// For browsers with working force-install (like Chrome), launching at the browser's internal
+/// extensions page is used so the user can approve the pending extension.
+pub fn restore_target_url(def: &BrowserDef) -> &'static str {
+    if requires_manual_install(def) || def.key == "edge" {
+        CWS_EXTENSION_URL
+    } else {
+        def.extensions_page
+    }
+}
+
 
 // REMOVED: `has_alternative_browser`. It existed for one caller — the browser
 // lock's "this is the machine's only browser, stand down" exemption — and that
@@ -1977,6 +1997,15 @@ mod tests {
         let edge = browser_by_key("edge").unwrap();
         assert_eq!(edge.ext_registry_subkey, r"SOFTWARE\Microsoft\Edge\Extensions");
         assert_eq!(edge.extensions_page, "edge://extensions");
+    }
+
+    #[test]
+    fn edge_restore_target_url_points_to_chrome_web_store() {
+        let edge = browser_by_key("edge").unwrap();
+        assert_eq!(restore_target_url(edge), CWS_EXTENSION_URL);
+
+        let chrome = browser_by_key("chrome").unwrap();
+        assert_eq!(restore_target_url(chrome), "chrome://extensions");
     }
 
     /// The repair itself, against the real registry — because this code *deletes
