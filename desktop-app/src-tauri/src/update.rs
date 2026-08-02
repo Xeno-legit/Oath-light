@@ -68,7 +68,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// How long an update window lasts. See the module doc — this is the number
 /// that bounds the whole feature's blast radius, so it is deliberately one
 /// constant with one meaning, checked on write AND on every read.
-pub const WINDOW_SECS: u64 = 1 * 60;
+pub const WINDOW_SECS: u64 = 60;
 
 /// Name of the one-shot recovery task that relaunches the app when a window
 /// expires without the update having happened. Registered by `begin_update`,

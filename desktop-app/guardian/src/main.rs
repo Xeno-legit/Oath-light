@@ -71,7 +71,7 @@ fn main() {
     /// is a CAP on a window the app issues, so a guardian holding a smaller cap
     /// would reject a legitimately-issued window and keep resurrecting the app
     /// straight through the update it was told to allow. Kept equal.
-    const UPDATE_WINDOW_SECS: u64 = 1 * 60; // ← keep in sync w/ update.rs
+    const UPDATE_WINDOW_SECS: u64 = 60; // ← keep in sync w/ update.rs
 
     const POLL: Duration = Duration::from_millis(1000);
     const SPAWN_COOLDOWN: Duration = Duration::from_secs(3);
