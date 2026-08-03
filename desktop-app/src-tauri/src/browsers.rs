@@ -133,7 +133,7 @@ pub const FIREFOX_XPI_URL: &str =
 /// than parsed from the manifest at build time so a missing/relocated extension
 /// folder can never fail a release build; `expected_version_matches_manifest`
 /// (in the test module) is what keeps it honest.
-pub const EXPECTED_EXTENSION_VERSION: &str = "4.2.0";
+pub const EXPECTED_EXTENSION_VERSION: &str = "4.3.0";
 
 /// The `install_url` to write into the Firefox force-install policy.
 ///

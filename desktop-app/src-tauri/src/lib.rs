@@ -1245,8 +1245,13 @@ fn handle_connection(app: AppHandle, state: Arc<Mutex<AppState>>, stream: TcpStr
                 continue;
             }
             Err(e) => {
-                log::warn!("[conn {}] native host disconnected: {}", conn_id, e);
-                state.lock().unwrap().connections.remove(&conn_id);
+                let browser_key = {
+                    let mut s = state.lock().unwrap();
+                    s.connections.remove(&conn_id).map(|c| c.browser)
+                };
+                log::warn!("[conn {}] native host disconnected (browser: {:?}): {}", conn_id, browser_key, e);
+                profiles::invalidate_cache();
+                check_and_kill_locked_browsers(&app, &state);
                 break;
             }
         }
@@ -2034,7 +2039,10 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
             enforce_browser_lock(&app, &cfg, guard_enabled, &mut statuses);
 
             let _ = app.emit("browsers-status", &statuses);
-            std::thread::sleep(MONITOR_TICK);
+            for _ in 0..12 {
+                check_and_kill_locked_browsers(&app, &state);
+                std::thread::sleep(MONITOR_TICK / 12);
+            }
         }
     });
 }
@@ -2049,27 +2057,114 @@ fn start_monitor(app: AppHandle, state: Arc<Mutex<AppState>>) {
 /// forever.
 const BROWSER_LOCK_EMIT_THROTTLE: Duration = Duration::from_secs(60);
 
+/// Immediately check all manual-install browsers (like Edge) and kill any process
+/// that is running without an installed extension or live protection window.
+pub fn check_and_kill_locked_browsers(app: &AppHandle, state: &Arc<Mutex<AppState>>) {
+    let guard_enabled = state.lock().unwrap().guard_enabled;
+    let cfg = app.state::<Arc<settings::SettingsState>>().get();
+    let Some(locks) = app.try_state::<Arc<browser_lock::BrowserLockState>>() else { return };
+    if !cfg.lock_unverified_browsers || !guard_enabled {
+        locks.clear_all();
+        return;
+    }
+
+    let proc_names = browsers::running_process_names();
+    let running = browsers::detect_running_from(&proc_names);
+
+    let mut condemned: Vec<&'static browsers::BrowserDef> = Vec::new();
+    for def in BROWSERS {
+        if !browsers::requires_manual_install(def) {
+            continue;
+        }
+        if !running.contains(&def.key) {
+            continue;
+        }
+
+        let facts = match profiles::read_profiles(def) {
+            Some(list) => {
+                if list.is_empty() {
+                    browser_lock::BrowserFacts {
+                        protected: false,
+                        ground_truth: true,
+                    }
+                } else {
+                    let running_dirs = profiles::detect_running_profiles(def);
+                    let protected = if running_dirs.is_empty() {
+                        list.iter().all(|p| p.installed)
+                    } else {
+                        list.iter().all(|p| {
+                            let dir_name = std::path::Path::new(&p.profile_dir)
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_default();
+                            !running_dirs.contains(&dir_name) || p.installed
+                        })
+                    };
+                    browser_lock::BrowserFacts {
+                        protected,
+                        ground_truth: true,
+                    }
+                }
+            }
+            None => browser_lock::BrowserFacts { protected: false, ground_truth: false },
+        };
+
+        if locks.decide(def.key, facts) == browser_lock::LockDecision::Kill {
+            condemned.push(def);
+        }
+    }
+
+    if condemned.is_empty() {
+        return;
+    }
+
+    let names: HashSet<String> =
+        condemned.iter().flat_map(|d| d.process_names.iter().map(|n| n.to_string())).collect();
+    use sysinfo::{ProcessRefreshKind, System};
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(ProcessRefreshKind::new());
+    let mut killed: HashMap<&'static str, usize> = HashMap::new();
+    for proc in sys.processes().values() {
+        let name = proc.name().to_lowercase();
+        if !names.contains(&name) {
+            continue;
+        }
+        let Some(def) = browsers::match_browser_process(&name) else { continue };
+        if !condemned.iter().any(|d| d.key == def.key) {
+            continue;
+        }
+        proc.kill();
+        *killed.entry(def.key).or_default() += 1;
+    }
+
+    let now = Instant::now();
+    let mut memo = browser_lock_emit_memo().lock().unwrap();
+    for (key, count) in killed {
+        if count == 0 {
+            continue;
+        }
+        let stale = memo
+            .get(key)
+            .map(|t| now.duration_since(*t) >= BROWSER_LOCK_EMIT_THROTTLE)
+            .unwrap_or(true);
+        if !stale {
+            continue;
+        }
+        memo.insert(key, now);
+        log::warn!(
+            "browser_lock: killed {count} '{key}' process(es) — the extension is not installed \
+             and no restore window is open"
+        );
+        let _ = app.emit(
+            "browser-locked-out",
+            serde_json::json!({ "browser": key, "processes": count }),
+        );
+        log_event(app, "browser_locked_out", serde_json::json!({ "browser": key }));
+    }
+}
+
 /// Kill any browser that cannot be force-installed and is running without the
 /// extension, unless it holds a restore window (see `browser_lock`).
-///
-/// **Why killing is the only lever here.** For every other browser the app pins
-/// the extension with a policy and the browser itself puts it back. Edge on a
-/// consumer machine refuses that policy outright, so "protected" there is
-/// whatever the user last chose — which on a machine running this app is exactly
-/// the thing that shouldn't be up to the user at 2am. Making the browser
-/// unusable until the extension is on is the remaining lever.
-///
-/// Two guards keep this from being a browser that randomly dies:
-///   * it only ever touches `browsers::requires_manual_install` browsers, so a
-///     force-installable one is never killed (killing one would *prevent* the
-///     launch during which its policy reinstalls the extension); and
-///   * it needs real ground truth from the profile scan. Unreadable prefs are
-///     not evidence, and must never be able to brick a browser.
-///
-/// There used to be a third — "the user turned this on" — and a fourth, the
-/// only-browser-on-the-machine exemption. Both are gone: the lock is mandatory
-/// and `settings::force_mandatory` holds the flag true, so the early return
-/// below is now unreachable defence rather than a real off state.
 fn enforce_browser_lock(
     app: &AppHandle,
     cfg: &settings::SettingsV1,
@@ -2093,14 +2188,8 @@ fn enforce_browser_lock(
         if !browsers::requires_manual_install(def) {
             continue;
         }
-        // No exemptions. This used to stand down when the browser was the only
-        // one on the machine; that made the protection weakest on exactly the
-        // stock consumer PC it exists for, and made "uninstall your other
-        // browsers" a working bypass. See `browser_lock`'s module doc — the
-        // Read the profiles directly: a browser is protected if all currently
-        // running profiles carry the extension. If an active running profile lacks
-        // the extension, the browser is locked out and killed.
-        let facts = match profiles::cached_profiles(def) {
+        // Read profiles directly so we never use stale 30s cache data
+        let facts = match profiles::read_profiles(def) {
             Some(list) => {
                 if list.is_empty() {
                     browser_lock::BrowserFacts {

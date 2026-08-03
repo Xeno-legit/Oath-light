@@ -158,9 +158,12 @@ def verify(path: pathlib.Path, *, expect_service_worker: bool) -> list[str]:
         if bad := z.testzip():
             problems.append(f"corrupt entry: {bad}")
 
+        manifest = json.loads(z.read("manifest.json"))
+        if "key" in manifest:
+            problems.append("dev 'key' field present — store upload will reject key mismatch")
+
         # The one real difference between the two builds — assert it rather
         # than trust that the right manifest went to the right file.
-        manifest = json.loads(z.read("manifest.json"))
         has_sw = "service_worker" in manifest.get("background", {})
         if has_sw != expect_service_worker:
             problems.append(
@@ -211,12 +214,18 @@ def main() -> int:
         )
         return 1
 
-    chrome_manifest = (SRC / "manifest.json").read_text(encoding="utf-8")
-    m = json.loads(chrome_manifest)
+    chrome_manifest_raw = (SRC / "manifest.json").read_text(encoding="utf-8")
+    m = json.loads(chrome_manifest_raw)
     version = m.get("version", "?")
 
-    # Firefox: drop service_worker, keep everything else identical.
-    firefox = json.loads(chrome_manifest)
+    # Store zips MUST NOT contain a dev "key" field — stores reject uploads if key doesn't match dashboard.
+    chrome = json.loads(chrome_manifest_raw)
+    chrome.pop("key", None)
+    chrome_manifest = json.dumps(chrome, indent=2) + "\n"
+
+    # Firefox: drop service_worker and key, keep everything else identical.
+    firefox = json.loads(chrome_manifest_raw)
+    firefox.pop("key", None)
     firefox["background"].pop("service_worker", None)
     firefox_manifest = json.dumps(firefox, indent=2) + "\n"
 

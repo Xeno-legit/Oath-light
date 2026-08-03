@@ -1384,7 +1384,6 @@ function SettingsPage({ s, PP, go }) {
       <TrustedContactCard s={s} />
       <SecurityCard />
       <RecordsCard />
-      <AppUpdateCard />
       <PendingChangesCard PP={PP} />
       <DangerCard PP={PP} />
     </div>

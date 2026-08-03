@@ -69,6 +69,10 @@ pub const WHITELIST_DOMAINS: &[&str] = &[
     "figma.com",
     // Cloud & Productivity
     "notion.so",
+    "camscanner.com",
+    "docufiler.com",
+    "sem-scanner.co.uk",
+    "cambridgemanufacturing.com",
     "docs.google.com",
     "drive.google.com",
     "dropbox.com",
@@ -89,6 +93,11 @@ pub const WHITELIST_DOMAINS: &[&str] = &[
     "mit.edu",
     "stanford.edu",
     "harvard.edu",
+    "metrostate.edu",
+    "ohiochristian.edu",
+    "specialconnections.ku.edu",
+    "frazer.rice.edu",
+    "ieltsmarkcambridge.com",
     "w3schools.com",
     "freecodecamp.org",
     "codecademy.com",
@@ -117,6 +126,8 @@ pub const WHITELIST_DOMAINS: &[&str] = &[
     "arstechnica.com",
     "theverge.com",
     "wired.com",
+    "norwichcyclingcampaign.org",
+    "thecambridgepestcontrolcompany.co.uk",
     // Banking & Finance
     "paypal.com",
     "stripe.com",
@@ -130,6 +141,8 @@ pub const WHITELIST_DOMAINS: &[&str] = &[
     // Government
     "nasa.gov",
     "irs.gov",
+    "djj.nsw.gov.au",
+    "primature.gov.gn",
     // Entertainment (safe) — youtube.com/youtu.be/spotify.com deliberately
     // excluded (see matching.js's note): they route through the normal
     // pipeline instead of an all-content-trusting whitelist entry.
@@ -945,6 +958,14 @@ mod tests {
     fn is_whitelisted_domain_exact_and_subdomain() {
         assert!(is_whitelisted_domain("github.com"));
         assert!(is_whitelisted_domain("gist.github.com"));
+        assert!(is_whitelisted_domain("camscanner.com"));
+        assert!(is_whitelisted_domain("www.camscanner.com"));
+        assert!(is_whitelisted_domain("metrostate.edu"));
+        assert!(is_whitelisted_domain("ohiochristian.edu"));
+        assert!(is_whitelisted_domain("specialconnections.ku.edu"));
+        assert!(is_whitelisted_domain("djj.nsw.gov.au"));
+        assert!(is_whitelisted_domain("ieltsmarkcambridge.com"));
+        assert!(is_whitelisted_domain("norwichcyclingcampaign.org"));
         assert!(!is_whitelisted_domain("githubcom.evil.com"));
         assert!(!is_whitelisted_domain("notgithub.com"));
     }

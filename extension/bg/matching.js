@@ -49,6 +49,10 @@ const WHITELIST_DOMAINS = [
 
   // Cloud & Productivity
   'notion.so',
+  'camscanner.com',
+  'docufiler.com',
+  'sem-scanner.co.uk',
+  'cambridgemanufacturing.com',
   'docs.google.com',
   'drive.google.com',
   'dropbox.com',
@@ -71,6 +75,11 @@ const WHITELIST_DOMAINS = [
   'mit.edu',
   'stanford.edu',
   'harvard.edu',
+  'metrostate.edu',
+  'ohiochristian.edu',
+  'specialconnections.ku.edu',
+  'frazer.rice.edu',
+  'ieltsmarkcambridge.com',
   'w3schools.com',
   'freecodecamp.org',
   'codecademy.com',
@@ -101,6 +110,8 @@ const WHITELIST_DOMAINS = [
   'arstechnica.com',
   'theverge.com',
   'wired.com',
+  'norwichcyclingcampaign.org',
+  'thecambridgepestcontrolcompany.co.uk',
 
   // Banking & Finance
   'paypal.com',
@@ -117,6 +128,8 @@ const WHITELIST_DOMAINS = [
   // Government
   'nasa.gov',
   'irs.gov',
+  'djj.nsw.gov.au',
+  'primature.gov.gn',
 
   // Entertainment (safe)
   // NOTE: youtube.com / youtu.be / spotify.com were REMOVED from the whitelist

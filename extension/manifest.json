@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Oath Light - Content Filter",
-  "version": "4.2.0",
+  "version": "4.3.0",
   "description": "A content filtering system to help you stay focused on personal growth",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA8Xuk2lOGhl0uMDtXaeJNgNHvHaGDOaKHhl0tZTAWMRA3VoItwuH3PFsKjYcYqIdt4avS5SGtp9ZT/U4rzT0O7YMbr1u58zDrAq5bPqO8cY+57bEiUKz5VPrfuT4yD1QL2rOQi4JPUv23gCTkk9Jf1TlJg/uULsMF9gEPrp1KPkal0uYRmaVPJQtrOuULpzGz6nSAcsJ5yNLqALEXpkf3je+g6PhsMck5t0dPn1c2Nvmvzeygs27HJvq4FPehYtZWyKO8cqVwnYuNc2V9lMcIZp75nJH0xepW6G1ADG6uO2OFq5zU7rm+MBhBgD6qF/iWcN1rtqZUDwVkS85medCxcQIDAQAB",
   "browser_specific_settings": {

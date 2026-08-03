@@ -293,7 +293,7 @@ fn read_profile_ext(profile_dir: &Path, name: &str) -> Option<ProfileExt> {
     })
 }
 
-fn read_profiles(def: &BrowserDef) -> Option<Vec<ProfileExt>> {
+pub fn read_profiles(def: &BrowserDef) -> Option<Vec<ProfileExt>> {
     match def.engine {
         Engine::Chromium => read_chromium_profiles(def),
         Engine::Gecko => read_gecko_profiles(),
