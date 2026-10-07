@@ -516,3 +516,69 @@ function renderGraylist() {
 }
 renderGraylist();
 
+// YOUTUBE RESTRICTED MODE SWITCH — opt-in, default OFF.
+// This page only reads/writes chrome.storage `ppYouTubeRestrict`; the service
+// worker listens for the change (bg/blocklists.js → chrome.storage.onChanged)
+// and mirrors it into the DNR `YouTube-Restrict: Strict` ruleset and the
+// graylist PREF cookie. Keeping the write in storage rather than sending a
+// message means the switch stays correct across worker restarts and needs no
+// message router entry. Absent key === off, which is every fresh install.
+const YT_RESTRICT_KEY = 'ppYouTubeRestrict';
+
+// The youtube.com row in the graylist below states the rule as unconditional,
+// which stops being true the moment the feature has a switch. Keep both states
+// in step with the toggle so the card can't contradict itself.
+const YT_GRAYLIST_DESC_ON =
+  'Restricted Mode forced (PREF cookie); explicit/suggestive searches blocked';
+const YT_GRAYLIST_DESC_OFF =
+  'Restricted Mode off — explicit/suggestive searches still blocked';
+
+function syncYouTubeGraylistRow(on) {
+  const rows = document.querySelectorAll('.graylist-row');
+  for (const row of rows) {
+    const url = row.querySelector('.gl-url');
+    if (!url || url.textContent !== 'youtube.com') continue;
+    const desc = row.querySelector('.gl-desc');
+    if (desc) desc.textContent = on ? YT_GRAYLIST_DESC_ON : YT_GRAYLIST_DESC_OFF;
+    return;
+  }
+}
+
+function renderYouTubeRestrict(on) {
+  const sw = document.getElementById('ytRestrictToggle');
+  const desc = document.getElementById('ytRestrictDesc');
+  if (!sw) return;
+  sw.classList.toggle('on', !!on);
+  sw.setAttribute('aria-checked', on ? 'true' : 'false');
+  if (desc) {
+    desc.textContent = on
+      ? 'On — YouTube handles mature videos and comments on its side.'
+      : 'Off — YouTube shows its normal, unfiltered feed.';
+  }
+  syncYouTubeGraylistRow(!!on);
+}
+
+function initYouTubeRestrict() {
+  const sw = document.getElementById('ytRestrictToggle');
+  if (!sw || typeof chrome === 'undefined' || !chrome.storage) return;
+
+  chrome.storage.local.get([YT_RESTRICT_KEY], (store) => {
+    renderYouTubeRestrict(!!(store && store[YT_RESTRICT_KEY] === true));
+  });
+
+  sw.addEventListener('click', () => {
+    const next = sw.getAttribute('aria-checked') !== 'true';
+    renderYouTubeRestrict(next); // paint immediately; storage is the source of truth
+    chrome.storage.local.set({ [YT_RESTRICT_KEY]: next }, () => {
+      if (chrome.runtime.lastError) renderYouTubeRestrict(!next); // revert on failure
+    });
+  });
+
+  // Follow a flip made from any other surface (popup, a second open tab).
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes || !changes[YT_RESTRICT_KEY]) return;
+    renderYouTubeRestrict(changes[YT_RESTRICT_KEY].newValue === true);
+  });
+}
+initYouTubeRestrict();
+

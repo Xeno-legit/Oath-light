@@ -16,16 +16,38 @@ let defaultDomains = [];
 // every navigation; mirrored to chrome.storage.local under `ppBlocking` so it
 // survives a service-worker restart.
 let blockingSettings = null;
+
+// YouTube Restricted Mode — OPT-IN, DEFAULT OFF, and owned by THIS extension.
+// The switch lives in chrome.storage under `ppYouTubeRestrict` (absent = off,
+// which is every fresh install) and is rendered on the Blocklist Manager page.
+// Nothing else may turn it on: the desktop app still pushes its own
+// `youtubeRestrict` value over the native bridge, and that value is
+// deliberately NOT read here, so an app-side default can never re-enable the
+// feature behind the user's back.
+const YT_RESTRICT_STORAGE_KEY = 'ppYouTubeRestrict';
+let youtubeRestrictOn = false;
+
 async function loadBlockingSettings() {
   try {
-    const { ppBlocking } = await chrome.storage.local.get(['ppBlocking']);
+    const { ppBlocking, ppYouTubeRestrict } =
+      await chrome.storage.local.get(['ppBlocking', YT_RESTRICT_STORAGE_KEY]);
     if (ppBlocking && typeof ppBlocking === 'object') blockingSettings = ppBlocking;
-  } catch (_) {}
+    youtubeRestrictOn = ppYouTubeRestrict === true;
+  } catch (_) {
+    youtubeRestrictOn = false;
+  }
   // Re-assert the DNR-backed strictness toggle on every worker spawn — ruleset
-  // enable/disable persists across restarts, but re-applying from the cached
-  // settings keeps DNR state honest if it and storage ever drift.
+  // enable/disable persists across restarts, but re-applying from storage keeps
+  // DNR state honest if it and storage ever drift.
   applyYouTubeRestrictRuleset();
   return blockingSettings;
+}
+
+// Single read used by both enforcement sites (the DNR ruleset below and the
+// graylist PREF cookie in bg/graylist.js) so the switch can never mean two
+// different things in two places.
+function isYouTubeRestrictOn() {
+  return youtubeRestrictOn === true;
 }
 
 // YouTube Restricted Mode (plan 3.4) — an opt-in strictness level, DEFAULT
@@ -33,13 +55,13 @@ async function loadBlockingSettings() {
 // `pp_youtube_restrict`, disabled at install) that stamps the documented
 // `YouTube-Restrict: Strict` request header onto *.youtube.com traffic — the
 // same mechanism school/enterprise networks use, so YouTube itself filters
-// server-side. Toggled by the desktop app's blocking settings
-// (`youtubeRestrict` on the same channel as redirectLinkOn/redirectUrl).
-// Wrapped in feature checks: Firefox < 113 and the test harness have no
+// server-side. Toggled from the Blocklist Manager page, which writes
+// `ppYouTubeRestrict` to storage; this function only mirrors that flag into
+// DNR. Wrapped in feature checks: Firefox < 113 and the test harness have no
 // chrome.declarativeNetRequest, and enforcement must degrade silently there.
 const YT_RESTRICT_RULESET_ID = 'pp_youtube_restrict';
 function applyYouTubeRestrictRuleset() {
-  const on = !!(blockingSettings && blockingSettings.youtubeRestrict);
+  const on = isYouTubeRestrictOn();
   try {
     const dnr = chrome.declarativeNetRequest;
     if (!dnr || typeof dnr.updateEnabledRulesets !== 'function') return;
@@ -50,6 +72,24 @@ function applyYouTubeRestrictRuleset() {
     if (p && typeof p.catch === 'function') p.catch(() => {});
   } catch (_) {}
 }
+
+// Follow the switch wherever it is flipped. The Blocklist Manager page writes
+// `ppYouTubeRestrict` straight to storage and this mirrors it back into both
+// enforcement sites — an MV3 worker is woken for storage events, so this also
+// works after the worker has been killed. A write is the ONLY channel: the
+// desktop app's `set_blocking` push cannot reach this flag.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes || !changes[YT_RESTRICT_STORAGE_KEY]) return;
+  const on = changes[YT_RESTRICT_STORAGE_KEY].newValue === true;
+  youtubeRestrictOn = on;
+  applyYouTubeRestrictRuleset();
+  // The PREF cookie is otherwise only touched on navigation, so without this
+  // the switch would lag a page-load behind on the way up and never take on
+  // the way down. graylist.js loads after this file (both manifest.scripts and
+  // importScripts), so the helper is resolved lazily, exactly as
+  // native-bridge.js already does for reconcileLockdownEscalationAlarm.
+  if (typeof syncYouTubeRestrictedCookie === 'function') syncYouTubeRestrictedCookie(on);
+});
 
 // Cached Set of the built-in domains, for fast "is this a default?" checks.
 let defaultSetCache = null;

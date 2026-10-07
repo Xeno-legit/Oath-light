@@ -147,34 +147,49 @@ function run() {
 
   // ── YouTube Restricted Mode toggle (plan 3.4 — opt-in, DEFAULT OFF) ─────────
   // applyYouTubeRestrictRuleset (bg/blocklists.js) drives the static DNR
-  // ruleset from blockingSettings.youtubeRestrict. blockingSettings is a
-  // top-level `let` shared across the sandbox's global lexical scope, so we
-  // set it exactly where the native-bridge set_blocking handler does, via a
-  // script evaluated in the same context. The harness's chrome stub records
-  // every updateEnabledRulesets call in dnrCalls.
+  // ruleset from the EXTENSION-owned `youtubeRestrictOn` flag (chrome.storage
+  // `ppYouTubeRestrict`, absent = off) — never from blockingSettings, which the
+  // desktop app fills with `youtubeRestrict: true`. `youtubeRestrictOn` is a
+  // top-level `let` shared across the sandbox's global lexical scope, so we set
+  // it exactly where loadBlockingSettings() does, via a script evaluated in the
+  // same context. The harness's chrome stub records every
+  // updateEnabledRulesets call in dnrCalls.
   {
-    // Default OFF: nothing pushed from the desktop yet → applying must DISABLE.
+    // Default OFF: no flag set → applying must DISABLE.
     const before = dnrCalls.length;
-    vm.runInContext('applyYouTubeRestrictRuleset();', sandbox, { filename: 'test:yt-default' });
+    vm.runInContext('youtubeRestrictOn = false; applyYouTubeRestrictRuleset();', sandbox, { filename: 'test:yt-default' });
     const call = dnrCalls[dnrCalls.length - 1];
     runner.ok(dnrCalls.length === before + 1 &&
       call && Array.isArray(call.disableRulesetIds) && call.disableRulesetIds.includes('pp_youtube_restrict') &&
       !call.enableRulesetIds,
-      'no settings pushed (default) → ruleset DISABLED (opt-in stays off)', JSON.stringify(call));
+      'no flag set (default) → ruleset DISABLED (opt-in stays off)', JSON.stringify(call));
   }
   {
-    vm.runInContext('blockingSettings = { youtubeRestrict: true }; applyYouTubeRestrictRuleset();', sandbox, { filename: 'test:yt-on' });
+    vm.runInContext('youtubeRestrictOn = true; applyYouTubeRestrictRuleset();', sandbox, { filename: 'test:yt-on' });
     const call = dnrCalls[dnrCalls.length - 1];
     runner.ok(call && Array.isArray(call.enableRulesetIds) && call.enableRulesetIds.includes('pp_youtube_restrict') &&
       !call.disableRulesetIds,
-      'youtubeRestrict:true → updateEnabledRulesets enableRulesetIds [pp_youtube_restrict]', JSON.stringify(call));
+      'youtubeRestrictOn:true → updateEnabledRulesets enableRulesetIds [pp_youtube_restrict]', JSON.stringify(call));
   }
   {
-    vm.runInContext('blockingSettings = { youtubeRestrict: false }; applyYouTubeRestrictRuleset();', sandbox, { filename: 'test:yt-off' });
+    vm.runInContext('youtubeRestrictOn = false; applyYouTubeRestrictRuleset();', sandbox, { filename: 'test:yt-off' });
     const call = dnrCalls[dnrCalls.length - 1];
     runner.ok(call && Array.isArray(call.disableRulesetIds) && call.disableRulesetIds.includes('pp_youtube_restrict') &&
       !call.enableRulesetIds,
-      'youtubeRestrict:false → updateEnabledRulesets disableRulesetIds [pp_youtube_restrict]', JSON.stringify(call));
+      'youtubeRestrictOn:false → updateEnabledRulesets disableRulesetIds [pp_youtube_restrict]', JSON.stringify(call));
+  }
+  {
+    // The desktop app hardcodes `youtubeRestrict: true` in its blocking settings
+    // push. It must NOT be able to arm the ruleset — the extension owns the
+    // switch. Full coverage lives in test-youtube-restrict.cjs; this pins the
+    // single most likely regression (re-reading blockingSettings here).
+    vm.runInContext(
+      'blockingSettings = { youtubeRestrict: true, redirectLinkOn: true }; applyYouTubeRestrictRuleset();',
+      sandbox, { filename: 'test:yt-app-push' });
+    const call = dnrCalls[dnrCalls.length - 1];
+    runner.ok(call && Array.isArray(call.disableRulesetIds) && call.disableRulesetIds.includes('pp_youtube_restrict'),
+      'desktop push youtubeRestrict:true does NOT arm the ruleset (extension owns the switch)', JSON.stringify(call));
+    vm.runInContext('blockingSettings = null; youtubeRestrictOn = false;', sandbox, { filename: 'test:yt-reset' });
   }
 
   // ── DNR static ruleset shape (plan 3.4 — Startpage cookie-strip + YT header) ─

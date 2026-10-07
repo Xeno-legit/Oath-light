@@ -66,16 +66,45 @@ function makeChromeStub() {
   const store = {}; // backing store for chrome.storage.local
   const dnrCalls = []; // recorded declarativeNetRequest.updateEnabledRulesets args
 
+  // chrome.storage.onChanged is a REAL registry, not a no-op: several pieces of
+  // background behaviour (the YouTube Restricted Mode switch in
+  // bg/blocklists.js) are driven purely by a storage write, and a no-op stub
+  // would leave them entirely untested. Writes below fan out to these
+  // listeners with the same `changes, area` shape the browser uses.
+  const changeListeners = [];
+  const fireChange = (changes) => {
+    if (!Object.keys(changes).length) return;
+    for (const fn of [...changeListeners]) {
+      try { fn(changes, 'local'); } catch (e) { listenerErrors.push(e); }
+    }
+  };
+  const listenerErrors = [];
+
   const asyncGet = (keys) => {
     const r = {};
     const list = keys == null ? Object.keys(store) : (Array.isArray(keys) ? keys : [keys]);
     for (const k of list) if (Object.prototype.hasOwnProperty.call(store, k)) r[k] = store[k];
     return Promise.resolve(r);
   };
-  const asyncSet = (obj) => { Object.assign(store, obj); return Promise.resolve(); };
+  const asyncSet = (obj) => {
+    const changes = {};
+    for (const [k, v] of Object.entries(obj)) {
+      changes[k] = { oldValue: store[k], newValue: v };
+      store[k] = v;
+    }
+    fireChange(changes);
+    return Promise.resolve();
+  };
   const asyncRemove = (keys) => {
     const list = Array.isArray(keys) ? keys : [keys];
-    for (const k of list) delete store[k];
+    const changes = {};
+    for (const k of list) {
+      if (Object.prototype.hasOwnProperty.call(store, k)) {
+        changes[k] = { oldValue: store[k], newValue: undefined };
+        delete store[k];
+      }
+    }
+    fireChange(changes);
     return Promise.resolve();
   };
 
@@ -91,7 +120,14 @@ function makeChromeStub() {
     },
     storage: {
       local: { get: asyncGet, set: asyncSet, remove: asyncRemove },
-      onChanged: listener,
+      onChanged: {
+        addListener: (fn) => { changeListeners.push(fn); },
+        removeListener: (fn) => {
+          const i = changeListeners.indexOf(fn);
+          if (i >= 0) changeListeners.splice(i, 1);
+        },
+        hasListener: (fn) => changeListeners.includes(fn),
+      },
     },
     tabs: {
       onRemoved: listener, onUpdated: listener,
@@ -99,7 +135,12 @@ function makeChromeStub() {
       update: () => Promise.resolve(),
     },
     webNavigation: { onBeforeNavigate: listener, onHistoryStateUpdated: listener, onCommitted: listener },
-    cookies: { set: () => Promise.resolve(), get: () => Promise.resolve(null), remove: () => Promise.resolve() },
+    cookies: {
+      set: () => Promise.resolve(),
+      get: () => Promise.resolve(null),
+      getAll: () => Promise.resolve([]),
+      remove: () => Promise.resolve(null),
+    },
     alarms: { create: noop, get: () => Promise.resolve(null), onAlarm: listener, clear: noop },
     action: { setBadgeText: noop, setBadgeBackgroundColor: noop },
     // DNR stub — records updateEnabledRulesets calls so the YouTube-Restrict
@@ -110,11 +151,11 @@ function makeChromeStub() {
       getEnabledRulesets: () => Promise.resolve([]),
     },
   };
-  return { chrome, store, dnrCalls };
+  return { chrome, store, dnrCalls, changeListeners, listenerErrors };
 }
 
 function makeSandbox() {
-  const { chrome, store, dnrCalls } = makeChromeStub();
+  const { chrome, store, dnrCalls, changeListeners, listenerErrors } = makeChromeStub();
   const sandbox = {
     chrome, console, URL, URLSearchParams, setTimeout, clearTimeout, setInterval, clearInterval,
     Date, Math, JSON, Set, Map, Promise,
@@ -124,7 +165,7 @@ function makeSandbox() {
   sandbox.self = sandbox;
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  return { sandbox, store, dnrCalls };
+  return { sandbox, store, dnrCalls, changeListeners, listenerErrors };
 }
 
 // Evaluate the Firefox `background.scripts` order: each bg/ file then
@@ -155,14 +196,14 @@ function loadChromeOrder(sandbox, filesLoaded) {
 }
 
 // mode: 'firefox' (default) or 'chrome'.
-// Returns { sandbox, store, filesLoaded, dnrCalls }.
+// Returns { sandbox, store, filesLoaded, dnrCalls, changeListeners, listenerErrors }.
 function buildSandbox(opts) {
   const mode = (opts && opts.mode) || 'firefox';
-  const { sandbox, store, dnrCalls } = makeSandbox();
+  const { sandbox, store, dnrCalls, changeListeners, listenerErrors } = makeSandbox();
   const filesLoaded = [];
   if (mode === 'chrome') loadChromeOrder(sandbox, filesLoaded);
   else loadFirefoxOrder(sandbox, filesLoaded);
-  return { sandbox, store, filesLoaded, dnrCalls };
+  return { sandbox, store, filesLoaded, dnrCalls, changeListeners, listenerErrors };
 }
 
 module.exports = { buildSandbox, makeSandbox, BG_FILES, ENTRY_FILE, EXT_ROOT, readExt };

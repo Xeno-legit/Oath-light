@@ -253,8 +253,12 @@ const NativeMessagingBridge = (function () {
     // to be a second re-arm here for the in-page reminder loop; reminders now
     // fire from the desktop app — see src-tauri/src/reminder.rs.)
     if (typeof reconcileLockdownEscalationAlarm === 'function') reconcileLockdownEscalationAlarm();
-    // Apply the opt-in YouTube Restricted Mode DNR toggle (default OFF) the
-    // moment the desktop app pushes it — same channel as the redirect link.
+    // Re-assert the YouTube Restricted Mode ruleset after every settings push.
+    // The switch itself lives in extension storage (`ppYouTubeRestrict`,
+    // default OFF, flipped from the Blocklist Manager) and this function only
+    // mirrors THAT flag into DNR — the app's own `youtubeRestrict` field is
+    // deliberately never read, so an app-side default cannot re-enable the
+    // feature behind the user's back.
     if (typeof applyYouTubeRestrictRuleset === 'function') applyYouTubeRestrictRuleset();
   }
 

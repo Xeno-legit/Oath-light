@@ -83,6 +83,15 @@ function matchGraylistEnforceDomain(hostname) {
 
 // Set restrictive cookies — only called for matching domains
 async function enforceGraylistCookies(baseDomain) {
+  // YouTube Restricted Mode is the ONE graylist enforcement that carries a
+  // switch (Blocklist Manager → YouTube Restricted Mode, `ppYouTubeRestrict`,
+  // default OFF), so its PREF cookie is skipped while the switch is off.
+  // Every other site's cookie below stays unconditional — turning YouTube off
+  // must not loosen Reddit, Pixiv, X or anything else. The guard fails toward
+  // OFF: if the switch helper is somehow absent, the default is "not enforced".
+  if (baseDomain === 'youtube.com' &&
+      (typeof isYouTubeRestrictOn !== 'function' || !isYouTubeRestrictOn())) return;
+
   const cookies = GRAYLIST_COOKIE_MAP.get(baseDomain);
   if (!cookies) return;
   for (const cookie of cookies) {
@@ -101,6 +110,45 @@ async function enforceGraylistCookies(baseDomain) {
       // chrome.cookies may not be available
     }
   }
+}
+
+// Apply (or undo) the YouTube Restricted Mode cookie at the moment the switch
+// flips. bg/graylist.js normally writes this cookie on each youtube.com
+// navigation, which would leave the switch one page-load behind on the way up
+// and stuck for the rest of the session on the way down — so the flip itself
+// does the work in both directions.
+//
+// OFF removes the whole PREF cookie rather than just the f2 bit: ON overwrote
+// it wholesale with `f2=8000000`, so there is nothing else left to preserve,
+// and clearing it hands YouTube back its own defaults.
+async function syncYouTubeRestrictedCookie(on) {
+  try {
+    const cookies = chrome.cookies;
+    if (!cookies) return;
+
+    if (on) {
+      if (typeof enforceGraylistCookies === 'function') await enforceGraylistCookies('youtube.com');
+      return;
+    }
+
+    // getAll catches both entries GRAYLIST_COOKIE_MAP writes (youtube.com and
+    // .youtube.com) — a single remove() call only takes one of them.
+    let list = [];
+    if (typeof cookies.getAll === 'function') {
+      list = (await cookies.getAll({ domain: 'youtube.com', name: 'PREF' })) || [];
+    }
+    if (!list.length) {
+      list = [{ domain: 'youtube.com', name: 'PREF', path: '/' }];
+    }
+    for (const c of list) {
+      try {
+        await cookies.remove({
+          url: `https://${(c.domain || 'youtube.com').replace(/^\./, '')}${c.path || '/'}`,
+          name: c.name,
+        });
+      } catch (_) { /* cookie already gone, or cookies API unavailable */ }
+    }
+  } catch (_) { /* cookies API unavailable — nothing to undo */ }
 }
 
 // Rewrite URL with safe-mode params — only called for matching domains

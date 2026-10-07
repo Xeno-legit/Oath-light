@@ -445,6 +445,63 @@
       color: #b3bcff;
     }
 
+    /* YouTube Restricted Mode — the one graylist enforcement with a switch.
+       The switch recipe mirrors design-system's .switch (blocklist_assets/
+       desktop.css); this page only loads tokens.css, so it is spelled out
+       here rather than pulling in the whole desktop stylesheet. */
+    .feature-toggle {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px;
+      margin-bottom: 14px;
+      background: var(--input-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+    }
+    .feature-toggle .ft-txt { flex: 1; min-width: 0; }
+    .feature-toggle .ft-title {
+      font-weight: 700;
+      font-size: 13.5px;
+      display: block;
+    }
+    .feature-toggle .ft-desc {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.55);
+      display: block;
+      margin-top: 2px;
+    }
+    .switch {
+      flex: 0 0 46px;
+      width: 46px;
+      height: 27px;
+      padding: 0;
+      border: none;
+      cursor: pointer;
+      position: relative;
+      border-radius: var(--ol-radius-pill);
+      background: color-mix(in oklab, var(--text-main) 16%, transparent);
+      transition: background 0.25s var(--ol-ease-standard);
+    }
+    .switch::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      inset-inline-start: 3px;
+      width: 21px;
+      height: 21px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      transition: transform 0.26s var(--ol-ease-standard);
+    }
+    .switch.on {
+      background: linear-gradient(135deg, var(--gradient-1), var(--gradient-2));
+    }
+    .switch.on::after { transform: translateX(19px); }
+    [dir="rtl"] .switch.on::after { transform: translateX(-19px); }
+    .switch:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
     /* Modals */
     .modal-overlay {
       position: fixed;
@@ -736,6 +793,20 @@
             These sites aren't explicit themselves, so they're not blocked. Instead Oath Light
             strips the explicit content out in place — feed posts, galleries, and adult pages.
           </p>
+
+          <!-- YouTube Restricted Mode — opt-in, OFF on every fresh install.
+               Writes chrome.storage `ppYouTubeRestrict`; bg/blocklists.js mirrors
+               it into the DNR header rule and the graylist PREF cookie. -->
+          <div class="feature-toggle">
+            <div class="ft-txt">
+              <span class="ft-title" id="ytRestrictTitle">YouTube Restricted Mode</span>
+              <span class="ft-desc" id="ytRestrictDesc">Off — YouTube shows its normal, unfiltered feed.</span>
+            </div>
+            <button type="button" class="switch" id="ytRestrictToggle" role="switch"
+                    aria-checked="false" aria-labelledby="ytRestrictTitle"
+                    aria-describedby="ytRestrictDesc"></button>
+          </div>
+
           <div id="graylistList" class="graylist-list"></div>
         </div>
 
